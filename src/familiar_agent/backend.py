@@ -612,7 +612,14 @@ class GeminiBackend:
 def create_backend(
     config: "AgentConfig",
 ) -> AnthropicBackend | OpenAICompatibleBackend | GeminiBackend:
-    """Factory: pick backend based on PLATFORM env var / config."""
+    """Factory: pick backend based on PLATFORM env var / config.
+
+    Supported values for PLATFORM:
+      anthropic  — Anthropic Claude (default)
+      gemini     — Google Gemini via native google-genai SDK
+      openai     — OpenAI API (or compatible via BASE_URL)
+      kimi       — Moonshot AI Kimi K2.5 (api.moonshot.ai/v1)
+    """
     if config.platform == "gemini":
         model = config.model or "gemini-2.5-flash"
         logger.info("Using Gemini backend: %s", model)
@@ -635,6 +642,18 @@ def create_backend(
             model=model,
             base_url=base_url,
             tools_mode=tools_mode,
+        )
+    if config.platform == "kimi":
+        # Moonshot AI Kimi K2.5 — OpenAI-compatible, frontier quality at Haiku prices
+        # See: https://platform.moonshot.ai / https://github.com/MoonshotAI/Kimi-K2.5
+        model = config.model or "kimi-k2.5"
+        base_url = "https://api.moonshot.ai/v1"
+        logger.info("Using Kimi backend: %s @ %s", model, base_url)
+        return OpenAICompatibleBackend(
+            api_key=config.api_key,
+            model=model,
+            base_url=base_url,
+            tools_mode="native",
         )
     model = config.model or "claude-haiku-4-5-20251001"
     logger.info("Using Anthropic backend: %s", model)

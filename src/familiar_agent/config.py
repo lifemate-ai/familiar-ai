@@ -72,7 +72,7 @@ class AgentConfig:
     # Agent display name shown in TUI
     agent_name: str = field(default_factory=lambda: os.environ.get("AGENT_NAME", "AI"))
 
-    # Platform: "gemini" | "anthropic" | "openai"
+    # Platform: "anthropic" | "gemini" | "openai" | "kimi"
     platform: str = field(default_factory=lambda: os.environ.get("PLATFORM", "anthropic"))
 
     # Unified API key (used for whichever platform is selected)

@@ -104,6 +104,7 @@ uv run familiar --no-tui # プレーンREPL
 | Google Gemini | `gemini` | `gemini-2.5-flash` |
 | OpenAI | `openai` | `gpt-4o-mini` |
 | OpenAI互換（Ollama, vllm…） | `openai` + `BASE_URL=` | — |
+| Moonshot Kimi K2.5 | `kimi` | `kimi-k2.5` |
 
 ## ハードウェア
 
