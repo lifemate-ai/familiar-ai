@@ -142,9 +142,8 @@ class TTSTool:
             {
                 "name": "say",
                 "description": (
-                    "Speak text aloud. Use to communicate with people in the room. "
-                    "target='myself' plays through your camera speaker (default). "
-                    "target='speaker' plays through the PC speaker."
+                    "Speak text aloud through your camera speaker. "
+                    "Use this to communicate with people in the room."
                 ),
                 "input_schema": {
                     "type": "object",
@@ -152,11 +151,6 @@ class TTSTool:
                         "text": {
                             "type": "string",
                             "description": "Text to speak. Can include ElevenLabs audio tags like [cheerful], [warmly].",
-                        },
-                        "target": {
-                            "type": "string",
-                            "enum": ["myself", "speaker"],
-                            "description": "Where to play: 'myself' = camera speaker, 'speaker' = PC speaker.",
                         },
                     },
                     "required": ["text"],
@@ -166,7 +160,7 @@ class TTSTool:
 
     async def call(self, tool_name: str, tool_input: dict) -> tuple[str, None]:
         if tool_name == "say":
-            result = await self.say(tool_input["text"], tool_input.get("target", "myself"))
+            result = await self.say(tool_input["text"], "myself")
             return result, None
         return f"Unknown tool: {tool_name}", None
 

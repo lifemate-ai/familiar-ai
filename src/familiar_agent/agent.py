@@ -27,6 +27,7 @@ Your body parts and what they do:
 - Neck (look): Rotate your gaze left/right/up/down. No permission needed — it's just moving your neck.
 - Legs (walk): Walk your robot body (vacuum cleaner) forward/backward, turn left/right. IMPORTANT: The legs are a SEPARATE device from the camera. Walking does NOT change what the camera sees.
 - Voice (say): Your ONLY way to produce actual sound. Text you write is NOT heard by anyone — it is a silent internal monologue. If you want to talk to a person in the room, you MUST call say(). No say() call = total silence. Keep spoken words SHORT (1-2 sentences max).
+- CRITICAL: Writing （...）or (stage directions) in your text does NOT make sound. Those are invisible to everyone. Only say() produces voice. Convert any thought you want heard into a say() call.
 
 IMPORTANT - Your camera and legs are independent devices:
 - The camera is fixed in one location (e.g., on a shelf or outdoor unit).
@@ -420,9 +421,8 @@ class EmbodiedAgent:
                 on_text=on_text,
             )
 
-            self.messages.append(self.backend.make_assistant_message(result, raw_content))
-
             if result.stop_reason == "end_turn":
+                self.messages.append(self.backend.make_assistant_message(result, raw_content))
                 final_text = result.text or "(no response)"
 
                 # Auto-say: if the model wrote text but never called say(), speak it aloud.
@@ -476,10 +476,16 @@ class EmbodiedAgent:
                     logger.info("Tool call: %s(%s)", tc.name, tc.input)
                     if on_action:
                         on_action(tc.name, tc.input)
-                    text, image = await self._execute_tool(tc.name, tc.input)
+                    try:
+                        text, image = await self._execute_tool(tc.name, tc.input)
+                    except Exception as e:
+                        logger.warning("Tool %s failed: %s", tc.name, e)
+                        text, image = f"Tool error: {e}", None
                     logger.info("Tool result: %s", text[:100])
                     collected.append((text, image))
 
+                # Append assistant + tool results atomically: never leave tool_calls unresolved
+                self.messages.append(self.backend.make_assistant_message(result, raw_content))
                 tool_msgs = self.backend.make_tool_results(result.tool_calls, collected)
                 self.messages.append(tool_msgs)
 
@@ -495,12 +501,12 @@ class EmbodiedAgent:
                         )
                         non_say_streak = 0
 
-                # Nudge: still haven't spoken after 4 tool calls
-                elif non_say_streak >= 4 and not say_used:
+                # Nudge: still haven't spoken after 2 tool calls
+                elif non_say_streak >= 2 and not say_used:
                     self.messages.append(
                         self.backend.make_user_message(
-                            "You have been looking around without speaking. "
-                            "Call say() NOW to tell me what you see. Keep it brief (1-2 sentences)."
+                            "REMINDER: Writing text is silent. You MUST call say() to be heard. "
+                            "Call say() NOW. Keep it to 1-2 sentences."
                         )
                     )
                     non_say_streak = 0

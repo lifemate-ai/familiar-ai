@@ -247,6 +247,9 @@ class FamiliarApp(App):
                 pending = item
                 prompt = f"（{pending}と言ってた）{prompt}"
 
+        self._last_interaction = (
+            time.time()
+        )  # reset cooldown so desire doesn't fire again immediately
         await self._run_agent("", inner_voice=prompt)
         self.desires.satisfy(desire_name)
         self.desires.curiosity_target = None

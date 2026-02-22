@@ -109,6 +109,7 @@ See [`persona-template/en.md`](./persona-template/en.md) for an example, or [`pe
 | Google Gemini | `gemini` | `gemini-2.5-flash` |
 | OpenAI | `openai` | `gpt-4o-mini` |
 | OpenAI-compatible (Ollama, vllm…) | `openai` + `BASE_URL=` | — |
+| Moonshot Kimi K2.5 | `kimi` | `kimi-k2.5` |
 
 ## Hardware
 
