@@ -6,7 +6,7 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](./LICENSE)
 [![Python 3.10+](https://img.shields.io/badge/python-3.10+-blue.svg)](https://www.python.org/)
 
-🌐 [English](./README.md) · [日本語](./README-ja.md) · [中文](./README-zh.md) · [Français](./README-fr.md) · Deutsch
+[English README](./README.md)
 
 ---
 
