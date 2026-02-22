@@ -102,6 +102,17 @@ familiar-ai works with whatever hardware you have — or none at all.
 
 Start with a PC, an API key, and a cheap webcam. Add more hardware as you go.
 
+## FAQ
+
+**Q: Does it work without a GPU?**
+Yes. The embedding model (multilingual-e5-small) runs fine on CPU. A GPU will make it faster, but it's not required.
+
+**Q: Can I use a camera other than Tapo?**
+Any camera that supports ONVIF + RTSP should work. Tapo C220 is what we tested with.
+
+**Q: Is my data sent anywhere?**
+Images and observations are sent to Anthropic's API (Claude) for processing. Memories are stored locally in `~/.familiar_ai/`.
+
 ## License
 
 [MIT](./LICENSE)
