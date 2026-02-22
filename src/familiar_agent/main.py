@@ -3,28 +3,13 @@
 from __future__ import annotations
 
 import asyncio
-import logging
 import sys
 import time
 
 from .agent import EmbodiedAgent
 from .config import AgentConfig
 from .desires import DesireSystem
-
-logging.basicConfig(
-    level=logging.WARNING,
-    format="%(levelname)s %(name)s: %(message)s",
-)
-
-BANNER = """
-╔══════════════════════════════════════╗
-║         familiar-ai  v0.1            ║
-║   AI that lives alongside you 🐾    ║
-╚══════════════════════════════════════╝
-コマンド:
-  /clear - 会話履歴をクリア
-  /quit  - 終了
-"""
+from ._i18n import BANNER, _t
 
 IDLE_CHECK_INTERVAL = 10.0  # seconds between desire checks when idle
 DESIRE_COOLDOWN = 90.0  # seconds after last user interaction before desires can fire
@@ -124,11 +109,11 @@ async def repl(agent: EmbodiedAgent, desires: DesireSystem, debug: bool = False)
                 if prompt:
                     desire_name, _ = desires.get_dominant()
                     murmur = {
-                        "look_around": "なんか外が気になってきた...",
-                        "explore": "ちょっと動きたくなってきたな...",
-                        "greet_companion": "誰かいるかな...",
-                        "rest": "少し休憩しよかな...",
-                    }.get(desire_name, "ちょっと気になることがあって...")
+                        "look_around": _t("desire_look_around"),
+                        "explore": _t("desire_explore"),
+                        "greet_companion": _t("desire_greet_companion"),
+                        "rest": _t("desire_rest"),
+                    }.get(desire_name, _t("desire_default"))
                     print(f"\n{murmur}")
 
                     # Check once more — user may have typed while we were deciding.
@@ -181,7 +166,7 @@ async def repl(agent: EmbodiedAgent, desires: DesireSystem, debug: bool = False)
         pass
     finally:
         stdin_task.cancel()
-        print("\nまたね。")
+        print(f"\n{_t('repl_goodbye')}")
 
 
 async def _handle_user(
@@ -198,7 +183,7 @@ async def _handle_user(
         raise EOFError
     elif user_input == "/clear":
         agent.clear_history()
-        print("履歴をクリアしました。")
+        print(_t("repl_history_cleared"))
     elif user_input == "/desires":
         if debug:
             desires.tick()
