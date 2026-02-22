@@ -21,9 +21,8 @@ BANNER = """
 ║   AI that lives alongside you 🐾    ║
 ╚══════════════════════════════════════╝
 コマンド:
-  /clear   - 会話履歴をクリア
-  /desires - 現在の欲求レベルを表示
-  /quit    - 終了
+  /clear - 会話履歴をクリア
+  /quit  - 終了
 """
 
 IDLE_CHECK_INTERVAL = 10.0  # seconds between desire checks when idle
@@ -61,7 +60,7 @@ def _format_action(name: str, tool_input: dict) -> str:
     return base
 
 
-async def repl(agent: EmbodiedAgent, desires: DesireSystem) -> None:
+async def repl(agent: EmbodiedAgent, desires: DesireSystem, debug: bool = False) -> None:
     print(BANNER)
 
     loop = asyncio.get_event_loop()
@@ -116,11 +115,12 @@ async def repl(agent: EmbodiedAgent, desires: DesireSystem) -> None:
                 print("履歴をクリアしました。")
                 continue
             elif user_input == "/desires":
-                desires.tick()
-                print("\n現在の欲求:")
-                for name, level in desires._desires.items():
-                    bar = "█" * int(level * 20)
-                    print(f"  {name:20s} {level:.2f} {bar}")
+                if debug:
+                    desires.tick()
+                    print("\n[debug] desires:")
+                    for name, level in desires._desires.items():
+                        bar = "█" * int(level * 20)
+                        print(f"  {name:20s} {level:.2f} {bar}")
                 continue
 
             response = await agent.run(user_input, on_action=on_action, desires=desires)
@@ -139,6 +139,8 @@ async def repl(agent: EmbodiedAgent, desires: DesireSystem) -> None:
 
 
 def main() -> None:
+    debug = "--debug" in sys.argv
+
     config = AgentConfig()
     if not config.anthropic_api_key:
         print("Error: ANTHROPIC_API_KEY not set.")
@@ -147,7 +149,7 @@ def main() -> None:
     agent = EmbodiedAgent(config)
     desires = DesireSystem()
 
-    asyncio.run(repl(agent, desires))
+    asyncio.run(repl(agent, desires, debug=debug))
 
 
 if __name__ == "__main__":
