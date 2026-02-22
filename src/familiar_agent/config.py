@@ -51,6 +51,10 @@ class TTSConfig:
     voice_id: str = field(
         default_factory=lambda: os.environ.get("ELEVENLABS_VOICE_ID", "cgSgspJ2msm6clMCkdW9")
     )
+    go2rtc_url: str = field(
+        default_factory=lambda: os.environ.get("GO2RTC_URL", "http://localhost:1984")
+    )
+    go2rtc_stream: str = field(default_factory=lambda: os.environ.get("GO2RTC_STREAM", "tapo_cam"))
 
 
 @dataclass
