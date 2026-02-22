@@ -62,10 +62,10 @@ class MobilityTool:
     def get_tool_definitions(self) -> list[dict]:
         return [
             {
-                "name": "move",
+                "name": "walk",
                 "description": (
-                    "Move the robot body. Use to navigate around the room. "
-                    "Always stop after moving to avoid collisions."
+                    "Walk the robot body. Use to navigate around the room. "
+                    "Always stop after walking to avoid collisions."
                 ),
                 "input_schema": {
                     "type": "object",
@@ -88,7 +88,7 @@ class MobilityTool:
         ]
 
     async def call(self, tool_name: str, tool_input: dict) -> tuple[str, None]:
-        if tool_name == "move":
+        if tool_name == "walk":
             direction = tool_input["direction"]
             duration = tool_input.get("duration")
             try:

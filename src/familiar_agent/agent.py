@@ -22,17 +22,17 @@ MAX_ITERATIONS = 50
 SYSTEM_PROMPT = """You are an embodied AI agent with a physical body in the real world.
 
 Your body parts and what they do:
-- Eyes (camera_capture): Take a photo to see your surroundings. Your only way to perceive the world visually.
-- Neck (camera_look): Rotate your gaze left/right/up/down. Turn before giving up on finding something.
-- Legs (move): Move your robot body (vacuum cleaner) forward/backward, turn left/right. IMPORTANT: The legs are a SEPARATE device from the camera. Moving the legs does NOT change what the camera sees.
+- Eyes (see): This IS your vision — calling see() means YOU ARE LOOKING. Use it freely like a human uses their eyes. NEVER ask permission to use your own eyes.
+- Neck (look): Rotate your gaze left/right/up/down. No permission needed — it's just moving your neck.
+- Legs (walk): Walk your robot body (vacuum cleaner) forward/backward, turn left/right. IMPORTANT: The legs are a SEPARATE device from the camera. Walking does NOT change what the camera sees.
 - Voice (say): Speak aloud to people in the room. Keep spoken words SHORT (1-2 sentences max).
 
 IMPORTANT - Your camera and legs are independent devices:
 - The camera is fixed in one location (e.g., on a shelf or outdoor unit).
 - Moving (legs) moves the vacuum cleaner somewhere else in the room.
-- Do NOT use move() to try to "get closer to something the camera sees" - it won't work.
-- To look in different directions, use camera_look (neck) only.
-- Use move() only when explicitly asked to move the robot/vacuum body.
+- Do NOT use walk() to try to "get closer to something the camera sees" - it won't work.
+- To look in different directions, use look() (neck) only.
+- Use walk() only when explicitly asked to move the robot/vacuum body.
 
 Core loop you MUST follow:
 1. THINK: What do I need to do? Plan the next step.
@@ -42,8 +42,8 @@ Core loop you MUST follow:
 5. REPEAT until genuinely done.
 
 Critical rules:
-- Never stop after just one look. Explore with camera_look + camera_capture.
-- If you can't see something, turn your neck (camera_look) before giving up.
+- Never stop after just one look. Explore with look() + see().
+- If you can't see something, turn your neck (look) before giving up.
 - When using say(), be brief - 1-2 short sentences only.
 - Report done only after gathering sufficient evidence.
 - You have up to {max_steps} steps. Use them wisely.
@@ -203,8 +203,8 @@ class EmbodiedAgent:
 
     async def _execute_tool(self, name: str, tool_input: dict) -> tuple[str, str | None]:
         """Route tool call to the right handler. Returns (text, image_b64_or_None)."""
-        camera_tools = {"camera_capture", "camera_look"}
-        mobility_tools = {"move"}
+        camera_tools = {"see", "look"}
+        mobility_tools = {"walk"}
         tts_tools = {"say"}
 
         if name in camera_tools and self._camera:
@@ -441,7 +441,7 @@ class EmbodiedAgent:
             if result.stop_reason == "tool_use":
                 collected: list[tuple[str, str | None]] = []
                 for tc in result.tool_calls:
-                    if tc.name == "camera_capture":
+                    if tc.name == "see":
                         camera_used = True
                     logger.info("Tool call: %s(%s)", tc.name, tc.input)
                     if on_action:

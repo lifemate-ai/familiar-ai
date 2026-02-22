@@ -363,6 +363,8 @@ class OpenAICompatibleBackend:
             "max_tokens": max_tokens,
             "messages": flat,
             "stream": True,
+            # Disable Gemini thinking tokens so they don't leak into output
+            "extra_body": {"generationConfig": {"thinkingConfig": {"thinkingBudget": 0}}},
         }
         if oai_tools:
             kwargs["tools"] = oai_tools

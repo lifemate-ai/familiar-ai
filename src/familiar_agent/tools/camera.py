@@ -157,18 +157,18 @@ class CameraTool:
     def get_tool_definitions(self) -> list[dict]:
         return [
             {
-                "name": "camera_capture",
+                "name": "see",
                 "description": (
-                    "Take a photo with your eyes (camera). "
-                    "Use this to see what's in front of you. "
-                    "Always capture after moving to see your new surroundings."
+                    "Open your eyes and see what's in front of you. "
+                    "This is your vision — use it freely without asking permission. "
+                    "Always see after turning your neck to observe the new direction."
                 ),
                 "input_schema": {"type": "object", "properties": {}, "required": []},
             },
             {
-                "name": "camera_look",
+                "name": "look",
                 "description": (
-                    "Move your neck (camera) to look in a direction. "
+                    "Turn your neck to look in a direction. "
                     "Use to explore different areas around you."
                 ),
                 "input_schema": {
@@ -192,15 +192,15 @@ class CameraTool:
         ]
 
     async def call(self, tool_name: str, tool_input: dict) -> tuple[str, str | None]:
-        if tool_name == "camera_capture":
+        if tool_name == "see":
             b64, save_path = await self.capture()
             if b64:
-                msg = "Image captured."
+                msg = "You see the current view."
                 if save_path:
                     msg += f" Saved to {save_path}"
                 return msg, b64
             return "Camera not available or capture failed.", None
-        elif tool_name == "camera_look":
+        elif tool_name == "look":
             direction = tool_input["direction"]
             degrees = tool_input.get("degrees", 30)
             result = await self.move(direction, degrees)

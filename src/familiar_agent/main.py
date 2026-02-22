@@ -30,9 +30,9 @@ IDLE_CHECK_INTERVAL = 10.0  # seconds between desire checks when idle
 DESIRE_COOLDOWN = 90.0  # seconds after last user interaction before desires can fire
 
 ACTION_ICONS = {
-    "camera_capture": "👀 観察中...",
-    "camera_look": "↩️  見回してる...",
-    "move": "🚶 移動中...",
+    "see": "👀 見てる...",
+    "look": "↩️  向いてる...",
+    "walk": "🚶 歩いてる...",
     "say": "💬 しゃべってる...",
 }
 
@@ -40,16 +40,16 @@ ACTION_ICONS = {
 def _format_action(name: str, tool_input: dict) -> str:
     """Format a tool call for display."""
     base = ACTION_ICONS.get(name, f"⚙  {name}...")
-    if name == "camera_look":
+    if name == "look":
         direction = tool_input.get("direction", "")
         label = {
-            "left": "左を見てる",
-            "right": "右を見てる",
-            "up": "上を見てる",
-            "down": "下を見てる",
+            "left": "左を向いた",
+            "right": "右を向いた",
+            "up": "上を向いた",
+            "down": "下を向いた",
         }.get(direction, "見回してる")
         return f"↩️  {label}..."
-    elif name == "move":
+    elif name == "walk":
         direction = tool_input.get("direction", "?")
         duration = tool_input.get("duration")
         if duration:
