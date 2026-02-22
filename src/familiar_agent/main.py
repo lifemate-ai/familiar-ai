@@ -92,7 +92,13 @@ async def repl(agent: EmbodiedAgent, desires: DesireSystem) -> None:
                 prompt = desires.dominant_as_prompt()
                 if prompt:
                     desire_name, level = desires.get_dominant()
-                    print(f"\n[{int(level * 100)}% 欲求が発動]")
+                    murmur = {
+                        "look_around": "なんか外が気になってきた...",
+                        "explore": "ちょっと動きたくなってきたな...",
+                        "greet_companion": "誰かいるかな...",
+                        "rest": "少し休憩しよかな...",
+                    }.get(desire_name, "ちょっと気になることがあって...")
+                    print(f"\n{murmur}")
                     response = await agent.run(prompt, on_action=on_action, desires=desires)
                     print(f"\n{response}")
                     desires.satisfy(desire_name)
