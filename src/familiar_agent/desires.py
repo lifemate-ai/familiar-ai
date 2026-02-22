@@ -18,8 +18,8 @@ DEFAULT_DESIRES = {
 
 # How fast each desire grows per second of inactivity
 GROWTH_RATES = {
-    "look_around": 0.002,   # reaches 0.7 after ~5.8 min
-    "explore": 0.001,       # reaches 0.7 after ~11.7 min
+    "look_around": 0.004,  # reaches 0.7 after ~2.5 min
+    "explore": 0.002,  # reaches 0.7 after ~5 min
     "greet_companion": 0.0,
     "rest": 0.0,
 }
@@ -82,9 +82,7 @@ class DesireSystem:
         """Return the strongest desire if it exceeds the trigger threshold."""
         self.tick()
         candidates = [
-            (name, level)
-            for name, level in self._desires.items()
-            if level >= TRIGGER_THRESHOLD
+            (name, level) for name, level in self._desires.items() if level >= TRIGGER_THRESHOLD
         ]
         if not candidates:
             return None

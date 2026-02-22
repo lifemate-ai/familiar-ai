@@ -26,14 +26,14 @@ BANNER = """
   /quit    - 終了
 """
 
-IDLE_CHECK_INTERVAL = 30.0  # seconds between desire checks when idle
+IDLE_CHECK_INTERVAL = 15.0  # seconds between desire checks when idle
 
 # Tool action display
 ACTION_ICONS = {
     "camera_capture": "👁  撮影中...",
-    "camera_look":    "🔄 首を動かす...",
-    "move":           "🦿 移動中...",
-    "say":            "🗣  発話中...",
+    "camera_look": "🔄 首を動かす...",
+    "move": "🦿 移動中...",
+    "say": "🗣  発話中...",
 }
 
 
