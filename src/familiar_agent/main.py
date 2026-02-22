@@ -26,7 +26,7 @@ BANNER = """
   /quit    - 終了
 """
 
-IDLE_CHECK_INTERVAL = 15.0  # seconds between desire checks when idle
+IDLE_CHECK_INTERVAL = 10.0  # seconds between desire checks when idle
 
 # Tool action display
 ACTION_ICONS = {

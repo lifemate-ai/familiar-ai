@@ -18,14 +18,14 @@ DEFAULT_DESIRES = {
 
 # How fast each desire grows per second of inactivity
 GROWTH_RATES = {
-    "look_around": 0.004,  # reaches 0.7 after ~2.5 min
-    "explore": 0.002,  # reaches 0.7 after ~5 min
+    "look_around": 0.012,  # reaches 0.6 after ~40 sec
+    "explore": 0.005,  # reaches 0.6 after ~2 min
     "greet_companion": 0.0,
     "rest": 0.0,
 }
 
-TRIGGER_THRESHOLD = 0.7
-DECAY_ON_SATISFY = 0.8  # multiply by this when satisfied
+TRIGGER_THRESHOLD = 0.6
+DECAY_ON_SATISFY = 0.5  # drop hard so it can rebuild and fire again
 
 
 class DesireSystem:
