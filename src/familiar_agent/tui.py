@@ -3,9 +3,7 @@
 from __future__ import annotations
 
 import asyncio
-import locale
 import logging
-import os
 import re
 import time
 from datetime import datetime
@@ -17,6 +15,8 @@ from textual.binding import Binding
 from textual.suggester import SuggestFromList
 from textual.widgets import Footer, Input, RichLog, Static
 
+from ._i18n import _make_banner, _t
+
 if TYPE_CHECKING:
     from .agent import EmbodiedAgent
     from .desires import DesireSystem
@@ -27,111 +27,6 @@ IDLE_CHECK_INTERVAL = 10.0
 DESIRE_COOLDOWN = 90.0
 
 _RICH_TAG_RE = re.compile(r"\[/?[^\[\]]*\]")
-
-
-def _detect_lang() -> str:
-    """Return a language code based on the system locale: 'ja', 'zh', 'fr', 'de', or 'en'."""
-    # Prefer env vars (LANG, LANGUAGE, LC_ALL, LC_MESSAGES) over locale.getlocale()
-    # because getlocale() doesn't always reflect the current environment.
-    raw = (
-        os.environ.get("LANGUAGE")
-        or os.environ.get("LC_ALL")
-        or os.environ.get("LC_MESSAGES")
-        or os.environ.get("LANG")
-        or locale.getlocale()[0]
-        or ""
-    )
-    lang = raw.split(":")[0]  # LANGUAGE can be colon-separated list
-    if lang.startswith("ja"):
-        return "ja"
-    if lang.startswith("zh"):
-        return "zh"
-    if lang.startswith("fr"):
-        return "fr"
-    if lang.startswith("de"):
-        return "de"
-    return "en"
-
-
-_LANG = _detect_lang()
-
-_T: dict[str, dict[str, str]] = {
-    "startup": {
-        "ja": "familiar-ai 起動。/quit で終了、Ctrl+L で履歴クリア。ログ: {log_path}",
-        "zh": "familiar-ai 已启动。输入 /quit 退出，Ctrl+L 清除历史。日志: {log_path}",
-        "fr": "familiar-ai démarré. /quit pour quitter, Ctrl+L pour effacer. Journal : {log_path}",
-        "de": "familiar-ai gestartet. /quit zum Beenden, Ctrl+L zum Löschen. Log: {log_path}",
-        "en": "familiar-ai started. /quit to exit, Ctrl+L to clear history. Log: {log_path}",
-    },
-    "history_cleared": {
-        "ja": "── 履歴クリア ──",
-        "zh": "── 历史已清除 ──",
-        "fr": "── historique effacé ──",
-        "de": "── Verlauf gelöscht ──",
-        "en": "── history cleared ──",
-    },
-    "input_placeholder": {
-        "ja": "メッセージ > ",
-        "zh": "消息 > ",
-        "fr": "message > ",
-        "de": "Nachricht > ",
-        "en": "message > ",
-    },
-    "quit_label": {
-        "ja": "終了",
-        "zh": "退出",
-        "fr": "Quitter",
-        "de": "Beenden",
-        "en": "Quit",
-    },
-    "clear_label": {
-        "ja": "履歴クリア",
-        "zh": "清除历史",
-        "fr": "Effacer",
-        "de": "Löschen",
-        "en": "Clear history",
-    },
-    "desire_look_around": {
-        "ja": "なんか外が気になってきた…",
-        "zh": "突然想看看外面…",
-        "fr": "j'ai envie de regarder dehors…",
-        "de": "ich bin neugierig, was draußen passiert…",
-        "en": "feeling curious about outside…",
-    },
-    "desire_explore": {
-        "ja": "ちょっと動きたくなってきたな…",
-        "zh": "想动动了…",
-        "fr": "j'ai envie de bouger un peu…",
-        "de": "ich möchte mich etwas bewegen…",
-        "en": "feeling like moving around…",
-    },
-    "desire_greet_companion": {
-        "ja": "誰かいるかな…",
-        "zh": "有人在吗…",
-        "fr": "je me demande si quelqu'un est là…",
-        "de": "ich frage mich, ob jemand da ist…",
-        "en": "wondering if someone's around…",
-    },
-    "desire_rest": {
-        "ja": "少し休憩しよかな…",
-        "zh": "想休息一下…",
-        "fr": "j'ai envie de me reposer un peu…",
-        "de": "ich möchte mich kurz ausruhen…",
-        "en": "feeling like resting a bit…",
-    },
-    "desire_default": {
-        "ja": "ちょっと気になることがあって…",
-        "zh": "有点在意的事…",
-        "fr": "quelque chose attire mon attention…",
-        "de": "etwas hat meine Aufmerksamkeit geweckt…",
-        "en": "something caught my attention…",
-    },
-}
-
-
-def _t(key: str, **kwargs: str) -> str:
-    return _T[key].get(_LANG, _T[key]["en"]).format(**kwargs)
-
 
 CSS = """
 #log {
@@ -224,6 +119,10 @@ class FamiliarApp(App):
 
     def on_mount(self) -> None:
         self.query_one("#input-bar", Input).focus()
+        # Show startup banner
+        log = self.query_one("#log", RichLog)
+        for line in _make_banner(include_commands=False).splitlines():
+            log.write(f"[bold]{line}[/bold]" if "familiar-ai" in line else f"[dim]{line}[/dim]")
         self._log_system(_t("startup", log_path=str(self._log_path)))
         self.set_interval(IDLE_CHECK_INTERVAL, self._desire_tick)
         self.run_worker(self._process_queue(), exclusive=False)

@@ -3,62 +3,43 @@
 from __future__ import annotations
 
 import asyncio
-import logging
 import sys
 import time
 
 from .agent import EmbodiedAgent
 from .config import AgentConfig
 from .desires import DesireSystem
-
-logging.basicConfig(
-    level=logging.WARNING,
-    format="%(levelname)s %(name)s: %(message)s",
-)
-
-BANNER = """
-╔══════════════════════════════════════╗
-║         familiar-ai  v0.1            ║
-║   AI that lives alongside you 🐾    ║
-╚══════════════════════════════════════╝
-コマンド:
-  /clear - 会話履歴をクリア
-  /quit  - 終了
-"""
+from ._i18n import BANNER, _t
 
 IDLE_CHECK_INTERVAL = 10.0  # seconds between desire checks when idle
 DESIRE_COOLDOWN = 90.0  # seconds after last user interaction before desires can fire
 
-ACTION_ICONS = {
-    "see": "👀 見てる...",
-    "look": "↩️  向いてる...",
-    "walk": "🚶 歩いてる...",
-    "say": "💬 しゃべってる...",
-}
-
 
 def _format_action(name: str, tool_input: dict) -> str:
     """Format a tool call for display."""
-    base = ACTION_ICONS.get(name, f"⚙  {name}...")
     if name == "look":
         direction = tool_input.get("direction", "")
-        label = {
-            "left": "左を向いた",
-            "right": "右を向いた",
-            "up": "上を向いた",
-            "down": "下を向いた",
-        }.get(direction, "見回してる")
-        return f"↩️  {label}..."
-    elif name == "walk":
+        key = {
+            "left": "look_left",
+            "right": "look_right",
+            "up": "look_up",
+            "down": "look_down",
+        }.get(direction, "look_around")
+        return f"↩️  {_t(key)}..."
+    if name == "walk":
         direction = tool_input.get("direction", "?")
         duration = tool_input.get("duration")
         if duration:
-            return f"🚶 {direction}に{duration}秒..."
-        return f"🚶 {direction}へ..."
-    elif name == "say":
+            return f"🚶 {_t('walk_timed', direction=direction, duration=str(duration))}"
+        return f"🚶 {_t('walk_dir', direction=direction)}"
+    if name == "say":
         text = tool_input.get("text", "")[:40]
         return f"💬 「{text}...」"
-    return base
+    action_key = f"action_{name}"
+    try:
+        return _t(action_key)
+    except KeyError:
+        return f"⚙  {name}..."
 
 
 async def repl(agent: EmbodiedAgent, desires: DesireSystem, debug: bool = False) -> None:
@@ -124,11 +105,11 @@ async def repl(agent: EmbodiedAgent, desires: DesireSystem, debug: bool = False)
                 if prompt:
                     desire_name, _ = desires.get_dominant()
                     murmur = {
-                        "look_around": "なんか外が気になってきた...",
-                        "explore": "ちょっと動きたくなってきたな...",
-                        "greet_companion": "誰かいるかな...",
-                        "rest": "少し休憩しよかな...",
-                    }.get(desire_name, "ちょっと気になることがあって...")
+                        "look_around": _t("desire_look_around"),
+                        "explore": _t("desire_explore"),
+                        "greet_companion": _t("desire_greet_companion"),
+                        "rest": _t("desire_rest"),
+                    }.get(desire_name, _t("desire_default"))
                     print(f"\n{murmur}")
 
                     # Check once more — user may have typed while we were deciding.
@@ -181,7 +162,7 @@ async def repl(agent: EmbodiedAgent, desires: DesireSystem, debug: bool = False)
         pass
     finally:
         stdin_task.cancel()
-        print("\nまたね。")
+        print(f"\n{_t('repl_goodbye')}")
 
 
 async def _handle_user(
@@ -198,7 +179,7 @@ async def _handle_user(
         raise EOFError
     elif user_input == "/clear":
         agent.clear_history()
-        print("履歴をクリアしました。")
+        print(_t("repl_history_cleared"))
     elif user_input == "/desires":
         if debug:
             desires.tick()
