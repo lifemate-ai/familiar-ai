@@ -27,7 +27,6 @@ BANNER = """
 
 IDLE_CHECK_INTERVAL = 10.0  # seconds between desire checks when idle
 
-# Tool action display
 ACTION_ICONS = {
     "camera_capture": "👀 観察中...",
     "camera_look": "↩️  見回してる...",
@@ -65,32 +64,53 @@ async def repl(agent: EmbodiedAgent, desires: DesireSystem, debug: bool = False)
 
     loop = asyncio.get_event_loop()
 
-    async def get_input() -> str | None:
-        """Read input with timeout for desire-driven behavior."""
-        try:
-            line = await asyncio.wait_for(
-                loop.run_in_executor(None, sys.stdin.readline),
-                timeout=IDLE_CHECK_INTERVAL,
-            )
+    # Persistent input queue — stdin reader runs as a background task
+    # so user input is captured even while the agent is busy.
+    input_queue: asyncio.Queue[str | None] = asyncio.Queue()
+
+    async def _stdin_reader() -> None:
+        """Read stdin continuously into the queue."""
+        while True:
+            line = await loop.run_in_executor(None, sys.stdin.readline)
             if not line:  # EOF
-                raise EOFError
-            return line.strip()
-        except asyncio.TimeoutError:
-            return None
+                await input_queue.put(None)
+                return
+            await input_queue.put(line.strip())
+
+    stdin_task = asyncio.create_task(_stdin_reader())
 
     def on_action(name: str, tool_input: dict) -> None:
         print(f"  {_format_action(name, tool_input)}", flush=True)
 
-    while True:
-        try:
-            print("\n> ", end="", flush=True)
-            user_input = await get_input()
+    try:
+        while True:
+            # Drain any pending user input first (user spoke while agent was busy)
+            pending: list[str] = []
+            while not input_queue.empty():
+                item = input_queue.get_nowait()
+                if item is None:
+                    raise EOFError
+                if item:
+                    pending.append(item)
 
-            # Idle timeout → check desires
-            if user_input is None:
+            if pending:
+                # Process all buffered user messages before doing anything autonomous
+                for user_input in pending:
+                    await _handle_user(user_input, agent, desires, on_action, debug)
+                continue
+
+            # No pending input — show prompt and wait briefly
+            print("\n> ", end="", flush=True)
+            try:
+                user_input = await asyncio.wait_for(input_queue.get(), timeout=IDLE_CHECK_INTERVAL)
+            except asyncio.TimeoutError:
+                user_input = None
+
+            if user_input is None and input_queue.empty():
+                # Genuine idle — check desires
                 prompt = desires.dominant_as_prompt()
                 if prompt:
-                    desire_name, level = desires.get_dominant()
+                    desire_name, _ = desires.get_dominant()
                     murmur = {
                         "look_around": "なんか外が気になってきた...",
                         "explore": "ちょっと動きたくなってきたな...",
@@ -98,44 +118,69 @@ async def repl(agent: EmbodiedAgent, desires: DesireSystem, debug: bool = False)
                         "rest": "少し休憩しよかな...",
                     }.get(desire_name, "ちょっと気になることがあって...")
                     print(f"\n{murmur}")
+
+                    # Check once more — user may have typed while we were deciding
+                    if not input_queue.empty():
+                        item = input_queue.get_nowait()
+                        if item is None:
+                            break
+                        if item:
+                            await _handle_user(item, agent, desires, on_action, debug)
+                            continue
+
                     response = await agent.run(prompt, on_action=on_action, desires=desires)
                     print(f"\n{response}")
                     desires.satisfy(desire_name)
-                    desires.curiosity_target = None  # consumed
+                    desires.curiosity_target = None
+
+                    # Flush any input that arrived during agent.run()
+                    buffered: list[str] = []
+                    while not input_queue.empty():
+                        item = input_queue.get_nowait()
+                        if item is None:
+                            raise EOFError
+                        if item:
+                            buffered.append(item)
+                    for msg in buffered:
+                        await _handle_user(msg, agent, desires, on_action, debug)
                 continue
 
-            if not user_input:
-                continue
+            if user_input:
+                await _handle_user(user_input, agent, desires, on_action, debug)
 
-            if user_input == "/quit":
-                print("またね。")
-                break
-            elif user_input == "/clear":
-                agent.clear_history()
-                print("履歴をクリアしました。")
-                continue
-            elif user_input == "/desires":
-                if debug:
-                    desires.tick()
-                    print("\n[debug] desires:")
-                    for name, level in desires._desires.items():
-                        bar = "█" * int(level * 20)
-                        print(f"  {name:20s} {level:.2f} {bar}")
-                continue
+    except (KeyboardInterrupt, EOFError):
+        pass
+    finally:
+        stdin_task.cancel()
+        print("\nまたね。")
 
-            response = await agent.run(user_input, on_action=on_action, desires=desires)
-            print(f"\n{response}")
 
-            # Show if curiosity target was set
-            if desires.curiosity_target:
-                print(f"  [気になること: {desires.curiosity_target}]")
-
-            desires.satisfy("greet_companion")
-
-        except KeyboardInterrupt:
-            print("\n/quit で終了できます。")
-        except EOFError:
-            break
+async def _handle_user(
+    user_input: str,
+    agent: EmbodiedAgent,
+    desires: DesireSystem,
+    on_action,
+    debug: bool,
+) -> None:
+    """Process a single user message."""
+    if user_input == "/quit":
+        raise EOFError
+    elif user_input == "/clear":
+        agent.clear_history()
+        print("履歴をクリアしました。")
+    elif user_input == "/desires":
+        if debug:
+            desires.tick()
+            print("\n[debug] desires:")
+            for name, level in desires._desires.items():
+                bar = "█" * int(level * 20)
+                print(f"  {name:20s} {level:.2f} {bar}")
+    else:
+        response = await agent.run(user_input, on_action=on_action, desires=desires)
+        print(f"\n{response}")
+        if desires.curiosity_target:
+            print(f"  [気になること: {desires.curiosity_target}]")
+        desires.satisfy("greet_companion")
 
 
 def main() -> None:
