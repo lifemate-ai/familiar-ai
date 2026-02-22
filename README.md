@@ -13,6 +13,8 @@
 
 ---
 
+[![Demo video](https://img.youtube.com/vi/hiR9uWRnjt4/0.jpg)](https://youtube.com/shorts/hiR9uWRnjt4)
+
 familiar-ai is an AI companion that lives in your home.
 Set it up in minutes. No coding required.
 
