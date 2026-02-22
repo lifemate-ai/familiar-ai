@@ -52,7 +52,7 @@ cp .env.example .env
 |------|------|
 | `ANTHROPIC_API_KEY` | [console.anthropic.com](https://console.anthropic.com/) で取得 |
 | `TAPO_CAMERA_HOST` | Wi-FiカメラのIPアドレス（任意） |
-| `ELEVENLABS_API_KEY` | 音声出力を使う場合（任意） |
+| `ELEVENLABS_API_KEY` | 音声出力を使う場合（任意）— [elevenlabs.io](https://elevenlabs.io/) で取得 |
 
 全項目の説明は [`.env.example`](./.env.example) を参照。
 

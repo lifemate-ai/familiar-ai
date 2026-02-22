@@ -64,7 +64,7 @@ You'll need at minimum:
 |----------|-------------|
 | `ANTHROPIC_API_KEY` | Get one at [console.anthropic.com](https://console.anthropic.com/) |
 | `TAPO_CAMERA_HOST` | IP address of your Wi-Fi camera (if you have one) |
-| `ELEVENLABS_API_KEY` | For voice output (optional) |
+| `ELEVENLABS_API_KEY` | For voice output (optional) — get one at [elevenlabs.io](https://elevenlabs.io/) |
 
 See [`.env.example`](./.env.example) for all options with descriptions.
 
