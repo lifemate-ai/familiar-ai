@@ -21,16 +21,17 @@ It perceives the real world through cameras, moves around on a robot body, speak
 - 🔄 **Look around** — pans and tilts the camera to explore its surroundings
 - 🦿 **Move** — drives a robot vacuum to roam the room
 - 🗣 **Speak** — talks via ElevenLabs TTS
-- 🧠 **Remember** — stores observations with semantic search (SQLite + embeddings)
+- 🧠 **Remember** — actively stores and recalls memories with semantic search (SQLite + embeddings)
+- 🫀 **Theory of Mind** — takes the other person's perspective before responding
 - 💭 **Desire** — has its own internal drives that trigger autonomous behavior
 
 ## How it works
 
-familiar-ai runs a [ReAct](https://arxiv.org/abs/2210.03629) loop powered by Claude (Anthropic). It perceives the world through tools, thinks about what to do next, and acts — just like a person would.
+familiar-ai runs a [ReAct](https://arxiv.org/abs/2210.03629) loop powered by your choice of LLM. It perceives the world through tools, thinks about what to do next, and acts — just like a person would.
 
 ```
 user input
-  → think → act (camera / move / speak) → observe → think → ...
+  → think → act (camera / move / speak / remember) → observe → think → ...
 ```
 
 When idle, it acts on its own desires: curiosity, wanting to look outside, missing the person it lives with.
@@ -41,7 +42,7 @@ When idle, it acts on its own desires: curiosity, wanting to look outside, missi
 
 - Python 3.10+
 - [uv](https://docs.astral.sh/uv/)
-- Anthropic API key
+- An API key (Anthropic, Google Gemini, or OpenAI)
 - A camera (Wi-Fi PTZ or USB webcam)
 
 ### Install
@@ -58,15 +59,18 @@ uv sync
 cp .env.example .env
 ```
 
-You'll need at minimum:
-
 | Variable | Description |
 |----------|-------------|
-| `ANTHROPIC_API_KEY` | Get one at [console.anthropic.com](https://console.anthropic.com/) |
-| `CAMERA_HOST` | IP address of your ONVIF/RTSP camera (if you have one) |
-| `ELEVENLABS_API_KEY` | For voice output (optional) — get one at [elevenlabs.io](https://elevenlabs.io/) |
+| `PLATFORM` | `anthropic` (default) \| `gemini` \| `openai` |
+| `API_KEY` | Your API key for the chosen platform |
+| `MODEL` | Model name (optional — sensible defaults per platform) |
+| `AGENT_NAME` | Display name shown in the TUI (e.g. `Yukine`) |
+| `CAMERA_HOST` | IP address of your ONVIF/RTSP camera (optional) |
+| `ELEVENLABS_API_KEY` | For voice output (optional) — [elevenlabs.io](https://elevenlabs.io/) |
 
-See [`.env.example`](./.env.example) for all options with descriptions.
+For OpenAI-compatible local models (Ollama etc.), also set `BASE_URL`.
+
+See [`.env.example`](./.env.example) for all options.
 
 ### Create your familiar
 
@@ -78,14 +82,33 @@ cp persona-template/en.md ME.md
 ### Run
 
 ```bash
-uv run familiar
+uv run familiar          # Textual TUI (default)
+uv run familiar --no-tui # Plain REPL
 ```
+
+## TUI
+
+familiar-ai includes a terminal UI built with [Textual](https://textual.textualize.io/):
+
+- Scrollable conversation history with live streaming text
+- Tab-completion for `/quit`, `/clear`
+- Interrupt the agent mid-turn by typing while it's thinking
+- Conversation log auto-saved to `~/.cache/familiar-ai/chat.log` for easy copy-paste
 
 ## Persona (ME.md)
 
 Your familiar's personality lives in `ME.md`. This file is gitignored — it's yours alone.
 
 See [`persona-template/en.md`](./persona-template/en.md) for an example, or [`persona-template/ja.md`](./persona-template/ja.md) for a Japanese version.
+
+## Supported LLM platforms
+
+| Platform | `PLATFORM=` | Default model |
+|----------|------------|---------------|
+| Anthropic Claude | `anthropic` | `claude-haiku-4-5-20251001` |
+| Google Gemini | `gemini` | `gemini-2.5-flash` |
+| OpenAI | `openai` | `gpt-4o-mini` |
+| OpenAI-compatible (Ollama, vllm…) | `openai` + `BASE_URL=` | — |
 
 ## Hardware
 
@@ -111,7 +134,7 @@ Yes. The embedding model (multilingual-e5-small) runs fine on CPU. A GPU will ma
 Any camera that supports ONVIF + RTSP should work. Tapo C220 is what we tested with.
 
 **Q: Is my data sent anywhere?**
-Images and observations are sent to Anthropic's API (Claude) for processing. Memories are stored locally in `~/.familiar_ai/`.
+Images and observations are sent to your chosen LLM API for processing. Memories are stored locally in `~/.familiar_ai/`.
 
 ## License
 
