@@ -11,7 +11,8 @@ from datetime import datetime
 from .backend import create_backend
 from .config import AgentConfig
 from .tools.camera import CameraTool
-from .tools.memory import ObservationMemory
+from .tools.memory import MemoryTool, ObservationMemory
+from .tools.tom import ToMTool
 from .tools.mobility import MobilityTool
 from .tools.tts import TTSTool
 
@@ -175,6 +176,8 @@ class EmbodiedAgent:
         self._mobility: MobilityTool | None = None
         self._tts: TTSTool | None = None
         self._memory = ObservationMemory()
+        self._memory_tool = MemoryTool(self._memory)
+        self._tom_tool = ToMTool(self._memory)
 
         self._init_tools()
 
@@ -204,6 +207,8 @@ class EmbodiedAgent:
             defs.extend(self._mobility.get_tool_definitions())
         if self._tts:
             defs.extend(self._tts.get_tool_definitions())
+        defs.extend(self._memory_tool.get_tool_definitions())
+        defs.extend(self._tom_tool.get_tool_definitions())
         return defs
 
     async def _execute_tool(self, name: str, tool_input: dict) -> tuple[str, str | None]:
@@ -211,6 +216,7 @@ class EmbodiedAgent:
         camera_tools = {"see", "look"}
         mobility_tools = {"walk"}
         tts_tools = {"say"}
+        memory_tools = {"remember", "recall"}
 
         if name in camera_tools and self._camera:
             return await self._camera.call(name, tool_input)
@@ -218,6 +224,10 @@ class EmbodiedAgent:
             return await self._mobility.call(name, tool_input)
         elif name in tts_tools and self._tts:
             return await self._tts.call(name, tool_input)
+        elif name in memory_tools:
+            return await self._memory_tool.call(name, tool_input)
+        elif name == "tom":
+            return await self._tom_tool.call(name, tool_input)
         else:
             return f"Tool '{name}' not available (check configuration).", None
 

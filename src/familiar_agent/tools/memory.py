@@ -33,7 +33,9 @@ CREATE TABLE IF NOT EXISTS observations (
     time TEXT NOT NULL,
     direction TEXT NOT NULL DEFAULT 'unknown',
     kind TEXT NOT NULL DEFAULT 'observation',
-    emotion TEXT NOT NULL DEFAULT 'neutral'
+    emotion TEXT NOT NULL DEFAULT 'neutral',
+    image_path TEXT,
+    image_data TEXT
 );
 CREATE INDEX IF NOT EXISTS idx_obs_timestamp ON observations(timestamp);
 CREATE INDEX IF NOT EXISTS idx_obs_date ON observations(date);
@@ -44,6 +46,27 @@ CREATE TABLE IF NOT EXISTS obs_embeddings (
     vector BLOB NOT NULL
 );
 """
+
+_THUMB_SIZE = (320, 240)
+
+
+def _encode_image(image_path: str) -> str | None:
+    """Encode image to base64 thumbnail for storage."""
+    try:
+        import base64
+        import io
+
+        from PIL import Image
+
+        with Image.open(image_path) as img:
+            img.thumbnail(_THUMB_SIZE, Image.LANCZOS)
+            buf = io.BytesIO()
+            img.convert("RGB").save(buf, format="JPEG", quality=60)
+            return base64.b64encode(buf.getvalue()).decode()
+    except Exception as e:
+        logger.warning("Failed to encode image %s: %s", image_path, e)
+        return None
+
 
 # ── vector helpers ────────────────────────────────────────────
 
@@ -122,6 +145,8 @@ class ObservationMemory:
             for col, definition in [
                 ("kind", "TEXT NOT NULL DEFAULT 'observation'"),
                 ("emotion", "TEXT NOT NULL DEFAULT 'neutral'"),
+                ("image_path", "TEXT"),
+                ("image_data", "TEXT"),
             ]:
                 try:
                     self._db.execute(f"ALTER TABLE observations ADD COLUMN {col} {definition}")
@@ -137,6 +162,7 @@ class ObservationMemory:
         direction: str = "unknown",
         kind: str = "observation",
         emotion: str = "neutral",
+        image_path: str | None = None,
     ) -> bool:
         """Save memory with embedding synchronously.
 
@@ -145,18 +171,22 @@ class ObservationMemory:
             direction: Spatial context (e.g. 'left', 'outside').
             kind: 'observation' | 'feeling' | 'conversation'
             emotion: 'neutral' | 'happy' | 'sad' | 'curious' | 'excited' | 'moved'
+            image_path: Optional path to image file (thumbnail stored as base64).
         """
         try:
             db = self._ensure_connected()
             now = datetime.now()
             obs_id = str(uuid.uuid4())
 
+            image_data = _encode_image(image_path) if image_path else None
+
             vec = self._embedder.encode_document([content])[0]
             blob = _encode_vector(vec)
 
             db.execute(
-                "INSERT INTO observations (id, content, timestamp, date, time, direction, kind, emotion) "
-                "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+                "INSERT INTO observations "
+                "(id, content, timestamp, date, time, direction, kind, emotion, image_path, image_data) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
                 (
                     obs_id,
                     content,
@@ -166,6 +196,8 @@ class ObservationMemory:
                     direction,
                     kind,
                     emotion,
+                    image_path,
+                    image_data,
                 ),
             )
             db.execute(
@@ -386,8 +418,9 @@ class ObservationMemory:
         direction: str = "unknown",
         kind: str = "observation",
         emotion: str = "neutral",
+        image_path: str | None = None,
     ) -> bool:
-        return await asyncio.to_thread(self.save, content, direction, kind, emotion)
+        return await asyncio.to_thread(self.save, content, direction, kind, emotion, image_path)
 
     async def recall_async(self, query: str, n: int = 3, kind: str | None = None) -> list[dict]:
         return await asyncio.to_thread(self.recall, query, n, kind)
@@ -400,3 +433,93 @@ class ObservationMemory:
 
     async def recall_curiosities_async(self, n: int = 5) -> list[dict]:
         return await asyncio.to_thread(self.recall_curiosities, n)
+
+
+class MemoryTool:
+    """Agent-callable memory tools: remember + recall (with optional image)."""
+
+    def __init__(self, store: ObservationMemory) -> None:
+        self._store = store
+
+    def get_tool_definitions(self) -> list[dict]:
+        return [
+            {
+                "name": "remember",
+                "description": (
+                    "Save something to long-term memory. Use this to remember important things: "
+                    "what you saw, what happened, how you felt, conversations. "
+                    "If you just took a photo with see(), pass the image_path to attach it."
+                ),
+                "input_schema": {
+                    "type": "object",
+                    "properties": {
+                        "content": {
+                            "type": "string",
+                            "description": "What to remember (1-3 sentences).",
+                        },
+                        "emotion": {
+                            "type": "string",
+                            "enum": ["neutral", "happy", "sad", "curious", "excited", "moved"],
+                            "description": "Emotional tone of this memory.",
+                        },
+                        "image_path": {
+                            "type": "string",
+                            "description": "Optional path to an image file to attach (e.g. from see()).",
+                        },
+                    },
+                    "required": ["content"],
+                },
+            },
+            {
+                "name": "recall",
+                "description": (
+                    "Search long-term memory for things related to a topic. "
+                    "Use this to remember past observations, conversations, or feelings."
+                ),
+                "input_schema": {
+                    "type": "object",
+                    "properties": {
+                        "query": {
+                            "type": "string",
+                            "description": "What to search for.",
+                        },
+                        "n": {
+                            "type": "integer",
+                            "description": "Number of memories to return (default 3).",
+                        },
+                    },
+                    "required": ["query"],
+                },
+            },
+        ]
+
+    async def call(self, tool_name: str, tool_input: dict) -> tuple[str, str | None]:
+        if tool_name == "remember":
+            content = tool_input["content"]
+            emotion = tool_input.get("emotion", "neutral")
+            image_path = tool_input.get("image_path")
+            ok = await self._store.save_async(
+                content, kind="observation", emotion=emotion, image_path=image_path
+            )
+            if ok:
+                suffix = " (with image)" if image_path else ""
+                return f"Remembered{suffix}: {content[:60]}", None
+            return "Failed to save memory.", None
+
+        if tool_name == "recall":
+            query = tool_input["query"]
+            n = int(tool_input.get("n", 3))
+            memories = await self._store.recall_async(query, n=n)
+            if not memories:
+                return "No relevant memories found.", None
+            lines = []
+            for m in memories:
+                score = f" ({m['score']:.2f})" if "score" in m else ""
+                emotion = f" [{m['emotion']}]" if m.get("emotion", "neutral") != "neutral" else ""
+                img = " 📷" if m.get("image_path") else ""
+                lines.append(
+                    f"- {m['date']} {m['time']}{score}{emotion}{img}: {m['summary'][:120]}"
+                )
+            return "\n".join(lines), None
+
+        return f"Unknown memory tool: {tool_name}", None
