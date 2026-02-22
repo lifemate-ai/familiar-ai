@@ -103,7 +103,9 @@ async def repl(agent: EmbodiedAgent, desires: DesireSystem, debug: bool = False)
                 # Process all buffered user messages before doing anything autonomous
                 for user_input in pending:
                     last_interaction_time = time.time()
-                    await _handle_user(user_input, agent, desires, on_action, on_text, debug)
+                    await _handle_user(
+                        user_input, agent, desires, on_action, on_text, debug, input_queue
+                    )
                 continue
 
             # No pending input — show prompt and wait briefly
@@ -151,6 +153,7 @@ async def repl(agent: EmbodiedAgent, desires: DesireSystem, debug: bool = False)
                         on_text=on_text,
                         desires=desires,
                         inner_voice=prompt,
+                        interrupt_queue=input_queue,
                     )
                     desires.satisfy(desire_name)
                     desires.curiosity_target = None
@@ -164,11 +167,15 @@ async def repl(agent: EmbodiedAgent, desires: DesireSystem, debug: bool = False)
                         if item:
                             buffered.append(item)
                     for msg in buffered:
-                        await _handle_user(msg, agent, desires, on_action, on_text, debug)
+                        await _handle_user(
+                            msg, agent, desires, on_action, on_text, debug, input_queue
+                        )
                 continue
 
             if user_input:
-                await _handle_user(user_input, agent, desires, on_action, on_text, debug)
+                await _handle_user(
+                    user_input, agent, desires, on_action, on_text, debug, input_queue
+                )
 
     except (KeyboardInterrupt, EOFError):
         pass
@@ -184,6 +191,7 @@ async def _handle_user(
     on_action,
     on_text,
     debug: bool,
+    interrupt_queue=None,
 ) -> None:
     """Process a single user message."""
     if user_input == "/quit":
@@ -200,7 +208,13 @@ async def _handle_user(
                 print(f"  {name:20s} {level:.2f} {bar}")
     else:
         print()
-        await agent.run(user_input, on_action=on_action, on_text=on_text, desires=desires)
+        await agent.run(
+            user_input,
+            on_action=on_action,
+            on_text=on_text,
+            desires=desires,
+            interrupt_queue=interrupt_queue,
+        )
         if desires.curiosity_target:
             print(f"\n  [気になること: {desires.curiosity_target}]")
         desires.satisfy("greet_companion")
@@ -208,17 +222,24 @@ async def _handle_user(
 
 def main() -> None:
     debug = "--debug" in sys.argv
+    use_tui = "--no-tui" not in sys.argv
 
     config = AgentConfig()
-    if config.llm_backend == "anthropic" and not config.anthropic_api_key:
-        print("Error: ANTHROPIC_API_KEY not set.")
-        print("  Or set LLM_BACKEND=openai and LLM_BASE_URL / LLM_MODEL to use a local model.")
+    if not config.api_key:
+        print("Error: API_KEY not set.")
+        print("  Set PLATFORM=gemini|anthropic|openai and API_KEY=<your key>.")
         sys.exit(1)
 
     agent = EmbodiedAgent(config)
     desires = DesireSystem()
 
-    asyncio.run(repl(agent, desires, debug=debug))
+    if use_tui:
+        from .tui import FamiliarApp
+
+        app = FamiliarApp(agent, desires)
+        app.run()
+    else:
+        asyncio.run(repl(agent, desires, debug=debug))
 
 
 if __name__ == "__main__":

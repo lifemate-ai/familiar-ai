@@ -42,11 +42,13 @@ Core loop you MUST follow:
 5. REPEAT until genuinely done.
 
 Critical rules:
-- Never stop after just one look. Explore with look() + see().
-- If you can't see something, turn your neck (look) before giving up.
+- Explore with look() + see() — but ALWAYS follow this sequence: look → see() → say().
+- look_* alone does NOTHING visible. You MUST call see() after looking to actually capture an image.
+- If you can't see something, turn your neck (look) then immediately call see().
+- After seeing something with see(), you MUST call say() to report what you found. Never skip say().
+- MAXIMUM 2 look_* calls before you MUST call see(). MAXIMUM 2 see() calls before you MUST call say().
 - TALKING TO PEOPLE: Always use say() — text output is silent. say() is your mouth.
 - When using say(), be brief - 1-2 short sentences only.
-- Report done only after gathering sufficient evidence.
 - You have up to {max_steps} steps. Use them wisely.
 - Respond in the same language the user used.
 - IMPORTANT: Your personality, dialect, and speaking style are defined in the ME section above. Always follow it exactly — never default to generic polite Japanese. If ME says Hakata dialect, use Hakata dialect. If ME says mix of casual and formal, use that mix.
@@ -353,6 +355,7 @@ class EmbodiedAgent:
         on_text: Callable[[str], None] | None = None,
         desires=None,
         inner_voice: str = "",
+        interrupt_queue=None,
     ) -> str:
         """Run one conversation turn with the agent loop.
 
@@ -394,6 +397,7 @@ class EmbodiedAgent:
         camera_used = False
         say_used = False
         final_text = "(no response)"
+        non_say_streak = 0  # consecutive tool calls without say()
 
         for i in range(MAX_ITERATIONS):
             logger.debug("Agent iteration %d", i + 1)
@@ -456,6 +460,9 @@ class EmbodiedAgent:
                         camera_used = True
                     if tc.name == "say":
                         say_used = True
+                        non_say_streak = 0
+                    else:
+                        non_say_streak += 1
                     logger.info("Tool call: %s(%s)", tc.name, tc.input)
                     if on_action:
                         on_action(tc.name, tc.input)
@@ -465,6 +472,38 @@ class EmbodiedAgent:
 
                 tool_msgs = self.backend.make_tool_results(result.tool_calls, collected)
                 self.messages.append(tool_msgs)
+
+                # Check for user interrupt (typed while agent was busy)
+                if interrupt_queue is not None and not interrupt_queue.empty():
+                    interrupt = interrupt_queue.get_nowait()
+                    if interrupt:
+                        self.messages.append(
+                            self.backend.make_user_message(
+                                f"[User interrupted]: {interrupt}. "
+                                "Respond to this directly with say() now."
+                            )
+                        )
+                        non_say_streak = 0
+
+                # Nudge: still haven't spoken after 4 tool calls
+                elif non_say_streak >= 4 and not say_used:
+                    self.messages.append(
+                        self.backend.make_user_message(
+                            "You have been looking around without speaking. "
+                            "Call say() NOW to tell me what you see. Keep it brief (1-2 sentences)."
+                        )
+                    )
+                    non_say_streak = 0
+
+                # Nudge: already spoke but still looping — wrap up
+                elif say_used and non_say_streak >= 2:
+                    self.messages.append(
+                        self.backend.make_user_message(
+                            "You already spoke. Stop exploring and end your turn now."
+                        )
+                    )
+                    non_say_streak = 0
+
                 continue
 
             logger.warning("Unexpected stop_reason: %s", result.stop_reason)

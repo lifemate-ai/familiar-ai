@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 import re
 import uuid
 from collections.abc import Callable
@@ -159,6 +160,8 @@ class OpenAICompatibleBackend:
         self.client = AsyncOpenAI(api_key=api_key or "local", base_url=base_url)
         self.model = model
         self.tools_mode = tools_mode  # "native" | "prompt"
+        # Real OpenAI API uses max_completion_tokens; local models use max_tokens
+        self._use_completion_tokens = "api.openai.com" in base_url
 
     # ── message factories ─────────────────────────────────────────
 
@@ -321,9 +324,10 @@ class OpenAICompatibleBackend:
         augmented_system = self._build_tools_system(system, tools)
         flat = self._flatten_messages(augmented_system, messages)
 
+        tokens_key = "max_completion_tokens" if self._use_completion_tokens else "max_tokens"
         stream = await self.client.chat.completions.create(
             model=self.model,
-            max_tokens=max_tokens,
+            **{tokens_key: max_tokens},
             messages=flat,
             stream=True,
         )
@@ -358,9 +362,10 @@ class OpenAICompatibleBackend:
         flat = self._flatten_messages(system, messages)
         oai_tools = self._convert_tools(tools) if tools else None
 
+        tokens_key = "max_completion_tokens" if self._use_completion_tokens else "max_tokens"
         kwargs: dict[str, Any] = {
             "model": self.model,
-            "max_tokens": max_tokens,
+            tokens_key: max_tokens,
             "messages": flat,
             "stream": True,
         }
@@ -451,10 +456,11 @@ class OpenAICompatibleBackend:
         return TurnResult(stop_reason=stop, text=text, tool_calls=tool_calls), raw_assistant
 
     async def complete(self, prompt: str, max_tokens: int) -> str:
+        tokens_key = "max_completion_tokens" if self._use_completion_tokens else "max_tokens"
         try:
             resp = await self.client.chat.completions.create(
                 model=self.model,
-                max_tokens=max_tokens,
+                **{tokens_key: max_tokens},
                 messages=[{"role": "user", "content": prompt}],
             )
             return (resp.choices[0].message.content or "").strip()
@@ -606,24 +612,30 @@ class GeminiBackend:
 def create_backend(
     config: "AgentConfig",
 ) -> AnthropicBackend | OpenAICompatibleBackend | GeminiBackend:
-    """Factory: pick backend based on LLM_BACKEND env var / config."""
-    if config.llm_backend == "gemini":
-        model = config.llm_model or "gemini-2.5-flash"
+    """Factory: pick backend based on PLATFORM env var / config."""
+    if config.platform == "gemini":
+        model = config.model or "gemini-2.5-flash"
         logger.info("Using Gemini backend: %s", model)
-        return GeminiBackend(api_key=config.llm_api_key, model=model)
-    if config.llm_backend == "openai":
-        model = config.llm_model or "qwen2.5vl:7b"
+        return GeminiBackend(api_key=config.api_key, model=model)
+    if config.platform == "openai":
+        model = config.model or "gpt-4o-mini"
+        # If BASE_URL not explicitly set, use the real OpenAI endpoint
+        base_url = config.base_url
+        if not os.environ.get("BASE_URL"):
+            base_url = "https://api.openai.com/v1"
+        tools_mode = config.tools_mode if os.environ.get("TOOLS_MODE") else "native"
         logger.info(
-            "Using OpenAI-compatible backend: %s @ %s (tools=%s)",
+            "Using OpenAI backend: %s @ %s (tools=%s)",
             model,
-            config.llm_base_url,
-            config.llm_tools_mode,
+            base_url,
+            tools_mode,
         )
         return OpenAICompatibleBackend(
-            api_key=config.llm_api_key,
+            api_key=config.api_key,
             model=model,
-            base_url=config.llm_base_url,
-            tools_mode=config.llm_tools_mode,
+            base_url=base_url,
+            tools_mode=tools_mode,
         )
-    logger.info("Using Anthropic backend: %s", config.model)
-    return AnthropicBackend(api_key=config.anthropic_api_key, model=config.model)
+    model = config.model or "claude-haiku-4-5-20251001"
+    logger.info("Using Anthropic backend: %s", model)
+    return AnthropicBackend(api_key=config.api_key, model=model)
