@@ -48,7 +48,9 @@ class TTSTool:
             tmp_path = f.name
 
         proc = await asyncio.create_subprocess_exec(
-            "mpv", "--no-terminal", tmp_path,
+            "mpv",
+            "--no-terminal",
+            tmp_path,
             stdout=asyncio.subprocess.DEVNULL,
             stderr=asyncio.subprocess.DEVNULL,
         )

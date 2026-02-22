@@ -43,7 +43,10 @@ class CameraTool:
                 wsdl_dir = os.path.join(os.path.dirname(onvif_dir), "wsdl")
 
             self._cam = ONVIFCamera(
-                self.host, self.port, self.username, self.password,
+                self.host,
+                self.port,
+                self.username,
+                self.password,
                 wsdl_dir=wsdl_dir,
             )
             await self._cam.update_xaddrs()
@@ -74,15 +77,23 @@ class CameraTool:
             proc = await asyncio.create_subprocess_exec(
                 "ffmpeg",
                 # Low-latency RTSP transport
-                "-rtsp_transport", "tcp",
-                "-fflags", "nobuffer",
-                "-flags", "low_delay",
-                "-i", stream_url,
+                "-rtsp_transport",
+                "tcp",
+                "-fflags",
+                "nobuffer",
+                "-flags",
+                "low_delay",
+                "-i",
+                stream_url,
                 # Grab first frame quickly
-                "-vframes", "1",
-                "-q:v", "3",
-                "-vf", "scale=1280:-1",
-                "-y", tmp_path,
+                "-vframes",
+                "1",
+                "-q:v",
+                "3",
+                "-vf",
+                "scale=1280:-1",
+                "-y",
+                tmp_path,
                 stdout=asyncio.subprocess.DEVNULL,
                 stderr=asyncio.subprocess.DEVNULL,
             )
@@ -128,12 +139,14 @@ class CameraTool:
             elif direction == "down":
                 tilt_delta = degrees / 90.0
 
-            await self._ptz.RelativeMove({
-                "ProfileToken": self._profile_token,
-                "Translation": {
-                    "PanTilt": {"x": pan_delta, "y": tilt_delta},
-                },
-            })
+            await self._ptz.RelativeMove(
+                {
+                    "ProfileToken": self._profile_token,
+                    "Translation": {
+                        "PanTilt": {"x": pan_delta, "y": tilt_delta},
+                    },
+                }
+            )
             await asyncio.sleep(0.4)
             return f"Looked {direction} by ~{degrees} degrees."
         except Exception as e:

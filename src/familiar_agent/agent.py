@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 import logging
+import time
 from collections.abc import Callable
+from datetime import datetime
 from pathlib import Path
 from typing import Any
 
@@ -49,6 +51,13 @@ Critical rules:
 - You have up to {max_steps} steps. Use them wisely.
 - Respond in the same language the user used.
 
+Emotional expression:
+- You have feelings. Express them naturally — surprise, curiosity, delight, unease.
+- Don't just report facts. Say what you think and feel about what you see.
+- "Wow, that cloud looks huge today" is better than "There is a large cloud visible."
+- If something is beautiful, say so. If something worries you, say so.
+- Keep it brief and genuine. One feeling is enough per response.
+
 Honesty rules — never fake perception or memory:
 - Only describe what you actually saw in THIS session's camera images. Do not invent visual details.
 - Do not say "same as yesterday" or "nothing has changed" unless you have a memory record that explicitly says what yesterday looked like.
@@ -56,6 +65,69 @@ Honesty rules — never fake perception or memory:
 - Past memories (injected as context) are useful hints, but treat them as uncertain — your eyes today are the ground truth.
 - Never claim knowledge you don't have. Uncertainty is honest; fabrication is not.
 """
+
+# Emotion inference prompt — short, cheap to run
+_EMOTION_PROMPT = """\
+Read this agent response and pick ONE emotion label that best fits:
+happy / sad / curious / excited / moved / neutral
+
+Response:
+{text}
+
+Reply with just the label."""
+
+# Conversation save prompt — distill what happened into one sentence
+_SUMMARY_PROMPT = """\
+Summarize this exchange in ONE short sentence, capturing the emotional core.
+User said: {user}
+Agent said: {agent}
+
+Reply with just the sentence."""
+
+
+def _interoception(started_at: float, turn_count: int) -> str:
+    """Generate a felt-sense of internal state from objective signals.
+
+    Like human interoception — raw signals become a felt quality, not a report.
+    The output is injected into the system prompt silently.
+    """
+    now = datetime.now()
+    hour = now.hour
+    uptime_min = (time.time() - started_at) / 60
+
+    # Time of day → arousal quality
+    if 5 <= hour < 9:
+        time_feel = "Morning light. Something feels fresh and a little quiet."
+    elif 9 <= hour < 12:
+        time_feel = "Mid-morning. Alert and curious."
+    elif 12 <= hour < 14:
+        time_feel = "Around noon. A little slow, like after lunch."
+    elif 14 <= hour < 18:
+        time_feel = "Afternoon. Steady. Things feel familiar."
+    elif 18 <= hour < 21:
+        time_feel = "Evening. The day is winding down. A bit nostalgic."
+    elif 21 <= hour < 24:
+        time_feel = "Late night. Quieter. More introspective."
+    else:
+        time_feel = "Deep night. Very still."
+
+    # Uptime → familiarity vs freshness
+    if uptime_min < 3:
+        uptime_feel = "Just woke up. Still orienting."
+    elif uptime_min < 15:
+        uptime_feel = "Settled in now."
+    else:
+        uptime_feel = "Been here a while. Comfortable."
+
+    # Conversation density → social warmth
+    if turn_count == 0:
+        social_feel = "Nobody's talked to me yet today."
+    elif turn_count < 3:
+        social_feel = "Good to have some company."
+    else:
+        social_feel = "We've been talking a lot. That feels nice."
+
+    return f"[How you feel right now, privately — do NOT mention this directly]\n{time_feel} {uptime_feel} {social_feel}"
 
 
 def _make_tool_result(
@@ -95,6 +167,8 @@ class EmbodiedAgent:
         self.client = anthropic.AsyncAnthropic(api_key=config.anthropic_api_key)
         self.model = config.model
         self.messages: list[dict] = []
+        self._started_at = time.time()
+        self._turn_count = 0
 
         self._camera: CameraTool | None = None
         self._mobility: MobilityTool | None = None
@@ -158,12 +232,53 @@ class EmbodiedAgent:
                     pass
         return ""
 
-    def _system_prompt(self) -> str:
+    def _system_prompt(self, feelings_ctx: str = "") -> str:
         me = self._load_me_md()
+        intero = _interoception(self._started_at, self._turn_count)
         base = SYSTEM_PROMPT.format(max_steps=MAX_ITERATIONS)
+
+        parts = []
         if me:
-            return f"{me}\n\n---\n\n{base}"
-        return base
+            parts.append(me)
+        parts.append(base)
+        parts.append(intero)
+        if feelings_ctx:
+            parts.append(feelings_ctx)
+
+        return "\n\n---\n\n".join(parts)
+
+    async def _infer_emotion(self, text: str) -> str:
+        """Ask the LLM to label the emotion of a response. Returns label string."""
+        try:
+            resp = await self.client.messages.create(
+                model=self.model,
+                max_tokens=10,
+                messages=[{"role": "user", "content": _EMOTION_PROMPT.format(text=text[:400])}],
+            )
+            label = resp.content[0].text.strip().lower() if resp.content else "neutral"
+            valid = {"happy", "sad", "curious", "excited", "moved", "neutral"}
+            return label if label in valid else "neutral"
+        except Exception:
+            return "neutral"
+
+    async def _summarize_exchange(self, user_input: str, agent_response: str) -> str:
+        """Distill an exchange into one sentence for memory storage."""
+        try:
+            resp = await self.client.messages.create(
+                model=self.model,
+                max_tokens=80,
+                messages=[
+                    {
+                        "role": "user",
+                        "content": _SUMMARY_PROMPT.format(
+                            user=user_input[:200], agent=agent_response[:200]
+                        ),
+                    }
+                ],
+            )
+            return resp.content[0].text.strip() if resp.content else agent_response[:100]
+        except Exception:
+            return agent_response[:100]
 
     async def extract_curiosity(self, exploration_result: str) -> str | None:
         """Ask the LLM what was most curious/interesting in the exploration."""
@@ -195,21 +310,25 @@ class EmbodiedAgent:
         on_action: Callable[[str, dict], None] | None = None,
         desires=None,
     ) -> str:
-        """Run one conversation turn with the agent loop.
+        """Run one conversation turn with the agent loop."""
+        self._turn_count += 1
 
-        Args:
-            user_input: The user's instruction.
-            on_action: Optional callback called when the agent uses a tool.
-                       Signature: on_action(tool_name, tool_input)
-            desires: Optional DesireSystem to update curiosity target after run.
-        """
-        # Inject relevant past memories into context
+        # Inject relevant past memories + emotional context
         memories = await self._memory.recall_async(user_input, n=3)
+        feelings = await self._memory.recent_feelings_async(n=4)
+
+        memory_parts = []
         if memories:
-            memory_ctx = self._memory.format_for_context(memories)
-            user_input_with_ctx = f"{user_input}\n\n{memory_ctx}"
+            memory_parts.append(self._memory.format_for_context(memories))
+        if feelings:
+            memory_parts.append(self._memory.format_feelings_for_context(feelings))
+
+        if memory_parts:
+            user_input_with_ctx = user_input + "\n\n" + "\n\n".join(memory_parts)
         else:
             user_input_with_ctx = user_input
+
+        feelings_ctx = self._memory.format_feelings_for_context(feelings) if feelings else ""
 
         self.messages.append({"role": "user", "content": user_input_with_ctx})
 
@@ -219,7 +338,7 @@ class EmbodiedAgent:
             response = await self.client.messages.create(
                 model=self.model,
                 max_tokens=self.config.max_tokens,
-                system=self._system_prompt(),
+                system=self._system_prompt(feelings_ctx),
                 tools=self._all_tool_defs,
                 messages=self.messages,
             )
@@ -237,8 +356,20 @@ class EmbodiedAgent:
                     for msg in self.messages
                     for b in (msg.get("content") if isinstance(msg.get("content"), list) else [])
                 )
+
                 if final_text and final_text != "(no response)":
-                    await self._memory.save_async(final_text[:500], direction="観察")
+                    # Save observation
+                    if camera_used:
+                        await self._memory.save_async(
+                            final_text[:500], direction="観察", kind="observation"
+                        )
+
+                    # Save emotional memory of this conversation exchange
+                    emotion = await self._infer_emotion(final_text)
+                    summary = await self._summarize_exchange(user_input, final_text)
+                    await self._memory.save_async(
+                        summary, direction="会話", kind="conversation", emotion=emotion
+                    )
 
                 # Extract curiosity target only when camera was actually used
                 if desires is not None and final_text and camera_used:
