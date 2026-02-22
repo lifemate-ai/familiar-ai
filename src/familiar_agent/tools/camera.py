@@ -91,7 +91,7 @@ class CameraTool:
                 "-q:v",
                 "3",
                 "-vf",
-                "scale=1280:-1",
+                "scale=640:-1",
                 "-y",
                 tmp_path,
                 stdout=asyncio.subprocess.DEVNULL,

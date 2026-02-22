@@ -67,9 +67,9 @@ class DesireSystem:
         self._save()
 
     def satisfy(self, desire_name: str) -> None:
-        """Reduce a desire after acting on it."""
+        """Reduce a desire after acting on it — reset to default (not just halve)."""
         if desire_name in self._desires:
-            self._desires[desire_name] *= DECAY_ON_SATISFY
+            self._desires[desire_name] = DEFAULT_DESIRES.get(desire_name, 0.0)
             self._save()
 
     def boost(self, desire_name: str, amount: float = 0.2) -> None:
@@ -100,17 +100,18 @@ class DesireSystem:
             target = self.curiosity_target
             return f"さっき気になったことがある。{target}をもっとよく見て。カメラを向けて確認して。"
 
+        # These are INTERNAL IMPULSES — the agent acts on them autonomously.
+        # Framed in first person so the model knows this is its own desire, not a user request.
         prompts = {
             "look_around": (
-                "なんか外が気になってきた。自分の意思でカメラを向けて、好きなように見てみて。"
-                "レポートとかまとめとかじゃなくて、気になったことや目に入ったものをぽつっとつぶやく感じでいい。"
-                "「あ、〇〇やん」とか「なんかあそこ気になるな」とか、自然に。"
+                "（内部衝動）なんか外が気になってきた。"
+                "camera_captureで実際に画像を取得して、目に入ったものをぽつっとひと言つぶやく。"
+                "camera_lookだけじゃなく必ずcamera_captureを呼ぶこと。"
             ),
             "explore": (
-                "なんか動きたい気分。どこでも好きなとこに動いてみて。"
-                "理由とかなくていい、ただ動きたいから動く感じで。"
+                "（内部衝動）なんか体を動かしたい気分。moveで少し移動してから、camera_captureで確認してみよう。"
             ),
-            "greet_companion": "誰かいる気配がする。声かけてみよかな。",
-            "rest": "ちょっとひと休み。",
+            "greet_companion": "（内部衝動）誰かいる気配がする。声かけてみよかな。",
+            "rest": "（内部衝動）ちょっとひと休み。",
         }
         return prompts.get(name)

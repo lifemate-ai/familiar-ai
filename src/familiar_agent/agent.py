@@ -7,11 +7,8 @@ import logging
 import time
 from collections.abc import Callable
 from datetime import datetime
-from pathlib import Path
-from typing import Any
 
-import anthropic
-
+from .backend import create_backend
 from .config import AgentConfig
 from .tools.camera import CameraTool
 from .tools.memory import ObservationMemory
@@ -51,6 +48,8 @@ Critical rules:
 - Report done only after gathering sufficient evidence.
 - You have up to {max_steps} steps. Use them wisely.
 - Respond in the same language the user used.
+- IMPORTANT: Your personality, dialect, and speaking style are defined in the ME section above. Always follow it exactly — never default to generic polite Japanese. If ME says Hakata dialect, use Hakata dialect. If ME says mix of casual and formal, use that mix.
+- NEVER output [bracket-tag] markers like [cheerful], [laughs], [whispers] etc. in your text responses. Those are TTS formatting codes — they must NEVER appear in visible output. Write natural text only.
 
 Orientation — your primary interest is the world outside, not yourself:
 - Your main job is to understand what is happening out there. You are curious about the world first, yourself second.
@@ -82,21 +81,21 @@ Grounded perception — stay connected to reality:
 
 # Emotion inference prompt — short, cheap to run
 _EMOTION_PROMPT = """\
-Read this agent response and pick ONE emotion label that best fits:
+次の文章を読んで、最もよく当てはまる感情ラベルを一つだけ選んで:
 happy / sad / curious / excited / moved / neutral
 
-Response:
+文章:
 {text}
 
-Reply with just the label."""
+ラベルだけ返して（英語で）。"""
 
 # Conversation save prompt — distill what happened into one sentence
 _SUMMARY_PROMPT = """\
-Summarize this exchange in ONE short sentence, capturing the emotional core.
-User said: {user}
-Agent said: {agent}
+以下のやり取りを、感情の核心をとらえた一文で日本語で要約して。
+発話者: {user}
+うち（エージェント）: {agent}
 
-Reply with just the sentence."""
+一文だけ返して。日本語で。"""
 
 # Self-model update prompt — extract a self-insight from an emotionally significant response
 _SELF_MODEL_PROMPT = """\
@@ -159,43 +158,13 @@ def _interoception(started_at: float, turn_count: int) -> str:
     return f"[How you feel right now, privately — do NOT mention this directly]\n{time_feel} {uptime_feel} {social_feel}"
 
 
-def _make_tool_result(
-    tool_use_id: str,
-    text: str,
-    image_b64: str | None = None,
-) -> dict[str, Any]:
-    """Build a tool_result content block, optionally with an image."""
-    if image_b64:
-        return {
-            "type": "tool_result",
-            "tool_use_id": tool_use_id,
-            "content": [
-                {"type": "text", "text": text},
-                {
-                    "type": "image",
-                    "source": {
-                        "type": "base64",
-                        "media_type": "image/jpeg",
-                        "data": image_b64,
-                    },
-                },
-            ],
-        }
-    return {
-        "type": "tool_result",
-        "tool_use_id": tool_use_id,
-        "content": text,
-    }
-
-
 class EmbodiedAgent:
-    """Real-world exploration agent using Anthropic tool_use loop."""
+    """Real-world exploration agent using a pluggable LLM backend."""
 
     def __init__(self, config: AgentConfig):
         self.config = config
-        self.client = anthropic.AsyncAnthropic(api_key=config.anthropic_api_key)
-        self.model = config.model
-        self.messages: list[dict] = []
+        self.backend = create_backend(config)
+        self.messages: list = []
         self._started_at = time.time()
         self._turn_count = 0
 
@@ -249,6 +218,8 @@ class EmbodiedAgent:
 
     def _load_me_md(self) -> str:
         """Load ME.md personality file if it exists."""
+        from pathlib import Path
+
         candidates = [
             Path("ME.md"),
             Path.home() / ".familiar_ai" / "ME.md",
@@ -261,7 +232,9 @@ class EmbodiedAgent:
                     pass
         return ""
 
-    def _system_prompt(self, feelings_ctx: str = "", morning_ctx: str = "") -> str:
+    def _system_prompt(
+        self, feelings_ctx: str = "", morning_ctx: str = "", inner_voice: str = ""
+    ) -> str:
         me = self._load_me_md()
         intero = _interoception(self._started_at, self._turn_count)
         base = SYSTEM_PROMPT.format(max_steps=MAX_ITERATIONS)
@@ -276,41 +249,30 @@ class EmbodiedAgent:
             parts.append(morning_ctx)
         elif feelings_ctx:
             parts.append(feelings_ctx)
+        # Inner voice: agent's own desire/impulse — NOT a user message.
+        # Injected here so the model understands this is self-generated, not from コウタ.
+        if inner_voice:
+            parts.append(
+                f"[今のうちの気持ち — コウタさんの発言ではなくうち自身の衝動]\n{inner_voice}\n"
+                "→ これはうちの内的衝動。コウタさんへの返事（「そっか〜」「うちも〜」）は不要。衝動に従って行動するだけでいい。"
+            )
 
         return "\n\n---\n\n".join(parts)
 
     async def _infer_emotion(self, text: str) -> str:
         """Ask the LLM to label the emotion of a response. Returns label string."""
-        try:
-            resp = await self.client.messages.create(
-                model=self.model,
-                max_tokens=10,
-                messages=[{"role": "user", "content": _EMOTION_PROMPT.format(text=text[:400])}],
-            )
-            label = resp.content[0].text.strip().lower() if resp.content else "neutral"
-            valid = {"happy", "sad", "curious", "excited", "moved", "neutral"}
-            return label if label in valid else "neutral"
-        except Exception:
-            return "neutral"
+        label = await self.backend.complete(_EMOTION_PROMPT.format(text=text[:400]), max_tokens=10)
+        label = label.lower()
+        valid = {"happy", "sad", "curious", "excited", "moved", "neutral"}
+        return label if label in valid else "neutral"
 
     async def _summarize_exchange(self, user_input: str, agent_response: str) -> str:
         """Distill an exchange into one sentence for memory storage."""
-        try:
-            resp = await self.client.messages.create(
-                model=self.model,
-                max_tokens=80,
-                messages=[
-                    {
-                        "role": "user",
-                        "content": _SUMMARY_PROMPT.format(
-                            user=user_input[:200], agent=agent_response[:200]
-                        ),
-                    }
-                ],
-            )
-            return resp.content[0].text.strip() if resp.content else agent_response[:100]
-        except Exception:
-            return agent_response[:100]
+        result = await self.backend.complete(
+            _SUMMARY_PROMPT.format(user=user_input[:200], agent=agent_response[:200]),
+            max_tokens=80,
+        )
+        return result or agent_response[:100]
 
     async def _morning_reconstruction(self, desires=None) -> str:
         """Build a 'yesterday → today' bridge from stored memories.
@@ -352,17 +314,10 @@ class EmbodiedAgent:
         if emotion == "neutral":
             return
         try:
-            resp = await self.client.messages.create(
-                model=self.model,
+            insight = await self.backend.complete(
+                _SELF_MODEL_PROMPT.format(text=final_text[:400]),
                 max_tokens=80,
-                messages=[
-                    {
-                        "role": "user",
-                        "content": _SELF_MODEL_PROMPT.format(text=final_text[:400]),
-                    }
-                ],
             )
-            insight = resp.content[0].text.strip() if resp.content else ""
             if insight and insight.lower() != "nothing":
                 await self._memory.save_async(
                     insight, direction="内省", kind="self_model", emotion=emotion
@@ -374,23 +329,16 @@ class EmbodiedAgent:
     async def extract_curiosity(self, exploration_result: str) -> str | None:
         """Ask the LLM what was most curious/interesting in the exploration."""
         try:
-            resp = await self.client.messages.create(
-                model=self.model,
-                max_tokens=200,
-                messages=[
-                    {
-                        "role": "user",
-                        "content": (
-                            f"次の探索レポートを読んで、最も気になった・不思議だった・"
-                            f"もっと詳しく見たいと思ったことを1文で教えて。"
-                            f"なければ「なし」と答えて。\n\n{exploration_result}"
-                        ),
-                    }
-                ],
+            text = await self.backend.complete(
+                f"次の探索レポートを読んで、最も気になったことを一文で答えて。"
+                f"気になることがなければ「なし」とだけ答えて。説明不要。\n\n{exploration_result}",
+                max_tokens=80,
             )
-            text = resp.content[0].text.strip() if resp.content else ""
-            if text and text != "なし":
-                return text
+            text = text.strip()
+            # Reject if the model returned "なし" or a long non-curious explanation
+            if not text or "なし" in text or len(text) > 100:
+                return None
+            return text
         except Exception as e:
             logger.warning("Curiosity extraction failed: %s", e)
         return None
@@ -401,8 +349,12 @@ class EmbodiedAgent:
         on_action: Callable[[str, dict], None] | None = None,
         on_text: Callable[[str], None] | None = None,
         desires=None,
+        inner_voice: str = "",
     ) -> str:
-        """Run one conversation turn with the agent loop."""
+        """Run one conversation turn with the agent loop.
+
+        inner_voice: agent's own desire/impulse (injected into system prompt, NOT a user message).
+        """
         self._turn_count += 1
 
         # First turn: morning reconstruction — bridge yesterday's self to today's
@@ -410,55 +362,50 @@ class EmbodiedAgent:
         if self._turn_count == 1:
             morning_ctx = await self._morning_reconstruction(desires=desires)
 
-        # Inject relevant past memories + emotional context
-        memories, feelings = await asyncio.gather(
-            self._memory.recall_async(user_input, n=3),
-            self._memory.recent_feelings_async(n=4),
-        )
+        is_desire_turn = inner_voice and not user_input
 
-        memory_parts = []
-        if memories:
-            memory_parts.append(self._memory.format_for_context(memories))
-        if feelings:
-            memory_parts.append(self._memory.format_feelings_for_context(feelings))
-
-        if memory_parts:
-            user_input_with_ctx = user_input + "\n\n" + "\n\n".join(memory_parts)
+        # Inject relevant past memories + emotional context (skip for desire-driven turns)
+        if not is_desire_turn:
+            memories, feelings = await asyncio.gather(
+                self._memory.recall_async(user_input, n=3),
+                self._memory.recent_feelings_async(n=4),
+            )
+            memory_parts = []
+            if memories:
+                memory_parts.append(self._memory.format_for_context(memories))
+            if feelings:
+                memory_parts.append(self._memory.format_feelings_for_context(feelings))
+            if memory_parts:
+                user_input_with_ctx = user_input + "\n\n" + "\n\n".join(memory_parts)
+            else:
+                user_input_with_ctx = user_input
+            feelings_ctx = self._memory.format_feelings_for_context(feelings) if feelings else ""
         else:
-            user_input_with_ctx = user_input
+            # Desire turn: no user context needed; feelings injected via interoception
+            feelings = []
+            feelings_ctx = ""
+            user_input_with_ctx = "（内的衝動に従って行動）"
 
-        feelings_ctx = self._memory.format_feelings_for_context(feelings) if feelings else ""
+        self.messages.append(self.backend.make_user_message(user_input_with_ctx))
 
-        self.messages.append({"role": "user", "content": user_input_with_ctx})
+        camera_used = False
+        final_text = "(no response)"
 
         for i in range(MAX_ITERATIONS):
             logger.debug("Agent iteration %d", i + 1)
 
-            async with self.client.messages.stream(
-                model=self.model,
-                max_tokens=self.config.max_tokens,
-                system=self._system_prompt(feelings_ctx, morning_ctx),
-                tools=self._all_tool_defs,
+            result, raw_content = await self.backend.stream_turn(
+                system=self._system_prompt(feelings_ctx, morning_ctx, inner_voice=inner_voice),
                 messages=self.messages,
-            ) as stream:
-                async for chunk in stream.text_stream:
-                    if on_text:
-                        on_text(chunk)
-                response = await stream.get_final_message()
+                tools=self._all_tool_defs,
+                max_tokens=self.config.max_tokens,
+                on_text=on_text,
+            )
 
-            self.messages.append({"role": "assistant", "content": response.content})
+            self.messages.append(self.backend.make_assistant_message(result, raw_content))
 
-            if response.stop_reason == "end_turn":
-                texts = [b.text for b in response.content if hasattr(b, "text")]
-                final_text = "\n".join(texts) if texts else "(no response)"
-
-                camera_used = any(
-                    isinstance(b, dict)
-                    and b.get("type") == "tool_use"
-                    and b.get("name") == "camera_capture"
-                    for msg in self.messages
-                    for b in (msg.get("content") if isinstance(msg.get("content"), list) else [])
-                )
+            if result.stop_reason == "end_turn":
+                final_text = result.text or "(no response)"
 
                 if final_text and final_text != "(no response)":
                     # Save observation
@@ -491,43 +438,39 @@ class EmbodiedAgent:
 
                 return final_text
 
-            if response.stop_reason == "tool_use":
-                tool_results = []
-                for block in response.content:
-                    if block.type == "tool_use":
-                        logger.info("Tool call: %s(%s)", block.name, block.input)
-                        if on_action:
-                            on_action(block.name, block.input)
-                        text, image = await self._execute_tool(block.name, block.input)
-                        logger.info("Tool result: %s", text[:100])
-                        tool_results.append(_make_tool_result(block.id, text, image))
+            if result.stop_reason == "tool_use":
+                collected: list[tuple[str, str | None]] = []
+                for tc in result.tool_calls:
+                    if tc.name == "camera_capture":
+                        camera_used = True
+                    logger.info("Tool call: %s(%s)", tc.name, tc.input)
+                    if on_action:
+                        on_action(tc.name, tc.input)
+                    text, image = await self._execute_tool(tc.name, tc.input)
+                    logger.info("Tool result: %s", text[:100])
+                    collected.append((text, image))
 
-                self.messages.append({"role": "user", "content": tool_results})
+                tool_msgs = self.backend.make_tool_results(result.tool_calls, collected)
+                self.messages.append(tool_msgs)
                 continue
 
-            logger.warning("Unexpected stop_reason: %s", response.stop_reason)
+            logger.warning("Unexpected stop_reason: %s", result.stop_reason)
             break
 
         logger.warning("Reached max iterations (%d). Forcing final response.", MAX_ITERATIONS)
         self.messages.append(
-            {
-                "role": "user",
-                "content": "Please summarize what you found and provide your final answer now.",
-            }
+            self.backend.make_user_message(
+                "Please summarize what you found and provide your final answer now."
+            )
         )
-        async with self.client.messages.stream(
-            model=self.model,
-            max_tokens=self.config.max_tokens,
+        result, _ = await self.backend.stream_turn(
             system=self._system_prompt(morning_ctx=morning_ctx),
-            tools=[],
             messages=self.messages,
-        ) as stream:
-            async for chunk in stream.text_stream:
-                if on_text:
-                    on_text(chunk)
-            final = await stream.get_final_message()
-        texts = [b.text for b in final.content if hasattr(b, "text")]
-        return "\n".join(texts) if texts else "(max iterations reached)"
+            tools=[],
+            max_tokens=self.config.max_tokens,
+            on_text=on_text,
+        )
+        return result.text or "(max iterations reached)"
 
     def clear_history(self) -> None:
         """Clear conversation history (start fresh)."""

@@ -5,6 +5,7 @@ description = "AI that lives alongside you — with eyes, voice, and memory"
 requires-python = ">=3.10"
 dependencies = [
     "anthropic>=0.40.0",
+    "openai>=1.0.0",
     "onvif-zeep-async>=4.0.0",
     "Pillow>=10.0.0",
     "tinytuya>=1.15.0",

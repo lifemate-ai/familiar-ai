@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import sys
+import time
 
 from .agent import EmbodiedAgent
 from .config import AgentConfig
@@ -26,6 +27,7 @@ BANNER = """
 """
 
 IDLE_CHECK_INTERVAL = 10.0  # seconds between desire checks when idle
+DESIRE_COOLDOWN = 90.0  # seconds after last user interaction before desires can fire
 
 ACTION_ICONS = {
     "camera_capture": "👀 観察中...",
@@ -67,6 +69,7 @@ async def repl(agent: EmbodiedAgent, desires: DesireSystem, debug: bool = False)
     # Persistent input queue — stdin reader runs as a background task
     # so user input is captured even while the agent is busy.
     input_queue: asyncio.Queue[str | None] = asyncio.Queue()
+    last_interaction_time: float = time.time()
 
     async def _stdin_reader() -> None:
         """Read stdin continuously into the queue."""
@@ -99,6 +102,7 @@ async def repl(agent: EmbodiedAgent, desires: DesireSystem, debug: bool = False)
             if pending:
                 # Process all buffered user messages before doing anything autonomous
                 for user_input in pending:
+                    last_interaction_time = time.time()
                     await _handle_user(user_input, agent, desires, on_action, on_text, debug)
                 continue
 
@@ -110,7 +114,10 @@ async def repl(agent: EmbodiedAgent, desires: DesireSystem, debug: bool = False)
                 user_input = None
 
             if user_input is None and input_queue.empty():
-                # Genuine idle — check desires
+                # Genuine idle — check desires, but respect cooldown after conversation
+                if time.time() - last_interaction_time < DESIRE_COOLDOWN:
+                    continue  # Still in post-conversation cooldown
+
                 prompt = desires.dominant_as_prompt()
                 if prompt:
                     desire_name, _ = desires.get_dominant()
@@ -139,10 +146,11 @@ async def repl(agent: EmbodiedAgent, desires: DesireSystem, debug: bool = False)
 
                     print()
                     await agent.run(
-                        prompt,
+                        "",
                         on_action=on_action,
                         on_text=on_text,
                         desires=desires,
+                        inner_voice=prompt,
                     )
                     desires.satisfy(desire_name)
                     desires.curiosity_target = None
@@ -202,8 +210,9 @@ def main() -> None:
     debug = "--debug" in sys.argv
 
     config = AgentConfig()
-    if not config.anthropic_api_key:
+    if config.llm_backend == "anthropic" and not config.anthropic_api_key:
         print("Error: ANTHROPIC_API_KEY not set.")
+        print("  Or set LLM_BACKEND=openai and LLM_BASE_URL / LLM_MODEL to use a local model.")
         sys.exit(1)
 
     agent = EmbodiedAgent(config)
