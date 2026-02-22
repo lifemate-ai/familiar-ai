@@ -13,10 +13,26 @@ load_dotenv()
 
 @dataclass
 class CameraConfig:
-    host: str = field(default_factory=lambda: os.environ.get("CAMERA_HOST", os.environ.get("TAPO_CAMERA_HOST", "")))
-    username: str = field(default_factory=lambda: os.environ.get("CAMERA_USERNAME", os.environ.get("TAPO_USERNAME", "admin")))
-    password: str = field(default_factory=lambda: os.environ.get("CAMERA_PASSWORD", os.environ.get("TAPO_PASSWORD", "")))
-    port: int = field(default_factory=lambda: int(os.environ.get("CAMERA_ONVIF_PORT", os.environ.get("TAPO_ONVIF_PORT", "2020"))))
+    host: str = field(
+        default_factory=lambda: os.environ.get(
+            "CAMERA_HOST", os.environ.get("TAPO_CAMERA_HOST", "")
+        )
+    )
+    username: str = field(
+        default_factory=lambda: os.environ.get(
+            "CAMERA_USERNAME", os.environ.get("TAPO_USERNAME", "admin")
+        )
+    )
+    password: str = field(
+        default_factory=lambda: os.environ.get(
+            "CAMERA_PASSWORD", os.environ.get("TAPO_PASSWORD", "")
+        )
+    )
+    port: int = field(
+        default_factory=lambda: int(
+            os.environ.get("CAMERA_ONVIF_PORT", os.environ.get("TAPO_ONVIF_PORT", "2020"))
+        )
+    )
 
 
 @dataclass
@@ -33,9 +49,7 @@ class TTSConfig:
         default_factory=lambda: os.environ.get("ELEVENLABS_API_KEY", "")
     )
     voice_id: str = field(
-        default_factory=lambda: os.environ.get(
-            "ELEVENLABS_VOICE_ID", "cgSgspJ2msm6clMCkdW9"
-        )
+        default_factory=lambda: os.environ.get("ELEVENLABS_VOICE_ID", "cgSgspJ2msm6clMCkdW9")
     )
 
 
@@ -51,11 +65,9 @@ class MemoryConfig:
 
 @dataclass
 class AgentConfig:
-    anthropic_api_key: str = field(
-        default_factory=lambda: os.environ.get("ANTHROPIC_API_KEY", "")
-    )
+    anthropic_api_key: str = field(default_factory=lambda: os.environ.get("ANTHROPIC_API_KEY", ""))
     model: str = field(
-        default_factory=lambda: os.environ.get("ANTHROPIC_MODEL", "claude-sonnet-4-6")
+        default_factory=lambda: os.environ.get("ANTHROPIC_MODEL", "claude-haiku-4-5-20251001")
     )
     max_tokens: int = 4096
     camera: CameraConfig = field(default_factory=CameraConfig)
