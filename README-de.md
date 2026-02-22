@@ -10,6 +10,8 @@
 
 ---
 
+[![Demo-Video](https://img.youtube.com/vi/PQvQ6M6-Uys/0.jpg)](https://youtube.com/shorts/PQvQ6M6-Uys)
+
 familiar-ai ist ein KI-Begleiter, der in deinem Zuhause lebt.
 Richte es in wenigen Minuten ein. Keine Programmierkenntnisse erforderlich.
 
