@@ -592,7 +592,10 @@ class GeminiBackend:
             resp = await self._client.aio.models.generate_content(
                 model=self.model,
                 contents=prompt,
-                config=types.GenerateContentConfig(max_output_tokens=max_tokens),
+                config=types.GenerateContentConfig(
+                    max_output_tokens=max_tokens,
+                    thinking_config=types.ThinkingConfig(thinking_budget=0),
+                ),
             )
             return (resp.text or "").strip()
         except Exception as e:
