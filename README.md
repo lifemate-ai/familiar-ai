@@ -56,8 +56,17 @@ uv sync
 
 ```bash
 cp .env.example .env
-# Fill in your API keys and camera settings
 ```
+
+You'll need at minimum:
+
+| Variable | Description |
+|----------|-------------|
+| `ANTHROPIC_API_KEY` | Get one at [console.anthropic.com](https://console.anthropic.com/) |
+| `TAPO_CAMERA_HOST` | IP address of your Wi-Fi camera (if you have one) |
+| `ELEVENLABS_API_KEY` | For voice output (optional) |
+
+See [`.env.example`](./.env.example) for all options with descriptions.
 
 ### Create your familiar
 
