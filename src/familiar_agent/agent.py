@@ -164,14 +164,16 @@ class EmbodiedAgent:
             resp = await self.client.messages.create(
                 model=self.model,
                 max_tokens=200,
-                messages=[{
-                    "role": "user",
-                    "content": (
-                        f"次の探索レポートを読んで、最も気になった・不思議だった・"
-                        f"もっと詳しく見たいと思ったことを1文で教えて。"
-                        f"なければ「なし」と答えて。\n\n{exploration_result}"
-                    ),
-                }],
+                messages=[
+                    {
+                        "role": "user",
+                        "content": (
+                            f"次の探索レポートを読んで、最も気になった・不思議だった・"
+                            f"もっと詳しく見たいと思ったことを1文で教えて。"
+                            f"なければ「なし」と答えて。\n\n{exploration_result}"
+                        ),
+                    }
+                ],
             )
             text = resp.content[0].text.strip() if resp.content else ""
             if text and text != "なし":
@@ -221,11 +223,18 @@ class EmbodiedAgent:
                 texts = [b.text for b in response.content if hasattr(b, "text")]
                 final_text = "\n".join(texts) if texts else "(no response)"
 
+                camera_used = any(
+                    isinstance(b, dict)
+                    and b.get("type") == "tool_use"
+                    and b.get("name") == "camera_capture"
+                    for msg in self.messages
+                    for b in (msg.get("content") if isinstance(msg.get("content"), list) else [])
+                )
                 if final_text and final_text != "(no response)":
                     await self._memory.save_async(final_text[:500], direction="観察")
 
-                # Extract curiosity target and update desire system
-                if desires is not None and final_text:
+                # Extract curiosity target only when camera was actually used
+                if desires is not None and final_text and camera_used:
                     curiosity = await self.extract_curiosity(final_text)
                     if curiosity:
                         desires.curiosity_target = curiosity
@@ -252,10 +261,12 @@ class EmbodiedAgent:
             break
 
         logger.warning("Reached max iterations (%d). Forcing final response.", MAX_ITERATIONS)
-        self.messages.append({
-            "role": "user",
-            "content": "Please summarize what you found and provide your final answer now.",
-        })
+        self.messages.append(
+            {
+                "role": "user",
+                "content": "Please summarize what you found and provide your final answer now.",
+            }
+        )
         final = await self.client.messages.create(
             model=self.model,
             max_tokens=self.config.max_tokens,
