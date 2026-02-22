@@ -86,4 +86,4 @@ familiar-ai was built with off-the-shelf hardware:
 
 ## License
 
-MIT
+[MIT](./LICENSE)
