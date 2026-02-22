@@ -21,7 +21,7 @@ jobs:
         with:
           version: "latest"
 
-      - name: Install anthropic
+      - name: Translate to all languages (ja / zh / fr / de)
         run: uvx --with anthropic python scripts/translate_readme.py
         env:
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
@@ -30,10 +30,17 @@ jobs:
         uses: peter-evans/create-pull-request@v6
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
-          commit-message: "docs: sync README-ja.md with README.md"
+          commit-message: "docs: sync translated READMEs with README.md"
           branch: auto/translate-readme
-          title: "docs: sync README-ja.md with README.md"
+          title: "docs: sync translated READMEs with README.md"
           body: |
-            Auto-generated translation of `README.md` → `README-ja.md` via Claude.
+            Auto-generated translations of `README.md` via Claude.
+
+            Updated files:
+            - `README-ja.md` (Japanese / 日本語)
+            - `README-zh.md` (Simplified Chinese / 简体中文)
+            - `README-fr.md` (French / Français)
+            - `README-de.md` (German / Deutsch)
+
             Please review before merging.
           labels: documentation
