@@ -259,6 +259,21 @@ _T: dict[str, dict[str, str]] = {
         "de": "Lukas",
         "en": "Alex",
     },
+    # Morning reconstruction — autobiographical self bridge
+    "morning_no_history": {
+        "ja": "[これは最初のセッション。過去の記憶はまだない。比較や昨日よりという表現は使わないこと。]",
+        "zh": "[这是第一次会话。还没有过去的记忆。不要使用与昨天相比这样的表达。]",
+        "fr": "[C'est la premiere session. Aucun souvenir passe pour l'instant. Ne pas utiliser de comparaisons avec hier.]",
+        "de": "[Dies ist die erste Sitzung. Es gibt noch keine vergangenen Erinnerungen. Keine Vergleiche mit gestern verwenden.]",
+        "en": "[This is the first session. No past memories yet. Do not use comparisons or expressions like 'more than yesterday'.]",
+    },
+    "morning_header": {
+        "ja": "[昨日からのうち — セッションをまたいで続く自分]:",
+        "zh": "[来自昨天的我——跨越会话延续的自我]：",
+        "fr": "[Moi depuis hier — le soi qui continue à travers les sessions] :",
+        "de": "[Ich von gestern — das Selbst, das über Sitzungen hinweg weiterbesteht]:",
+        "en": "[Me from yesterday — the self that continues across sessions]:",
+    },
 }
 
 

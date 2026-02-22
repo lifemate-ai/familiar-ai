@@ -319,9 +319,9 @@ class EmbodiedAgent:
 
         if not parts:
             # No history yet — make it explicit so the agent doesn't fabricate a past
-            return "[これは最初のセッション。過去の記憶はまだない。比較や「昨日より〜」という表現は使わないこと。]"
+            return _t("morning_no_history")
 
-        header = "[昨日からのうち — セッションをまたいで続く自分]:"
+        header = _t("morning_header")
         return header + "\n\n" + "\n\n".join(parts)
 
     async def _update_self_model(self, final_text: str, emotion: str) -> None:
