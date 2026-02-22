@@ -4,7 +4,10 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import re
 import time
+from datetime import datetime
+from pathlib import Path
 from typing import TYPE_CHECKING
 
 from textual.app import App, ComposeResult
@@ -20,6 +23,8 @@ logger = logging.getLogger(__name__)
 
 IDLE_CHECK_INTERVAL = 10.0
 DESIRE_COOLDOWN = 90.0
+
+_RICH_TAG_RE = re.compile(r"\[/?[^\[\]]*\]")
 
 CSS = """
 #log {
@@ -85,6 +90,20 @@ class FamiliarApp(App):
         self._last_interaction = time.time()
         self._agent_running = False
         self._current_text_buf = ""  # buffer for streaming text
+        self._log_path = self._open_log_file()
+
+    def _open_log_file(self) -> Path:
+        log_dir = Path.home() / ".cache" / "familiar-ai"
+        log_dir.mkdir(parents=True, exist_ok=True)
+        log_path = log_dir / "chat.log"
+        with log_path.open("a", encoding="utf-8") as f:
+            f.write(f"\n{'─' * 60}\n[{datetime.now():%Y-%m-%d %H:%M:%S}] セッション開始\n")
+        return log_path
+
+    def _append_log(self, line: str) -> None:
+        plain = _RICH_TAG_RE.sub("", line)
+        with self._log_path.open("a", encoding="utf-8") as f:
+            f.write(plain + "\n")
 
     def compose(self) -> ComposeResult:
         yield RichLog(id="log", highlight=False, markup=True, wrap=True)
@@ -98,7 +117,9 @@ class FamiliarApp(App):
 
     def on_mount(self) -> None:
         self.query_one("#input-bar", Input).focus()
-        self._log_system("familiar-ai 起動。/quit で終了、Ctrl+L で履歴クリア。")
+        self._log_system(
+            f"familiar-ai 起動。/quit で終了、Ctrl+L で履歴クリア。ログ: {self._log_path}"
+        )
         self.set_interval(IDLE_CHECK_INTERVAL, self._desire_tick)
         self.run_worker(self._process_queue(), exclusive=False)
 
@@ -110,6 +131,7 @@ class FamiliarApp(App):
             log.write(f"[{style}]{text}[/{style}]")
         else:
             log.write(text)
+        self._append_log(text)
 
     def _log_system(self, text: str) -> None:
         self._log(f"[dim]{text}[/dim]")
@@ -164,7 +186,9 @@ class FamiliarApp(App):
         def _flush_stream() -> None:
             """Commit streamed text to the log and clear the stream widget."""
             if text_buf:
-                log.write(f"{name_tag} {''.join(text_buf)}")
+                content = "".join(text_buf)
+                log.write(f"{name_tag} {content}")
+                self._append_log(f"{self._agent_name} ▶ {content}")
                 text_buf.clear()
                 stream.update("")
 
