@@ -392,6 +392,7 @@ class EmbodiedAgent:
         self.messages.append(self.backend.make_user_message(user_input_with_ctx))
 
         camera_used = False
+        say_used = False
         final_text = "(no response)"
 
         for i in range(MAX_ITERATIONS):
@@ -409,6 +410,13 @@ class EmbodiedAgent:
 
             if result.stop_reason == "end_turn":
                 final_text = result.text or "(no response)"
+
+                # Auto-say: if the model wrote text but never called say(), speak it aloud.
+                if self._tts and not say_used and final_text and final_text != "(no response)":
+                    spoken = final_text[:150]
+                    if on_action:
+                        on_action("say", {"text": spoken})
+                    await self._tts.call("say", {"text": spoken})
 
                 if final_text and final_text != "(no response)":
                     # Save observation
@@ -446,6 +454,8 @@ class EmbodiedAgent:
                 for tc in result.tool_calls:
                     if tc.name == "see":
                         camera_used = True
+                    if tc.name == "say":
+                        say_used = True
                     logger.info("Tool call: %s(%s)", tc.name, tc.input)
                     if on_action:
                         on_action(tc.name, tc.input)
