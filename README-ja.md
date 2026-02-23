@@ -108,6 +108,7 @@ cp persona-template/en.md ME.md
 | Google Gemini | `gemini` | `gemini-2.5-flash` | [aistudio.google.com](https://aistudio.google.com) |
 | OpenAI | `openai` | `gpt-4o-mini` | [platform.openai.com](https://platform.openai.com) |
 | OpenAI互換（Ollama、vllmなど） | `openai` + `BASE_URL=` | — | — |
+| OpenRouter.ai（マルチプロバイダー） | `openai` + `BASE_URL=https://openrouter.ai/api/v1` | — | [openrouter.ai](https://openrouter.ai) |
 
 **Kimi K2.5 `.env` の例：**
 ```env
@@ -115,6 +116,25 @@ PLATFORM=kimi
 API_KEY=sk-...   # platform.moonshot.ai から取得
 AGENT_NAME=ユキネ
 ```
+
+**Google Gemini `.env` の例：**
+```env
+PLATFORM=gemini
+API_KEY=AIza...   # aistudio.google.com から取得
+MODEL=gemini-2.5-flash  # または gemini-2.5-pro
+AGENT_NAME=ユキネ
+```
+
+**OpenRouter.ai `.env` の例：**
+```env
+PLATFORM=openai
+BASE_URL=https://openrouter.ai/api/v1
+API_KEY=sk-or-...   # openrouter.ai から取得
+MODEL=mistralai/mistral-7b-instruct  # オプション
+AGENT_NAME=ユキネ
+```
+
+> **注意：** ローカル/NVIDIAモデルを無効化するには、`BASE_URL` を `http://localhost:11434/v1` のようなローカルエンドポイントに設定しないでください。クラウドプロバイダーを使用してください。
 
 ---
 

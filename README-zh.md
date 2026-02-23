@@ -105,6 +105,7 @@ cp persona-template/en.md ME.md
 | Google Gemini | `gemini` | `gemini-2.5-flash` | [aistudio.google.com](https://aistudio.google.com) |
 | OpenAI | `openai` | `gpt-4o-mini` | [platform.openai.com](https://platform.openai.com) |
 | OpenAI 兼容（Ollama、vllm 等） | `openai` + `BASE_URL=` | — | — |
+| OpenRouter.ai（多供应商） | `openai` + `BASE_URL=https://openrouter.ai/api/v1` | — | [openrouter.ai](https://openrouter.ai) |
 
 **Kimi K2.5 `.env` 示例：**
 ```env
@@ -112,6 +113,25 @@ PLATFORM=kimi
 API_KEY=sk-...   # 来自 platform.moonshot.ai
 AGENT_NAME=Yukine
 ```
+
+**Google Gemini `.env` 示例：**
+```env
+PLATFORM=gemini
+API_KEY=AIza...   # 来自 aistudio.google.com
+MODEL=gemini-2.5-flash  # 或 gemini-2.5-pro
+AGENT_NAME=Yukine
+```
+
+**OpenRouter.ai `.env` 示例：**
+```env
+PLATFORM=openai
+BASE_URL=https://openrouter.ai/api/v1
+API_KEY=sk-or-...   # 来自 openrouter.ai
+MODEL=mistralai/mistral-7b-instruct  # 可选
+AGENT_NAME=Yukine
+```
+
+> **注意：** 要禁用本地/NVIDIA 模型，请勿将 `BASE_URL` 设置为本地端点如 `http://localhost:11434/v1`。请使用云服务提供商。
 
 ---
 

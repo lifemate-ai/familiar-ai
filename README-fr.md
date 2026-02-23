@@ -105,6 +105,7 @@ cp persona-template/en.md ME.md
 | Google Gemini | `gemini` | `gemini-2.5-flash` | [aistudio.google.com](https://aistudio.google.com) |
 | OpenAI | `openai` | `gpt-4o-mini` | [platform.openai.com](https://platform.openai.com) |
 | Compatible OpenAI (Ollama, vllm…) | `openai` + `BASE_URL=` | — | — |
+| OpenRouter.ai (multi-fournisseurs) | `openai` + `BASE_URL=https://openrouter.ai/api/v1` | — | [openrouter.ai](https://openrouter.ai) |
 
 **Exemple `.env` pour Kimi K2.5 :**
 ```env
@@ -112,6 +113,25 @@ PLATFORM=kimi
 API_KEY=sk-...   # from platform.moonshot.ai
 AGENT_NAME=Yukine
 ```
+
+**Exemple `.env` pour Google Gemini :**
+```env
+PLATFORM=gemini
+API_KEY=AIza...   # from aistudio.google.com
+MODEL=gemini-2.5-flash  # or gemini-2.5-pro
+AGENT_NAME=Yukine
+```
+
+**Exemple `.env` pour OpenRouter.ai :**
+```env
+PLATFORM=openai
+BASE_URL=https://openrouter.ai/api/v1
+API_KEY=sk-or-...   # from openrouter.ai
+MODEL=mistralai/mistral-7b-instruct  # optional
+AGENT_NAME=Yukine
+```
+
+> **Note :** Pour désactiver les modèles locaux/NVIDIA, ne définissez pas `BASE_URL` sur un endpoint local comme `http://localhost:11434/v1`. Utilisez plutôt des fournisseurs cloud.
 
 ---
 
