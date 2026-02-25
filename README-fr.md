@@ -160,6 +160,16 @@ Lancez `./run.sh` et commencez à discuter. Ajoutez du matériel au fur et à me
    ```
 3. La voix joue via le haut-parleur intégré de la caméra via go2rtc (téléchargé automatiquement au premier lancement)
 
+**La lecture audio locale** (utilisée en repli ou sans haut-parleur caméra) nécessite **mpv** ou **ffplay**. mpv est recommandé :
+
+| OS | Installation |
+|----|-------------|
+| macOS | `brew install mpv` |
+| Ubuntu / Debian | `sudo apt install mpv` |
+| Windows | [mpv.io/installation](https://mpv.io/installation/) — télécharger et ajouter au PATH, **ou** installer ffmpeg : `winget install ffmpeg` |
+
+> Sans mpv ni ffplay, familiar-ai peut générer la parole mais ne peut pas la lire localement. La lecture via le haut-parleur de la caméra (go2rtc) n'est pas affectée.
+
 ---
 
 ## Interface textuelle

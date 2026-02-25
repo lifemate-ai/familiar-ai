@@ -160,6 +160,16 @@ API_KEY=sk-...
    ```
 3. 语音通过 go2rtc（首次运行时自动下载）通过摄像头内置扬声器播放
 
+**本地音频播放**（无摄像头扬声器时的回退方案）需要安装 **mpv** 或 **ffplay**，推荐使用 mpv：
+
+| 操作系统 | 安装方式 |
+|---------|---------|
+| macOS | `brew install mpv` |
+| Ubuntu / Debian | `sudo apt install mpv` |
+| Windows | 从 [mpv.io/installation](https://mpv.io/installation/) 下载并添加到 PATH，**或**安装 ffmpeg：`winget install ffmpeg` |
+
+> 未安装 mpv 或 ffplay 时，familiar-ai 仍可生成语音，但无法在本地播放。通过摄像头扬声器（go2rtc）播放不受影响。
+
 ---
 
 ## TUI

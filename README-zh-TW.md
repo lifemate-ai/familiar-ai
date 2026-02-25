@@ -160,6 +160,16 @@ API_KEY=sk-...
    ```
 3. 語音透過 go2rtc（首次執行時自動下載）透過攝影機內建喇叭播放
 
+**本機音訊播放**（無攝影機喇叭時的備用方案）需要安裝 **mpv** 或 **ffplay**，建議使用 mpv：
+
+| 作業系統 | 安裝方式 |
+|---------|---------|
+| macOS | `brew install mpv` |
+| Ubuntu / Debian | `sudo apt install mpv` |
+| Windows | 從 [mpv.io/installation](https://mpv.io/installation/) 下載並加入 PATH，**或**安裝 ffmpeg：`winget install ffmpeg` |
+
+> 未安裝 mpv 或 ffplay 時，familiar-ai 仍可生成語音，但無法在本機播放。透過攝影機喇叭（go2rtc）播放不受影響。
+
 ---
 
 ## TUI
