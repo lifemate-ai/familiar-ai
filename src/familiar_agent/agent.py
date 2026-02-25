@@ -10,6 +10,7 @@ from datetime import datetime
 
 from .backend import create_backend
 from .config import AgentConfig
+from .tape import check_plan_blocked, generate_plan, generate_replan
 from .tools.camera import CameraTool
 from .tools.memory import MemoryTool, ObservationMemory
 from .tools.tom import ToMTool
@@ -251,7 +252,11 @@ class EmbodiedAgent:
         return ""
 
     def _system_prompt(
-        self, feelings_ctx: str = "", morning_ctx: str = "", inner_voice: str = ""
+        self,
+        feelings_ctx: str = "",
+        morning_ctx: str = "",
+        inner_voice: str = "",
+        plan_ctx: str = "",
     ) -> str:
         me = self._load_me_md()
         intero = _interoception(self._started_at, self._turn_count)
@@ -271,6 +276,12 @@ class EmbodiedAgent:
         # Injected here so the model understands this is self-generated, not from the companion.
         if inner_voice:
             parts.append(f"{_t('inner_voice_label')}\n{inner_voice}\n{_t('inner_voice_directive')}")
+        # TAPE: upfront action plan to anchor the react loop (mechanism 1)
+        if plan_ctx:
+            parts.append(
+                "[Action plan for this turn — follow it unless you discover a good reason not to]\n"
+                + plan_ctx
+            )
 
         return "\n\n---\n\n".join(parts)
 
@@ -411,6 +422,15 @@ class EmbodiedAgent:
 
         self.messages.append(self.backend.make_user_message(user_input_with_ctx))
 
+        # TAPE mechanism 1: generate an upfront action plan to anchor the react loop.
+        # Skip for desire-driven turns (no explicit user request to plan around).
+        plan_ctx = ""
+        if not is_desire_turn and user_input.strip():
+            tool_names = [t["name"] for t in self._all_tool_defs]
+            plan_ctx = await generate_plan(self.backend, user_input, tool_names)
+            if plan_ctx:
+                logger.debug("TAPE plan: %s", plan_ctx[:80])
+
         camera_used = False
         say_used = False
         final_text = "(no response)"
@@ -420,7 +440,9 @@ class EmbodiedAgent:
             logger.debug("Agent iteration %d", i + 1)
 
             result, raw_content = await self.backend.stream_turn(
-                system=self._system_prompt(feelings_ctx, morning_ctx, inner_voice=inner_voice),
+                system=self._system_prompt(
+                    feelings_ctx, morning_ctx, inner_voice=inner_voice, plan_ctx=plan_ctx
+                ),
                 messages=self.messages,
                 tools=self._all_tool_defs,
                 max_tokens=self.config.max_tokens,
@@ -482,11 +504,28 @@ class EmbodiedAgent:
                     logger.info("Tool call: %s(%s)", tc.name, tc.input)
                     if on_action:
                         on_action(tc.name, tc.input)
+
                     try:
                         text, image = await self._execute_tool(tc.name, tc.input)
                     except Exception as e:
                         logger.warning("Tool %s failed: %s", tc.name, e)
                         text, image = f"Tool error: {e}", None
+
+                    # TAPE mechanism 3: adaptive replanning.
+                    # Trigger: NOT a technical error, but an observation that contradicts
+                    # the plan's assumptions (e.g., looked for the cat, it wasn't there).
+                    # Only meaningful when an upfront plan exists.
+                    if plan_ctx and await check_plan_blocked(
+                        self.backend, plan_ctx, tc.name, tc.input, text
+                    ):
+                        logger.info("TAPE: plan blocked after %s, replanning...", tc.name)
+                        replan = await generate_replan(
+                            self.backend, plan_ctx, tc.name, tc.input, text
+                        )
+                        if replan:
+                            text = f"{text}\n\n[ADAPTIVE REPLAN] {replan}"
+                            logger.info("TAPE replan: %s", replan[:80])
+
                     logger.info("Tool result: %s", text[:100])
                     collected.append((text, image))
 
@@ -538,7 +577,7 @@ class EmbodiedAgent:
             )
         )
         result, _ = await self.backend.stream_turn(
-            system=self._system_prompt(morning_ctx=morning_ctx),
+            system=self._system_prompt(morning_ctx=morning_ctx, plan_ctx=plan_ctx),
             messages=self.messages,
             tools=[],
             max_tokens=self.config.max_tokens,
