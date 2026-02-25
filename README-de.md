@@ -180,6 +180,16 @@ Starte `./run.sh` und fang an zu chatten. Füge Hardware später hinzu.
    ```
 3. Die Stimme wird über den integrierten Kameralautsprecher via go2rtc abgespielt (beim ersten Start automatisch heruntergeladen)
 
+**Lokale Audiowiedergabe** (Fallback oder ohne Kameralautsprecher) erfordert **mpv** oder **ffplay**. mpv wird empfohlen:
+
+| OS | Installation |
+|----|-------------|
+| macOS | `brew install mpv` |
+| Ubuntu / Debian | `sudo apt install mpv` |
+| Windows | [mpv.io/installation](https://mpv.io/installation/) — herunterladen und zu PATH hinzufügen, **oder** ffmpeg installieren: `winget install ffmpeg` |
+
+> Ohne mpv oder ffplay kann familiar-ai Sprache generieren, aber nicht lokal abspielen. Kameralautsprecher (go2rtc) ist davon nicht betroffen.
+
 ---
 
 ## TUI
