@@ -165,6 +165,16 @@ Run `./run.sh` and start chatting. Add hardware as you go.
    ```
 3. Voice plays through the camera's built-in speaker via go2rtc (auto-downloaded on first run)
 
+**Local audio playback** (used as fallback, or when no camera speaker is configured) requires **mpv** or **ffplay**. mpv is recommended:
+
+| OS | Install |
+|----|---------|
+| macOS | `brew install mpv` |
+| Ubuntu / Debian | `sudo apt install mpv` |
+| Windows | [mpv.io/installation](https://mpv.io/installation/) — download and add to PATH, **or** install ffmpeg: `winget install ffmpeg` |
+
+> Without mpv or ffplay, familiar-ai can still generate speech — it just won't play it locally. Voice via camera speaker (go2rtc) is unaffected.
+
 ---
 
 ## TUI

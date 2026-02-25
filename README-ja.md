@@ -163,6 +163,16 @@ API_KEY=sk-...
    ```
 3. 音声はgo2rtc経由でカメラのスピーカーから再生されます（初回実行時に自動ダウンロード）
 
+**ローカル音声再生**（カメラスピーカー未設定時のフォールバック）には **mpv** または **ffplay** が必要です。mpv推奨：
+
+| OS | インストール方法 |
+|----|----------------|
+| macOS | `brew install mpv` |
+| Ubuntu / Debian | `sudo apt install mpv` |
+| Windows | [mpv.io/installation](https://mpv.io/installation/) からダウンロードしてPATHに追加、**または** ffmpegをインストール：`winget install ffmpeg` |
+
+> mpv・ffplayがない場合でも音声生成自体は動作します。カメラスピーカー経由（go2rtc）の再生には影響しません。
+
 ---
 
 ## TUI
