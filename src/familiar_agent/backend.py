@@ -803,7 +803,15 @@ def create_backend(
         base_url = config.base_url
         if not os.environ.get("BASE_URL"):
             base_url = "https://api.openai.com/v1"
-        tools_mode = config.tools_mode if os.environ.get("TOOLS_MODE") else "native"
+        # Default to "prompt" for local/compatible endpoints; "native" only for real OpenAI.
+        # Local model servers (LM Studio, Ollama, vllm, etc.) often hang or timeout when
+        # they receive the `tools` parameter without proper support — causing Request timed out.
+        is_real_openai = "api.openai.com" in base_url
+        tools_mode = (
+            config.tools_mode
+            if os.environ.get("TOOLS_MODE")
+            else ("native" if is_real_openai else "prompt")
+        )
         logger.info(
             "Using OpenAI backend: %s @ %s (tools=%s)",
             model,
