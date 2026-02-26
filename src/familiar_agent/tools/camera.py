@@ -42,6 +42,7 @@ class CameraTool:
             if not os.path.isdir(wsdl_dir):
                 wsdl_dir = os.path.join(os.path.dirname(onvif_dir), "wsdl")
 
+            logger.debug("Connecting to ONVIF at %s:%d (user=%s)", self.host, self.port, self.username)
             self._cam = ONVIFCamera(
                 self.host,
                 self.port,
@@ -70,34 +71,66 @@ class CameraTool:
 
     async def capture(self) -> tuple[str | None, str | None]:
         """Capture image via RTSP. Returns (base64_jpeg, saved_path)."""
-        stream_url = f"rtsp://{self.username}:{self.password}@{self.host}:554/stream1"
+        # Build auth string: "user:pass@" or "user@" or ""
+        if self.username and self.password:
+            auth = f"{self.username}:{self.password}@"
+        elif self.username:
+            auth = f"{self.username}@"
+        else:
+            auth = ""
+        
+        # stream_url = f"rtsp://{self.username}:{self.password}@{self.host}:554/stream1"        
+        stream_url = f"rtsp://{auth}{self.host}:554/stream1"
+        
+        # Sanitize URL for logging (hide password)
+        log_url = stream_url
+        if self.password:
+            log_url = stream_url.replace(self.password, "****")
+        logger.debug("Attempting RTSP capture: %s", log_url)
+
         with tempfile.NamedTemporaryFile(suffix=".jpg", delete=False) as f:
             tmp_path = f.name
+        
         try:
-            proc = await asyncio.create_subprocess_exec(
+            # ffmpeg command optimized for lightning-fast single frame grab
+            cmd = [
                 "ffmpeg",
-                # Low-latency RTSP transport
-                "-rtsp_transport",
-                "tcp",
-                "-fflags",
-                "nobuffer",
-                "-flags",
-                "low_delay",
-                "-i",
-                stream_url,
-                # Grab first frame quickly
-                "-vframes",
-                "1",
-                "-q:v",
-                "3",
-                "-vf",
-                "scale=640:-1",
-                "-y",
-                tmp_path,
-                stdout=asyncio.subprocess.DEVNULL,
-                stderr=asyncio.subprocess.DEVNULL,
+                "-rtsp_transport", "tcp",
+                "-probesize", "32",          # Minimize analysis probe size
+                "-analyzeduration", "0",     # Skip stream analysis
+                "-fflags", "nobuffer",
+                "-flags", "low_delay",
+                "-i", stream_url,
+                "-an",                       # No audio
+                "-sn",                       # No subtitles
+                "-vframes", "1",             # Grab 1 frame
+                "-q:v", "3",
+                "-vf", "scale=640:-1",
+                "-y", tmp_path,
+            ]
+            
+            proc = await asyncio.create_subprocess_exec(
+                *cmd,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
             )
-            await asyncio.wait_for(proc.wait(), timeout=8.0)
+            
+            try:
+                stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=8.0)
+                if proc.returncode != 0:
+                    err_msg = stderr.decode(errors="replace").strip()
+                    logger.warning("ffmpeg capture failed (exit %d): %s", proc.returncode, err_msg)
+                else:
+                    logger.debug("ffmpeg capture successful")
+            except asyncio.TimeoutError:
+                logger.warning("RTSP capture timed out (8s)")
+                try:
+                    proc.kill()
+                    await proc.wait()
+                except Exception:
+                    pass
+                return None, None
+
             p = Path(tmp_path)
             if p.exists() and p.stat().st_size > 0:
                 data = p.read_bytes()
@@ -108,17 +141,18 @@ class CameraTool:
                 timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
                 save_path = CAPTURE_DIR / f"capture_{timestamp}.jpg"
                 save_path.write_bytes(data)
+                logger.info("Captured image saved to %s", save_path)
 
                 return b64, str(save_path)
-            return None, None
-        except asyncio.TimeoutError:
-            logger.warning("RTSP capture timed out")
+            else:
+                logger.warning("Capture failed: output file is empty or missing (%s)", tmp_path)
             return None, None
         except Exception as e:
-            logger.warning("Capture failed: %s", e)
+            logger.warning("Capture exception: %s", e, exc_info=True)
             return None, None
         finally:
-            Path(tmp_path).unlink(missing_ok=True)
+            if Path(tmp_path).exists():
+                Path(tmp_path).unlink(missing_ok=True)
 
     async def move(self, direction: str, degrees: int = 30) -> str:
         """Move camera using RelativeMove. direction: left/right/up/down."""
@@ -199,7 +233,7 @@ class CameraTool:
                 if save_path:
                     msg += f" Saved to {save_path}"
                 return msg, b64
-            return "Camera not available or capture failed.", None
+            return "Camera not available or capture failed. Check logs for ffmpeg errors.", None
         elif tool_name == "look":
             direction = tool_input["direction"]
             degrees = tool_input.get("degrees", 30)

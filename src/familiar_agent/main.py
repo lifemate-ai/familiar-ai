@@ -3,8 +3,10 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 import sys
 import time
+from pathlib import Path
 
 from .agent import EmbodiedAgent
 from .config import AgentConfig
@@ -13,6 +15,31 @@ from ._i18n import BANNER, _t
 
 IDLE_CHECK_INTERVAL = 10.0  # seconds between desire checks when idle
 DESIRE_COOLDOWN = 90.0  # seconds after last user interaction before desires can fire
+
+
+def setup_logging(debug: bool = False) -> None:
+    """Setup basic logging to a file ONLY (to keep the screen clean)."""
+    log_dir = Path.home() / ".cache" / "familiar-ai"
+    log_dir.mkdir(parents=True, exist_ok=True)
+    log_file = log_dir / "app.log"
+
+    level = logging.DEBUG if debug else logging.INFO
+    
+    # Root logger configuration - FileHandler only
+    logging.basicConfig(
+        level=level,
+        format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
+        handlers=[
+            logging.FileHandler(log_file, encoding="utf-8")
+        ]
+    )
+    # Reduce noise from 3rd party libs
+    logging.getLogger("httpx").setLevel(logging.WARNING)
+    logging.getLogger("anthropic").setLevel(logging.WARNING)
+    logging.getLogger("openai").setLevel(logging.WARNING)
+    logging.getLogger("google.genai").setLevel(logging.WARNING)
+
+    logging.info("Logging initialized. Level: %s, File: %s", logging.getLevelName(level), log_file)
 
 
 def _format_action(name: str, tool_input: dict) -> str:
@@ -204,6 +231,8 @@ async def _handle_user(
 def main() -> None:
     debug = "--debug" in sys.argv
     use_tui = "--no-tui" not in sys.argv
+
+    setup_logging(debug=debug)
 
     config = AgentConfig()
     if not config.api_key:

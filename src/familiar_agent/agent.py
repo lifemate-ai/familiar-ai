@@ -187,7 +187,8 @@ class EmbodiedAgent:
 
     def _init_tools(self) -> None:
         cam = self.config.camera
-        if cam.host and cam.password:
+        # Allow camera if host is present, even without password (e.g. local RTSP)
+        if cam.host:
             self._camera = CameraTool(cam.host, cam.username, cam.password, cam.port)
 
         mob = self.config.mobility
