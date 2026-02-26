@@ -12,8 +12,8 @@ from typing import TYPE_CHECKING
 
 from textual.app import App, ComposeResult
 from textual.binding import Binding
-from textual.suggester import SuggestFromList
 from textual.widgets import Footer, Input, RichLog, Static
+from textual_autocomplete import AutoComplete, DropdownItem, TargetState
 
 from ._i18n import _make_banner, _t
 
@@ -60,6 +60,24 @@ CSS = """
 """
 
 _SPINNER_FRAMES = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"]
+
+# Slash commands shown in the autocomplete dropdown
+_SLASH_COMMANDS: list[tuple[str, str]] = [
+    ("/transcribe", "🎙  Start / stop voice input (STT)"),
+    ("/clear", "🗑   Clear conversation history"),
+    ("/quit", "✕   Quit"),
+]
+
+
+def _slash_candidates(state: TargetState) -> list[DropdownItem]:
+    """Return matching commands only when input starts with '/'."""
+    text = state.text
+    if not text.startswith("/"):
+        return []
+    return [
+        DropdownItem(main=cmd, prefix=desc) for cmd, desc in _SLASH_COMMANDS if cmd.startswith(text)
+    ]
+
 
 ACTION_ICONS = {
     "see": "👀",
@@ -127,8 +145,8 @@ class FamiliarApp(App):
         yield Input(
             placeholder=_t("input_placeholder"),
             id="input-bar",
-            suggester=SuggestFromList(["/quit", "/clear", "/transcribe"], case_sensitive=False),
         )
+        yield AutoComplete("input-bar", candidates=_slash_candidates)
         yield Footer()
 
     def on_mount(self) -> None:
