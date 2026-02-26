@@ -193,6 +193,7 @@ async def repl(agent: EmbodiedAgent, desires: DesireSystem, debug: bool = False)
         pass
     finally:
         stdin_task.cancel()
+        await agent.close()
         print(f"\n{_t('repl_goodbye')}")
 
 
@@ -232,7 +233,79 @@ async def _handle_user(
         desires.satisfy("greet_companion")
 
 
+def _mcp_command(args: list[str]) -> None:
+    """Handle 'familiar mcp <subcommand>' — manage ~/.familiar-ai.json."""
+    import argparse
+    import json
+
+    from .mcp_client import _resolve_config_path
+
+    parser = argparse.ArgumentParser(prog="familiar mcp", add_help=True)
+    sub = parser.add_subparsers(dest="action", required=True)
+
+    p_add = sub.add_parser("add", help="Add an MCP server")
+    p_add.add_argument("name", help="Name for the server (e.g. filesystem)")
+    p_add.add_argument("command", help="Command to launch the server (e.g. npx)")
+    p_add.add_argument("server_args", nargs="*", metavar="ARG")
+    p_add.add_argument(
+        "-e",
+        "--env",
+        action="append",
+        metavar="KEY=VALUE",
+        default=[],
+        help="Set environment variable (repeatable)",
+    )
+
+    p_rm = sub.add_parser("remove", help="Remove an MCP server")
+    p_rm.add_argument("name")
+
+    sub.add_parser("list", help="List configured MCP servers")
+
+    parsed = parser.parse_args(args)
+    cfg_path = _resolve_config_path()
+
+    data: dict = json.loads(cfg_path.read_text()) if cfg_path.exists() else {}
+    servers: dict = data.setdefault("mcpServers", {})
+
+    if parsed.action == "add":
+        env: dict[str, str] = {}
+        for kv in parsed.env:
+            k, _, v = kv.partition("=")
+            if k:
+                env[k] = v
+        entry: dict = {"type": "stdio", "command": parsed.command, "args": parsed.server_args}
+        if env:
+            entry["env"] = env
+        servers[parsed.name] = entry
+        cfg_path.write_text(json.dumps(data, indent=2, ensure_ascii=False) + "\n")
+        print(f"Added MCP server '{parsed.name}' → {cfg_path}")
+
+    elif parsed.action == "remove":
+        if parsed.name not in servers:
+            print(f"MCP server '{parsed.name}' not found in {cfg_path}")
+            sys.exit(1)
+        del servers[parsed.name]
+        cfg_path.write_text(json.dumps(data, indent=2, ensure_ascii=False) + "\n")
+        print(f"Removed MCP server '{parsed.name}'")
+
+    elif parsed.action == "list":
+        if not servers:
+            print(f"No MCP servers configured.  Config: {cfg_path}")
+            return
+        print(f"MCP servers  ({cfg_path})\n")
+        for name, cfg in servers.items():
+            cmd = cfg.get("command", "")
+            a = " ".join(str(x) for x in cfg.get("args", []))
+            env_keys = list((cfg.get("env") or {}).keys())
+            env_hint = f"  env:{','.join(env_keys)}" if env_keys else ""
+            print(f"  {name:<22} {cmd} {a}{env_hint}")
+
+
 def main() -> None:
+    if len(sys.argv) > 1 and sys.argv[1] == "mcp":
+        _mcp_command(sys.argv[2:])
+        return
+
     debug = "--debug" in sys.argv
     use_tui = "--no-tui" not in sys.argv
 

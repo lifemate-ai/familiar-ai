@@ -320,4 +320,5 @@ class FamiliarApp(App):
         self._log_system(_t("history_cleared"))
 
     async def action_quit(self) -> None:
+        await self.agent.close()
         self.exit()
