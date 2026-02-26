@@ -343,10 +343,16 @@ class FamiliarApp(App):
         """Worker: record until stop_event, transcribe, then submit as user input."""
         stream = self.query_one("#stream", Static)
         try:
-            # Wait for stop signal (in case toggle was pressed immediately)
-            await asyncio.sleep(0.1)
+            # Kick off recording as a background task so we can update the UI mid-way
+            record_task = asyncio.create_task(
+                self.agent.stt.record_and_transcribe(self._stop_recording)  # type: ignore[union-attr]
+            )
+            # Wait until the user presses Ctrl+M again (stop_event is set)
+            await self._stop_recording.wait()
+            # Recording has stopped — now transcribing
+            stream.remove_class("recording")
             stream.update("🔄 Transcribing…")
-            text = await self.agent.stt.record_and_transcribe(self._stop_recording)  # type: ignore[union-attr]
+            text = await record_task
             if text.strip():
                 self._log_user(text)
                 self._last_interaction = time.time()
