@@ -22,3 +22,6 @@ jobs:
 
       - name: Format check
         run: uvx ruff format --check .
+
+      - name: Type check
+        run: uv run --group dev mypy src/familiar_agent

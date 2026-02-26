@@ -136,7 +136,7 @@ class FamiliarApp(App):
 
     # ── logging helpers ────────────────────────────────────────────
 
-    def _log(self, text: str, style: str = "") -> None:
+    def _write_log(self, text: str, style: str = "") -> None:
         log = self.query_one("#log", RichLog)
         if style:
             log.write(f"[{style}]{text}[/{style}]")
@@ -145,14 +145,14 @@ class FamiliarApp(App):
         self._append_log(text)
 
     def _log_system(self, text: str) -> None:
-        self._log(f"[dim]{text}[/dim]")
+        self._write_log(f"[dim]{text}[/dim]")
 
     def _log_user(self, text: str) -> None:
-        self._log(f"[bold cyan]{self._companion_name} ▶[/bold cyan] {text}")
+        self._write_log(f"[bold cyan]{self._companion_name} ▶[/bold cyan] {text}")
 
     def _log_action(self, name: str, tool_input: dict) -> None:
         label = _format_action(name, tool_input)
-        self._log(f"[dim]{label}[/dim]")
+        self._write_log(f"[dim]{label}[/dim]")
 
     # ── input handling ─────────────────────────────────────────────
 
@@ -198,10 +198,12 @@ class FamiliarApp(App):
     async def _run_agent(self, user_input: str, inner_voice: str = "") -> None:
         self._agent_running = True
         self._current_text_buf = ""
+        start_time = time.time()
 
         log = self.query_one("#log", RichLog)
         stream = self.query_one("#stream", Static)
         text_buf: list[str] = []
+        action_counts: dict[str, int] = {}
 
         name_tag = f"[bold magenta]{self._agent_name} ▶[/bold magenta]"
 
@@ -229,7 +231,19 @@ class FamiliarApp(App):
                 text_buf.clear()
                 stream.update("")
 
+        def _log_turn_summary() -> None:
+            elapsed = time.time() - start_time
+            parts = [f"[dim]{elapsed:.1f}s[/dim]"]
+            for tool_name, icon in ACTION_ICONS.items():
+                count = action_counts.get(tool_name, 0)
+                if count:
+                    parts.append(f"[dim]{icon} ×{count}[/dim]")
+            summary = "  [dim]──[/dim] " + "  ".join(parts) + "  [dim]" + "─" * 20 + "[/dim]"
+            log.write(summary)
+            self._append_log(f"── {elapsed:.1f}s ──")
+
         def on_action(name: str, tool_input: dict) -> None:
+            action_counts[name] = action_counts.get(name, 0) + 1
             _stop_spinner()
             _flush_stream()
             label = _format_action(name, tool_input)
@@ -252,8 +266,9 @@ class FamiliarApp(App):
                 interrupt_queue=self._input_queue,
             )
             _flush_stream()
+            _log_turn_summary()
         except Exception as e:
-            self._log(f"[red]エラー: {e}[/red]")
+            self._write_log(f"[red]エラー: {e}[/red]")
         finally:
             _stop_spinner()
             stream.update("")
@@ -272,7 +287,10 @@ class FamiliarApp(App):
         if not prompt:
             return
 
-        desire_name, _ = self.desires.get_dominant()
+        dominant = self.desires.get_dominant()
+        if dominant is None:
+            return
+        desire_name, _ = dominant
         murmur = {
             "look_around": _t("desire_look_around"),
             "explore": _t("desire_explore"),
@@ -301,5 +319,5 @@ class FamiliarApp(App):
         self.agent.clear_history()
         self._log_system(_t("history_cleared"))
 
-    def action_quit(self) -> None:
+    async def action_quit(self) -> None:
         self.exit()
