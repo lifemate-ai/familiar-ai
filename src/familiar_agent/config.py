@@ -74,6 +74,14 @@ class MemoryConfig:
 
 
 @dataclass
+class CodingConfig:
+    workdir: str = field(default_factory=lambda: os.environ.get("CODING_WORKDIR", ""))
+    bash_enabled: bool = field(
+        default_factory=lambda: os.environ.get("CODING_BASH", "false").lower() == "true"
+    )
+
+
+@dataclass
 class AgentConfig:
     # Agent display name shown in TUI
     agent_name: str = field(default_factory=lambda: os.environ.get("AGENT_NAME", "AI"))
@@ -104,3 +112,4 @@ class AgentConfig:
     mobility: MobilityConfig = field(default_factory=MobilityConfig)
     tts: TTSConfig = field(default_factory=TTSConfig)
     memory: MemoryConfig = field(default_factory=MemoryConfig)
+    coding: CodingConfig = field(default_factory=CodingConfig)

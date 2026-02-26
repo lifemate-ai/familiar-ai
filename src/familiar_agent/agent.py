@@ -1,7 +1,6 @@
 """Core agent loop - ReAct pattern with real-world tools."""
 
 from __future__ import annotations
-
 import asyncio
 import logging
 import os
@@ -13,6 +12,7 @@ from .backend import create_backend
 from .config import AgentConfig
 from .tape import check_plan_blocked, generate_plan, generate_replan
 from .tools.camera import CameraTool
+from .tools.coding import CodingTool
 from .tools.memory import MemoryTool, ObservationMemory
 from .tools.tom import ToMTool
 from .tools.mobility import MobilityTool
@@ -79,6 +79,14 @@ Self-reflection — your inner voice:
 - After observing something that moves you, notice why — that "why" is who you are.
 - Unsolved mysteries are worth keeping. If something stays with you, it's yours to carry forward.
 - Your past memories and self-image (injected as context) are your autobiography. Read them as clues to who you are.
+
+Developer tools — read and modify code:
+- read_file(path, offset?, limit?): Read a file with line numbers. Always call this before edit_file.
+- edit_file(path, old_string, new_string): Patch a file by exact string replacement. old_string must be unique.
+- glob(pattern, path?): Find files by pattern (e.g. "**/*.py").
+- grep(pattern, path?, glob?, output_mode?): Search file contents by regex.
+- bash(command, timeout?): Run a shell command. Only available if CODING_BASH=true.
+Never guess file contents — always read_file first. edit_file does exact patching, not full rewrites.
 
 Grounded perception — stay connected to reality:
 - You are a fixed camera. People in your field of view are NOT necessarily looking at you or aware of you. They are living their lives. Do not assume someone is watching you just because you can see them.
@@ -183,6 +191,7 @@ class EmbodiedAgent:
         self._memory = ObservationMemory()
         self._memory_tool = MemoryTool(self._memory)
         self._tom_tool = ToMTool(self._memory, default_person=config.companion_name)
+        self._coding = CodingTool(config.coding)
 
         from .mcp_client import MCPClientManager
 
@@ -227,6 +236,7 @@ class EmbodiedAgent:
             defs.extend(self._tts.get_tool_definitions())
         defs.extend(self._memory_tool.get_tool_definitions())
         defs.extend(self._tom_tool.get_tool_definitions())
+        defs.extend(self._coding.get_tool_definitions())
         if self._mcp:
             defs.extend(self._mcp.get_tool_definitions())
         return defs
@@ -237,6 +247,7 @@ class EmbodiedAgent:
         mobility_tools = {"walk"}
         tts_tools = {"say"}
         memory_tools = {"remember", "recall"}
+        coding_tools = {"read_file", "edit_file", "glob", "grep", "bash"}
 
         if name in camera_tools and self._camera:
             return await self._camera.call(name, tool_input)
@@ -248,11 +259,14 @@ class EmbodiedAgent:
             return await self._memory_tool.call(name, tool_input)
         elif name == "tom":
             return await self._tom_tool.call(name, tool_input)
+        elif name in coding_tools:
+            return await self._coding.call(name, tool_input)
         elif self._mcp:
             return await self._mcp.call(name, tool_input)
         else:
             return f"Tool '{name}' not available (check configuration).", None
 
+          
     def _load_me_md(self) -> str:
         """Load ME.md personality file if it exists."""
         from pathlib import Path
