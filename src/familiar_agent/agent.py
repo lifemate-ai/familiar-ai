@@ -276,7 +276,6 @@ class EmbodiedAgent:
         else:
             return f"Tool '{name}' not available (check configuration).", None
 
-          
     def _load_me_md(self) -> str:
         """Load ME.md personality file if it exists."""
         from pathlib import Path
