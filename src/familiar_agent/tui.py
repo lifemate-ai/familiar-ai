@@ -91,7 +91,7 @@ class FamiliarApp(App):
     BINDINGS = [
         Binding("ctrl+c", "quit", _t("quit_label"), show=True),
         Binding("ctrl+l", "clear_history", _t("clear_label"), show=True),
-        Binding("ctrl+m", "toggle_listen", "🎙 Voice", show=True),
+        Binding("ctrl+t", "toggle_listen", "🎙 Voice", show=True),
     ]
 
     def __init__(self, agent: "EmbodiedAgent", desires: "DesireSystem") -> None:
@@ -127,7 +127,7 @@ class FamiliarApp(App):
         yield Input(
             placeholder=_t("input_placeholder"),
             id="input-bar",
-            suggester=SuggestFromList(["/quit", "/clear"], case_sensitive=False),
+            suggester=SuggestFromList(["/quit", "/clear", "/transcribe"], case_sensitive=False),
         )
         yield Footer()
 
@@ -175,6 +175,9 @@ class FamiliarApp(App):
         if text == "/clear":
             self.agent.clear_history()
             self._log_system(_t("history_cleared"))
+            return
+        if text == "/transcribe":
+            await self.action_toggle_listen()
             return
 
         self._log_user(text)
