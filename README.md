@@ -322,6 +322,29 @@ Make sure `ELEVENLABS_API_KEY` is set. Without it, voice is disabled and the age
 
 Curious about how it works? See [docs/technical.md](./docs/technical.md) for the research and design decisions behind familiar-ai — ReAct, SayCan, Reflexion, Voyager, the desire system, and more.
 
+---
+
+## Contributing
+
+familiar-ai is an open experiment. If any of this resonates with you — technically or philosophically — contributions are very welcome.
+
+**Good places to start:**
+
+| Area | What's needed |
+|------|---------------|
+| New hardware | Support for more cameras (RTSP, IP Webcam), microphones, actuators |
+| New tools | Web search, home automation, calendar, anything via MCP |
+| New backends | Any LLM or local model that fits the `stream_turn` interface |
+| Persona templates | ME.md templates for different languages and personalities |
+| Research | Better desire models, memory retrieval, theory-of-mind prompting |
+| Documentation | Tutorials, walkthroughs, translations |
+
+See [CONTRIBUTING.md](./CONTRIBUTING.md) for dev setup, code style, and PR guidelines.
+
+If you're unsure where to start, [open an issue](https://github.com/lifemate-ai/familiar-ai/issues) — happy to point you in the right direction.
+
+---
+
 ## License
 
 [MIT](./LICENSE)
