@@ -3,6 +3,11 @@
 Connects to external MCP servers and exposes their tools to the agent.
 Body-related tools (camera, TTS, mobility) stay as built-in; MCP is for everything else.
 
+Supported transports
+--------------------
+* **stdio** — launch a local subprocess (default)
+* **sse** — connect to an HTTP+SSE server
+
 Config file: ~/.familiar-ai.json  (same mcpServers format as Claude Code's ~/.claude.json)
 Override:    MCP_CONFIG=/path/to/config.json
 
@@ -13,6 +18,10 @@ Example config:
           "type": "stdio",
           "command": "npx",
           "args": ["-y", "@modelcontextprotocol/server-filesystem", "/home/user"]
+        },
+        "memory": {
+          "type": "sse",
+          "url": "http://localhost:3000/sse"
         }
       }
     }
@@ -54,7 +63,7 @@ def _load_servers(config_path: Path) -> dict[str, dict[str, Any]]:
 
 
 class MCPClientManager:
-    """Manages stdio MCP server connections for the duration of the agent session."""
+    """Manages MCP server connections (stdio and SSE) for the duration of the agent session."""
 
     def __init__(self, config_path: Path | None = None) -> None:
         self._config_path = config_path or _resolve_config_path()
@@ -70,6 +79,39 @@ class MCPClientManager:
     @property
     def is_started(self) -> bool:
         return self._started
+
+    async def _register_tools(self, name: str, session: Any) -> int:
+        """Register tools from a connected session. Returns count of registered tools."""
+        tools_result = await session.list_tools()
+        tools = tools_result.tools if hasattr(tools_result, "tools") else []
+        count = 0
+        for tool in tools:
+            tool_name: str = tool.name
+            if tool_name in self._tool_router:
+                existing = self._tool_router[tool_name]
+                logger.warning(
+                    "MCP tool name collision: '%s' provided by both '%s' and '%s'; '%s' wins",
+                    tool_name,
+                    existing,
+                    name,
+                    existing,
+                )
+                continue
+
+            self._tool_router[tool_name] = name
+            self._tool_defs.append(
+                {
+                    "name": tool_name,
+                    "description": tool.description or "",
+                    "input_schema": (
+                        tool.inputSchema
+                        if isinstance(tool.inputSchema, dict)
+                        else {"type": "object", "properties": {}}
+                    ),
+                }
+            )
+            count += 1
+        return count
 
     async def start(self) -> None:
         """Connect to all configured servers. Skips servers that fail to connect."""
@@ -90,59 +132,47 @@ class MCPClientManager:
         await self._exit_stack.__aenter__()
 
         for name, cfg in self._servers.items():
-            if cfg.get("type", "stdio") != "stdio":
-                logger.warning("MCP server '%s': only 'stdio' type is supported, skipping", name)
-                continue
-
-            command = cfg.get("command", "")
-            args: list[str] = cfg.get("args", [])
-            env: dict[str, str] | None = cfg.get("env") or None
-
-            if not command:
-                logger.warning("MCP server '%s': missing 'command', skipping", name)
-                continue
+            server_type = cfg.get("type", "stdio")
 
             try:
-                params = StdioServerParameters(command=command, args=args, env=env)
-                read, write = await self._exit_stack.enter_async_context(stdio_client(params))
-                session: Any = await self._exit_stack.enter_async_context(
-                    ClientSession(read, write)
-                )
-                await session.initialize()
+                if server_type == "stdio":
+                    command = cfg.get("command", "")
+                    args: list[str] = cfg.get("args", [])
+                    env: dict[str, str] | None = cfg.get("env") or None
 
-                tools_result = await session.list_tools()
-                tools = tools_result.tools if hasattr(tools_result, "tools") else []
-                self._sessions[name] = session
+                    if not command:
+                        logger.warning("MCP server '%s': missing 'command', skipping", name)
+                        continue
 
-                count = 0
-                for tool in tools:
-                    tool_name: str = tool.name
-                    if tool_name in self._tool_router:
-                        existing = self._tool_router[tool_name]
+                    params = StdioServerParameters(command=command, args=args, env=env)
+                    read, write = await self._exit_stack.enter_async_context(stdio_client(params))
+                    session: Any = await self._exit_stack.enter_async_context(
+                        ClientSession(read, write)
+                    )
+                    await session.initialize()
+
+                elif server_type == "sse":
+                    from mcp.client.sse import sse_client
+
+                    url = cfg.get("url", "")
+                    if not url:
                         logger.warning(
-                            "MCP tool name collision: '%s' provided by both '%s' and '%s';"
-                            " '%s' wins",
-                            tool_name,
-                            existing,
-                            name,
-                            existing,
+                            "MCP server '%s': missing 'url' for sse type, skipping", name
                         )
                         continue
 
-                    self._tool_router[tool_name] = name
-                    self._tool_defs.append(
-                        {
-                            "name": tool_name,
-                            "description": tool.description or "",
-                            "input_schema": (
-                                tool.inputSchema
-                                if isinstance(tool.inputSchema, dict)
-                                else {"type": "object", "properties": {}}
-                            ),
-                        }
-                    )
-                    count += 1
+                    read, write = await self._exit_stack.enter_async_context(sse_client(url=url))
+                    session = await self._exit_stack.enter_async_context(ClientSession(read, write))
+                    await session.initialize()
 
+                else:
+                    logger.warning(
+                        "MCP server '%s': unsupported type '%s', skipping", name, server_type
+                    )
+                    continue
+
+                self._sessions[name] = session
+                count = await self._register_tools(name, session)
                 logger.info("Connected to MCP server '%s' (%d tools)", name, count)
 
             except Exception as e:
