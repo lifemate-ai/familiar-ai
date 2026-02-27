@@ -10,6 +10,7 @@ from datetime import datetime
 
 from .backend import create_backend
 from .config import AgentConfig
+from .desires import detect_worry_signal
 from .tape import check_plan_blocked, generate_plan, generate_replan
 from .tools.camera import CameraTool
 from .tools.coding import CodingTool
@@ -532,6 +533,17 @@ class EmbodiedAgent:
 
                     # Update self-model when something actually moved us (Conway's working self)
                     await self._update_self_model(final_text, emotion)
+
+                    # Worry signal: detect concern-triggering content in user input.
+                    # Only during real conversation turns (not desire-driven turns).
+                    if desires is not None and not is_desire_turn and user_input:
+                        worry_boost = detect_worry_signal(user_input)
+                        if worry_boost > 0.0:
+                            desires.boost("worry_companion", worry_boost)
+                            logger.debug(
+                                "Worry signal detected (%.2f): boosting worry_companion",
+                                worry_boost,
+                            )
 
                 # Extract curiosity target only when camera was actually used
                 if desires is not None and final_text and camera_used:

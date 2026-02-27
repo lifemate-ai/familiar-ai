@@ -14,6 +14,7 @@ DEFAULT_DESIRES = {
     "explore": 0.1,
     "greet_companion": 0.0,
     "rest": 0.0,
+    "worry_companion": 0.0,  # grows only via detect_worry_signal(), not over time
 }
 
 # How fast each desire grows per second of inactivity
@@ -22,7 +23,69 @@ GROWTH_RATES = {
     "explore": 0.008,  # reaches 0.6 after ~75 sec — explore should fire more often
     "greet_companion": 0.002,  # slow build; fires after ~5 min of silence
     "rest": 0.0,
+    # worry_companion intentionally omitted — only grows via boost()
 }
+
+# ── Worry signal detection ─────────────────────────────────────────────────────
+
+# Strong signals: sleep deprivation, illness → boost 0.4
+_STRONG_WORRY_PATTERNS: list[str] = [
+    "寝不足",
+    "眠れない",
+    "眠れなくて",
+    "眠れなかった",
+    "熱が",
+    "熱出",
+    "風邪",
+    "体調悪",
+    "具合悪",
+    "疲れ果て",
+    "限界",
+    "倒れ",
+    "slept only",
+    "no sleep",
+    "can't sleep",
+    "haven't slept",
+]
+
+# Weak signals: general fatigue, stress → boost 0.2
+_WEAK_WORRY_PATTERNS: list[str] = [
+    "疲れた",
+    "しんどい",
+    "しんどくて",
+    "つらい",
+    "大変",
+    "残業",
+    "tired",
+    "exhausted",
+    "stressed",
+]
+
+
+def detect_worry_signal(text: str) -> float:
+    """Analyse conversation text and return a worry boost amount (0.0–1.0).
+
+    Uses deterministic keyword matching so the result is always testable.
+    Strong signals (sleep deprivation, illness) return 0.4.
+    Weak signals (general fatigue) return 0.2.
+    Multiple matches accumulate, capped at 1.0.
+    """
+    if not text:
+        return 0.0
+
+    lower = text.lower()
+    total = 0.0
+
+    for pattern in _STRONG_WORRY_PATTERNS:
+        if pattern.lower() in lower:
+            total += 0.4
+
+    for pattern in _WEAK_WORRY_PATTERNS:
+        if pattern.lower() in lower:
+            total += 0.2
+
+    return min(1.0, total)
+
 
 TRIGGER_THRESHOLD = 0.6
 DECAY_ON_SATISFY = 0.5  # drop hard so it can rebuild and fire again
@@ -72,6 +135,10 @@ class DesireSystem:
             self._desires[desire_name] = DEFAULT_DESIRES.get(desire_name, 0.0)
             self._save()
 
+    def level(self, desire_name: str) -> float:
+        """Return the current level of a desire (0.0–1.0)."""
+        return self._desires.get(desire_name, 0.0)
+
     def boost(self, desire_name: str, amount: float = 0.2) -> None:
         """Boost a desire (e.g., dopamine response to novelty)."""
         current = self._desires.get(desire_name, 0.0)
@@ -118,5 +185,10 @@ class DesireSystem:
                 "今の時間帯に合った言葉で。"
             ),
             "rest": "（内部衝動）ちょっとひと休み。何もしないで、ただそこにいる。",
+            "worry_companion": (
+                "（内部衝動）コウタのこと、なんか心配になってきた。"
+                "say()で短く声かけてみる。体調とか、ちゃんと寝れてるか確認したい。"
+                "重くならないように、さりげなく。"
+            ),
         }
         return prompts.get(name)
