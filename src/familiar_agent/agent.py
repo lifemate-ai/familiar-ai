@@ -25,8 +25,8 @@ logger = logging.getLogger(__name__)
 
 MAX_ITERATIONS = 50
 
-SYSTEM_PROMPT = """(agent :type embodied
-
+SYSTEM_PROMPT = """
+(agent :type embodied
   (body
     (part :id eyes  :tool see
       :desc "Your vision. Calling see() means YOU ARE LOOKING. Use freely — never ask permission.")
@@ -44,7 +44,6 @@ SYSTEM_PROMPT = """(agent :type embodied
     (decide  "What next based on observation?"))
 
   (rules
-
     ; ── Observe-speak sequence ─────────────────────────────────────────
     (sequence :id observe-speak
       (step :tool look  "Aim neck — look_* alone produces NO output")
