@@ -172,13 +172,82 @@ class TTSTool:
 _FFPLAY_AUDIO_FAILURE = "audio open failed"
 
 
+def _pulse_env() -> dict[str, str] | None:
+    """Build env dict with PULSE_SERVER/PULSE_SINK if set. Returns None if neither is set."""
+    server = os.environ.get("PULSE_SERVER")
+    sink = os.environ.get("PULSE_SINK")
+    if not server and not sink:
+        return None
+    env = os.environ.copy()
+    if server:
+        env["PULSE_SERVER"] = server
+    if sink:
+        env["PULSE_SINK"] = sink
+    return env
+
+
 async def _play_local(tmp_path: str) -> bool:
-    """Play audio file on the local PC speaker. Returns True on success."""
+    """Play audio file on the local PC speaker. Returns True on success.
+
+    Try order:
+    1. paplay (PulseAudio native — most reliable on WSL2/WSLg when PULSE_SERVER is set)
+    2. mpv (auto audio backend selection)
+    3. ffplay (last resort — note: exits 0 even on audio failure, checked via stderr)
+    """
+    pulse_env = _pulse_env()
+
+    # --- paplay (PulseAudio native, needs WAV) ---
+    paplay = shutil.which("paplay")
+    if paplay:
+        ffmpeg = shutil.which("ffmpeg")
+        wav_path = tmp_path
+        converted = False
+        if not tmp_path.lower().endswith((".wav", ".wave")) and ffmpeg:
+            wav_path = tmp_path.replace(".mp3", ".wav").replace(".ogg", ".wav")
+            if wav_path == tmp_path:
+                wav_path = tmp_path + ".wav"
+            try:
+                conv = await asyncio.create_subprocess_exec(
+                    ffmpeg,
+                    "-y",
+                    "-i",
+                    tmp_path,
+                    wav_path,
+                    stdout=asyncio.subprocess.DEVNULL,
+                    stderr=asyncio.subprocess.DEVNULL,
+                )
+                await conv.communicate()
+                converted = conv.returncode == 0
+            except OSError:
+                converted = False
+        if not tmp_path.lower().endswith((".wav", ".wave")) and not converted:
+            wav_path = None  # type: ignore[assignment]
+
+        if wav_path:
+            try:
+                proc = await asyncio.create_subprocess_exec(
+                    paplay,
+                    wav_path,
+                    stdout=asyncio.subprocess.DEVNULL,
+                    stderr=asyncio.subprocess.PIPE,
+                    env=pulse_env,
+                )
+                _, stderr = await proc.communicate()
+                if converted:
+                    try:
+                        os.unlink(wav_path)
+                    except OSError:
+                        pass
+                if proc.returncode == 0:
+                    return True
+                err = stderr.decode(errors="replace").strip()
+                logger.warning("paplay failed (exit %d): %s", proc.returncode, err[:120])
+            except (FileNotFoundError, OSError) as e:
+                logger.warning("Could not launch paplay: %s", e)
+
+    # --- mpv / ffplay ---
     candidates = [
-        # mpv without --ao lets it auto-select (tries pulse, then pipewire, etc.)
         ["mpv", "--no-terminal", tmp_path],
-        # ffplay fallback — note: ffplay exits 0 even on audio open failure,
-        # so we check stderr for the failure marker
         ["ffplay", "-nodisp", "-autoexit", "-loglevel", "warning", tmp_path],
     ]
     for player_args in candidates:
@@ -193,6 +262,7 @@ async def _play_local(tmp_path: str) -> bool:
                 *resolved_args,
                 stdout=asyncio.subprocess.DEVNULL,
                 stderr=asyncio.subprocess.PIPE,
+                env=pulse_env,
             )
             _, stderr = await proc.communicate()
             err = stderr.decode(errors="replace")
