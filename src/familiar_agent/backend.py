@@ -128,7 +128,7 @@ class AnthropicBackend:
         model: str,
         thinking_mode: str = "auto",
         thinking_budget: int = 10000,
-        fast_mode: bool = False,
+        thinking_effort: str = "high",
     ) -> None:
         import anthropic
 
@@ -136,36 +136,45 @@ class AnthropicBackend:
         self.model = model
         self.thinking_mode = thinking_mode
         self.thinking_budget = thinking_budget
-        self.fast_mode = fast_mode
+        self.thinking_effort = thinking_effort
 
     def _build_thinking_params(self) -> dict:
-        """Return thinking kwargs + beta headers for the Anthropic API call.
+        """Return thinking kwargs for the Anthropic API call.
+
+        Per official docs (https://platform.claude.com/docs/en/build-with-claude/adaptive-thinking):
+        - adaptive thinking: no beta header needed (GA feature since Opus/Sonnet 4.6)
+        - adaptive mode automatically enables interleaved thinking
+        - extended mode on Sonnet 4.6 needs interleaved-thinking-2025-05-14 beta for interleaved support
+        - extended mode on Opus 4.6 does NOT support interleaved thinking even with beta header
 
         Returns a dict that may contain:
-          - "thinking": the thinking config passed directly to the API
-          - "betas": list of beta header strings to send as anthropic-beta
+          - "thinking": thinking config
+          - "output_config": effort level (adaptive mode only)
+          - "betas": list of beta header strings (extended mode on Sonnet 4.6 only)
         """
         mode = self.thinking_mode
         if mode == "auto":
             mode = "adaptive" if _supports_adaptive_thinking(self.model) else "disabled"
 
-        betas: list[str] = []
-        if self.fast_mode:
-            betas.append("fast-mode-2026-02-01")
-
         if mode == "adaptive":
-            betas = ["adaptive-thinking-2026-01-28", "interleaved-thinking-2025-05-14"] + betas
-            return {"thinking": {"type": "adaptive"}, "betas": betas}
+            # No beta header required — adaptive thinking is GA on Opus 4.6 / Sonnet 4.6.
+            # Interleaved thinking is automatically enabled in adaptive mode.
+            params: dict = {"thinking": {"type": "adaptive"}}
+            if self.thinking_effort != "high":  # "high" is the default; skip if default
+                params["output_config"] = {"effort": self.thinking_effort}
+            return params
 
         if mode == "extended":
-            betas = ["interleaved-thinking-2025-05-14"] + betas
-            return {
-                "thinking": {"type": "enabled", "budget_tokens": self.thinking_budget},
-                "betas": betas,
-            }
+            # budget_tokens is deprecated on Opus 4.6 / Sonnet 4.6 but still accepted.
+            # interleaved-thinking-2025-05-14 beta enables interleaved thinking on Sonnet 4.6
+            # only (Opus 4.6 extended mode does not support interleaved thinking).
+            params = {"thinking": {"type": "enabled", "budget_tokens": self.thinking_budget}}
+            if "sonnet-4" in self.model:
+                params["betas"] = ["interleaved-thinking-2025-05-14"]
+            return params
 
         # disabled (or unknown)
-        return {"betas": betas}
+        return {}
 
     # ── message factories ─────────────────────────────────────────
 
@@ -244,14 +253,10 @@ class AnthropicBackend:
 
         thinking_params = self._build_thinking_params()
         betas = thinking_params.pop("betas", [])
-        extra_headers: dict[str, str] | None = (
-            {"anthropic-beta": ",".join(betas)} if betas else None
-        )
-        thinking_config: Any = thinking_params.get("thinking")
 
         sys_param = self._build_system_param(system)
-        # Build kwargs separately so we only pass 'thinking' / 'extra_headers' when needed
-        # (passing thinking=None or extra_headers=None are not valid Anthropic API arguments)
+        # Build kwargs separately so we only add keys when they have meaningful values.
+        # Passing thinking=None, output_config=None, or extra_headers=None are not valid.
         stream_kwargs: dict[str, Any] = {
             "model": self.model,
             "max_tokens": max_tokens,
@@ -259,10 +264,12 @@ class AnthropicBackend:
             "tools": cast(list[ToolParam], self._convert_tools(tools)),
             "messages": cast(list[MessageParam], self._flatten_messages(messages)),
         }
-        if extra_headers:
-            stream_kwargs["extra_headers"] = extra_headers
-        if thinking_config is not None:
-            stream_kwargs["thinking"] = thinking_config
+        if betas:
+            stream_kwargs["extra_headers"] = {"anthropic-beta": ",".join(betas)}
+        if "thinking" in thinking_params:
+            stream_kwargs["thinking"] = thinking_params["thinking"]
+        if "output_config" in thinking_params:
+            stream_kwargs["output_config"] = thinking_params["output_config"]
         async with self.client.messages.stream(**stream_kwargs) as stream:  # type: ignore[arg-type]
             async for chunk in stream.text_stream:
                 if on_text:
@@ -1110,5 +1117,5 @@ def create_backend(
         model=model,
         thinking_mode=config.thinking_mode,
         thinking_budget=config.thinking_budget,
-        fast_mode=config.fast_mode,
+        thinking_effort=config.thinking_effort,
     )

@@ -1,7 +1,10 @@
 """Tests for adaptive thinking and fast mode in AnthropicBackend.
 
-Tests follow TDD: these tests are written BEFORE implementation.
-All tests should FAIL until the implementation is added.
+Based on official Anthropic docs (https://platform.claude.com/docs/en/build-with-claude/adaptive-thinking):
+- adaptive thinking: NO beta header needed (GA feature on Opus/Sonnet 4.6)
+- adaptive mode automatically enables interleaved thinking
+- extended mode on Sonnet 4.6 needs interleaved-thinking-2025-05-14 for interleaved support
+- effort parameter via output_config (adaptive mode only)
 """
 
 from __future__ import annotations
@@ -10,7 +13,7 @@ import asyncio
 from unittest.mock import AsyncMock, MagicMock, patch
 
 
-# ── Module-level helper (not yet implemented) ──────────────────────────────
+# ── _supports_adaptive_thinking() ─────────────────────────────────────────
 
 
 class TestSupportsAdaptiveThinking:
@@ -59,7 +62,11 @@ class TestBuildThinkingParams:
     """AnthropicBackend._build_thinking_params()"""
 
     def _make_backend(
-        self, model: str, thinking_mode: str, thinking_budget: int = 10000, fast_mode: bool = False
+        self,
+        model: str,
+        thinking_mode: str,
+        thinking_budget: int = 10000,
+        thinking_effort: str = "high",
     ):
         from familiar_agent.backend import AnthropicBackend
 
@@ -69,43 +76,62 @@ class TestBuildThinkingParams:
                 model=model,
                 thinking_mode=thinking_mode,
                 thinking_budget=thinking_budget,
-                fast_mode=fast_mode,
+                thinking_effort=thinking_effort,
             )
 
-    def test_disabled_returns_no_thinking_key(self):
+    def test_disabled_returns_empty_dict(self):
         b = self._make_backend("claude-sonnet-4-6", "disabled")
         params = b._build_thinking_params()
-        assert "thinking" not in params
-
-    def test_disabled_betas_empty(self):
-        b = self._make_backend("claude-sonnet-4-6", "disabled")
-        params = b._build_thinking_params()
-        assert params.get("betas", []) == []
+        assert params == {}
 
     def test_adaptive_mode_thinking_type(self):
         b = self._make_backend("claude-sonnet-4-6", "adaptive")
         params = b._build_thinking_params()
         assert params["thinking"] == {"type": "adaptive"}
 
-    def test_adaptive_mode_betas_include_adaptive_header(self):
+    def test_adaptive_mode_no_beta_header_needed(self):
+        """Adaptive thinking is GA — no anthropic-beta header required."""
         b = self._make_backend("claude-sonnet-4-6", "adaptive")
         params = b._build_thinking_params()
-        assert "adaptive-thinking-2026-01-28" in params["betas"]
+        assert "betas" not in params
 
-    def test_adaptive_mode_betas_include_interleaved_header(self):
-        b = self._make_backend("claude-sonnet-4-6", "adaptive")
+    def test_adaptive_mode_default_effort_no_output_config(self):
+        """Default effort 'high' should NOT add output_config (it's the default)."""
+        b = self._make_backend("claude-sonnet-4-6", "adaptive", thinking_effort="high")
         params = b._build_thinking_params()
-        assert "interleaved-thinking-2025-05-14" in params["betas"]
+        assert "output_config" not in params
+
+    def test_adaptive_mode_medium_effort_adds_output_config(self):
+        b = self._make_backend("claude-sonnet-4-6", "adaptive", thinking_effort="medium")
+        params = b._build_thinking_params()
+        assert params["output_config"] == {"effort": "medium"}
+
+    def test_adaptive_mode_low_effort(self):
+        b = self._make_backend("claude-sonnet-4-6", "adaptive", thinking_effort="low")
+        params = b._build_thinking_params()
+        assert params["output_config"] == {"effort": "low"}
+
+    def test_adaptive_mode_max_effort(self):
+        b = self._make_backend("claude-opus-4-6", "adaptive", thinking_effort="max")
+        params = b._build_thinking_params()
+        assert params["output_config"] == {"effort": "max"}
 
     def test_extended_mode_thinking_type(self):
         b = self._make_backend("claude-sonnet-4-6", "extended", thinking_budget=5000)
         params = b._build_thinking_params()
         assert params["thinking"] == {"type": "enabled", "budget_tokens": 5000}
 
-    def test_extended_mode_betas_include_interleaved(self):
+    def test_extended_mode_sonnet4_includes_interleaved_beta(self):
+        """Interleaved thinking beta is needed for manual mode on Sonnet 4.6."""
         b = self._make_backend("claude-sonnet-4-6", "extended")
         params = b._build_thinking_params()
-        assert "interleaved-thinking-2025-05-14" in params["betas"]
+        assert "interleaved-thinking-2025-05-14" in params.get("betas", [])
+
+    def test_extended_mode_opus4_no_interleaved_beta(self):
+        """Opus 4.6 extended mode does NOT support interleaved thinking."""
+        b = self._make_backend("claude-opus-4-6", "extended")
+        params = b._build_thinking_params()
+        assert "betas" not in params
 
     def test_auto_mode_sonnet_4_becomes_adaptive(self):
         b = self._make_backend("claude-sonnet-4-6", "auto")
@@ -116,23 +142,6 @@ class TestBuildThinkingParams:
         b = self._make_backend("claude-haiku-4-5-20251001", "auto")
         params = b._build_thinking_params()
         assert "thinking" not in params
-
-    def test_fast_mode_adds_fast_mode_beta(self):
-        b = self._make_backend("claude-sonnet-4-6", "disabled", fast_mode=True)
-        params = b._build_thinking_params()
-        assert "fast-mode-2026-02-01" in params["betas"]
-
-    def test_adaptive_with_fast_mode_includes_both_betas(self):
-        b = self._make_backend("claude-sonnet-4-6", "adaptive", fast_mode=True)
-        params = b._build_thinking_params()
-        betas = params["betas"]
-        assert "adaptive-thinking-2026-01-28" in betas
-        assert "fast-mode-2026-02-01" in betas
-
-    def test_fast_mode_false_no_fast_mode_beta(self):
-        b = self._make_backend("claude-sonnet-4-6", "adaptive", fast_mode=False)
-        params = b._build_thinking_params()
-        assert "fast-mode-2026-02-01" not in params.get("betas", [])
 
 
 # ── stream_turn integration (mocked) ──────────────────────────────────────
@@ -169,17 +178,16 @@ class TestStreamTurnThinkingIntegration:
         del block.text
         return block
 
-    def _make_backend(self, model: str, thinking_mode: str, fast_mode: bool = False):
+    def _make_backend(self, model: str, thinking_mode: str, thinking_effort: str = "high"):
         from familiar_agent.backend import AnthropicBackend
 
         with patch("anthropic.AsyncAnthropic"):
-            b = AnthropicBackend(
+            return AnthropicBackend(
                 api_key="test-key",
                 model=model,
                 thinking_mode=thinking_mode,
-                fast_mode=fast_mode,
+                thinking_effort=thinking_effort,
             )
-        return b
 
     def _run(self, coro):
         return asyncio.get_event_loop().run_until_complete(coro)
@@ -202,7 +210,8 @@ class TestStreamTurnThinkingIntegration:
             assert "thinking" in kwargs
             assert kwargs["thinking"]["type"] == "adaptive"
 
-    def test_adaptive_thinking_passes_beta_header(self):
+    def test_adaptive_thinking_no_beta_header(self):
+        """GA feature — no anthropic-beta header should be sent."""
         backend = self._make_backend("claude-sonnet-4-6", "adaptive")
         mock_stream = self._make_stream_mock([self._text_block("hello")])
 
@@ -217,11 +226,9 @@ class TestStreamTurnThinkingIntegration:
                 )
             )
             _, kwargs = mock_call.call_args
-            assert "extra_headers" in kwargs
-            assert "anthropic-beta" in kwargs["extra_headers"]
-            assert "adaptive-thinking-2026-01-28" in kwargs["extra_headers"]["anthropic-beta"]
+            assert "extra_headers" not in kwargs
 
-    def test_disabled_no_extra_headers(self):
+    def test_disabled_no_thinking_kwarg(self):
         backend = self._make_backend("claude-haiku-4-5-20251001", "disabled")
         mock_stream = self._make_stream_mock([self._text_block("hello")])
 
@@ -237,7 +244,7 @@ class TestStreamTurnThinkingIntegration:
             )
             _, kwargs = mock_call.call_args
             assert "thinking" not in kwargs
-            assert kwargs.get("extra_headers", {}) == {}
+            assert "extra_headers" not in kwargs
 
     def test_thinking_blocks_excluded_from_text(self):
         """ThinkingBlocks in response.content must NOT appear in TurnResult.text."""
@@ -278,6 +285,23 @@ class TestStreamTurnThinkingIntegration:
         # raw_content must include both blocks (ThinkingBlock + TextBlock)
         assert len(raw) == 2
 
+    def test_effort_medium_passes_output_config(self):
+        backend = self._make_backend("claude-sonnet-4-6", "adaptive", thinking_effort="medium")
+        mock_stream = self._make_stream_mock([self._text_block("hello")])
+
+        with patch.object(backend.client.messages, "stream", return_value=mock_stream) as mock_call:
+            self._run(
+                backend.stream_turn(
+                    system="sys",
+                    messages=[],
+                    tools=[],
+                    max_tokens=1000,
+                    on_text=None,
+                )
+            )
+            _, kwargs = mock_call.call_args
+            assert kwargs.get("output_config") == {"effort": "medium"}
+
 
 # ── AgentConfig env-var reading ────────────────────────────────────────────
 
@@ -287,8 +311,8 @@ class TestAgentConfig:
 
     def test_thinking_mode_default_is_auto(self, monkeypatch):
         monkeypatch.delenv("THINKING_MODE", raising=False)
-        # reimport to pick up fresh env
         import importlib
+
         import familiar_agent.config as cfg_mod
 
         importlib.reload(cfg_mod)
@@ -300,6 +324,7 @@ class TestAgentConfig:
     def test_thinking_mode_env_adaptive(self, monkeypatch):
         monkeypatch.setenv("THINKING_MODE", "adaptive")
         import importlib
+
         import familiar_agent.config as cfg_mod
 
         importlib.reload(cfg_mod)
@@ -311,6 +336,7 @@ class TestAgentConfig:
     def test_thinking_budget_default(self, monkeypatch):
         monkeypatch.delenv("THINKING_BUDGET_TOKENS", raising=False)
         import importlib
+
         import familiar_agent.config as cfg_mod
 
         importlib.reload(cfg_mod)
@@ -322,6 +348,7 @@ class TestAgentConfig:
     def test_thinking_budget_custom(self, monkeypatch):
         monkeypatch.setenv("THINKING_BUDGET_TOKENS", "5000")
         import importlib
+
         import familiar_agent.config as cfg_mod
 
         importlib.reload(cfg_mod)
@@ -330,38 +357,41 @@ class TestAgentConfig:
         config = AgentConfig()
         assert config.thinking_budget == 5000
 
-    def test_fast_mode_default_false(self, monkeypatch):
-        monkeypatch.delenv("FAST_MODE", raising=False)
+    def test_thinking_effort_default_high(self, monkeypatch):
+        monkeypatch.delenv("THINKING_EFFORT", raising=False)
         import importlib
+
         import familiar_agent.config as cfg_mod
 
         importlib.reload(cfg_mod)
         from familiar_agent.config import AgentConfig
 
         config = AgentConfig()
-        assert config.fast_mode is False
+        assert config.thinking_effort == "high"
 
-    def test_fast_mode_true(self, monkeypatch):
-        monkeypatch.setenv("FAST_MODE", "true")
+    def test_thinking_effort_medium(self, monkeypatch):
+        monkeypatch.setenv("THINKING_EFFORT", "medium")
         import importlib
+
         import familiar_agent.config as cfg_mod
 
         importlib.reload(cfg_mod)
         from familiar_agent.config import AgentConfig
 
         config = AgentConfig()
-        assert config.fast_mode is True
+        assert config.thinking_effort == "medium"
 
-    def test_fast_mode_case_insensitive(self, monkeypatch):
-        monkeypatch.setenv("FAST_MODE", "True")
+    def test_thinking_effort_low(self, monkeypatch):
+        monkeypatch.setenv("THINKING_EFFORT", "low")
         import importlib
+
         import familiar_agent.config as cfg_mod
 
         importlib.reload(cfg_mod)
         from familiar_agent.config import AgentConfig
 
         config = AgentConfig()
-        assert config.fast_mode is True
+        assert config.thinking_effort == "low"
 
 
 # ── helpers ────────────────────────────────────────────────────────────────

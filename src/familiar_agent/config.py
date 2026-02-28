@@ -128,10 +128,9 @@ class AgentConfig:
         default_factory=lambda: int(os.environ.get("THINKING_BUDGET_TOKENS", "10000"))
     )
 
-    # Enable fast-mode-2026-02-01 beta header
-    fast_mode: bool = field(
-        default_factory=lambda: os.environ.get("FAST_MODE", "false").lower() == "true"
-    )
+    # Effort level for adaptive thinking: "high" (default) | "medium" | "low" | "max"
+    # "max" is Opus 4.6 only. Ignored unless THINKING_MODE=adaptive (or auto on supported models).
+    thinking_effort: str = field(default_factory=lambda: os.environ.get("THINKING_EFFORT", "high"))
 
     max_tokens: int = 4096
     camera: CameraConfig = field(default_factory=CameraConfig)
