@@ -92,6 +92,7 @@ cp .env.example .env
 | `CAMERA_HOST` | ONVIF/RTSP 摄像头的 IP 地址 |
 | `CAMERA_USER` / `CAMERA_PASS` | 摄像头凭证 |
 | `ELEVENLABS_API_KEY` | 用于语音输出 — [elevenlabs.io](https://elevenlabs.io/) |
+| `TTS_OUTPUT` | 音频输出位置：`local`（PC 扬声器，默认）\| `remote`（摄像头扬声器）\| `both`（两者同时） |
 
 ### 5. 创建你的伙伴
 
@@ -231,11 +232,17 @@ API_KEY=sk-...
    ELEVENLABS_API_KEY=sk_...
    ELEVENLABS_VOICE_ID=...   # 可选，省略则使用默认声音
    ```
-音频有两种播放方式：
+音频播放位置由 `TTS_OUTPUT` 控制：
+
+```env
+TTS_OUTPUT=local    # PC 扬声器（默认）
+TTS_OUTPUT=remote   # 仅摄像头扬声器
+TTS_OUTPUT=both     # 摄像头扬声器 + PC 扬声器同时播放
+```
 
 #### A) 摄像头扬声器（通过 go2rtc）
 
-若要通过摄像头内置扬声器播放，需手动安装 [go2rtc](https://github.com/AlexxIT/go2rtc/releases)：
+设置 `TTS_OUTPUT=remote`（或 `both`）时使用。需手动安装 [go2rtc](https://github.com/AlexxIT/go2rtc/releases)：
 
 1. 从[发布页面](https://github.com/AlexxIT/go2rtc/releases)下载二进制文件：
    - Linux/macOS：`go2rtc_linux_amd64` / `go2rtc_darwin_amd64`
@@ -259,9 +266,9 @@ API_KEY=sk-...
 
 4. familiar-ai 启动时会自动启动 go2rtc。如果摄像头支持双向音频，声音将从摄像头扬声器输出。
 
-#### B) 本地 PC 扬声器（回退方案）
+#### B) 本地 PC 扬声器
 
-未配置 go2rtc 或摄像头不支持双向音频时，回退到 **mpv** 或 **ffplay**：
+默认方式（`TTS_OUTPUT=local`）。使用 **mpv** 或 **ffplay**。当 `TTS_OUTPUT=remote` 且 go2rtc 不可用时也作为回退方案。
 
 | 操作系统 | 安装方式 |
 |---------|---------|

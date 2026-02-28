@@ -96,6 +96,7 @@ cp .env.example .env
 | `CAMERA_HOST` | ONVIF/RTSPカメラのIPアドレス |
 | `CAMERA_USER` / `CAMERA_PASS` | カメラの認証情報 |
 | `ELEVENLABS_API_KEY` | 音声出力用 — [elevenlabs.io](https://elevenlabs.io/) |
+| `TTS_OUTPUT` | 音声出力先：`local`（PCスピーカー、デフォルト）\| `remote`（カメラスピーカー）\| `both`（両方同時） |
 
 ### 5. familiarを作る
 
@@ -236,11 +237,17 @@ API_KEY=sk-...
    ELEVENLABS_VOICE_ID=...   # オプション、省略時はデフォルト音声を使用
    ```
 
-音声の再生先は2通りあります：
+音声の再生先は `TTS_OUTPUT` で切り替えられます：
+
+```env
+TTS_OUTPUT=local    # PCスピーカー（デフォルト）
+TTS_OUTPUT=remote   # カメラスピーカーのみ
+TTS_OUTPUT=both     # カメラスピーカー + PCスピーカー同時再生
+```
 
 #### A) カメラのスピーカーから再生（go2rtc 経由）
 
-カメラ内蔵スピーカーから声を出したい場合は [go2rtc](https://github.com/AlexxIT/go2rtc/releases) のセットアップが必要です。
+`TTS_OUTPUT=remote`（または `both`）を設定した場合に使用します。[go2rtc](https://github.com/AlexxIT/go2rtc/releases) のセットアップが必要です：
 
 1. [リリースページ](https://github.com/AlexxIT/go2rtc/releases) からバイナリをダウンロード：
    - Linux/macOS: `go2rtc_linux_amd64` / `go2rtc_darwin_amd64`
@@ -265,9 +272,9 @@ API_KEY=sk-...
 
 4. familiar-ai 起動時に go2rtc が自動起動します。カメラが双方向音声（バックチャンネル）に対応していれば、カメラのスピーカーから声が出ます。
 
-#### B) PCのスピーカーから再生（フォールバック）
+#### B) PCのスピーカーから再生
 
-go2rtc が未設定、またはカメラがバックチャンネル非対応の場合、**mpv** または **ffplay** でPCから再生します。
+デフォルト（`TTS_OUTPUT=local`）。**mpv** または **ffplay** を使用します。`TTS_OUTPUT=remote` でgo2rtcが使えない場合のフォールバックにもなります。
 
 | OS | インストール方法 |
 |----|----------------|

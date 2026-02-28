@@ -57,7 +57,7 @@ def _ensure_go2rtc(api_url: str) -> None:
 
 
 class TTSTool:
-    """Text-to-speech using ElevenLabs, played via go2rtc camera speaker."""
+    """Text-to-speech using ElevenLabs, played via go2rtc camera speaker and/or local speaker."""
 
     def __init__(
         self,
@@ -65,20 +65,27 @@ class TTSTool:
         voice_id: str,
         go2rtc_url: str = "http://localhost:1984",
         go2rtc_stream: str = "tapo_cam",
+        output: str = "local",
     ) -> None:
         self.api_key = api_key
         self.voice_id = voice_id
         self.go2rtc_url = go2rtc_url
         self.go2rtc_stream = go2rtc_stream
+        # "local" = PC speaker only, "remote" = camera speaker only, "both" = both simultaneously
+        self.output = output
         # Ensure go2rtc is running at startup
         _ensure_go2rtc(self.go2rtc_url)
 
-    async def say(self, text: str, target: str = "myself") -> str:
+    async def say(self, text: str, output: str | None = None) -> str:
         """Speak text aloud via ElevenLabs.
 
-        target: "myself" = camera speaker (go2rtc), "speaker" = PC local speaker.
+        output: "local" = PC speaker, "remote" = camera speaker (go2rtc), "both" = both.
+                Defaults to self.output when not specified.
         """
         import aiohttp
+
+        if output is None:
+            output = self.output
 
         if len(text) > 200:
             text = text[:197] + "..."
@@ -106,46 +113,29 @@ class TTSTool:
             tmp_path = f.name
 
         try:
-            if target != "speaker":
+            played_via: list[str] = []
+
+            # --- Remote (camera speaker via go2rtc) ---
+            if output in ("remote", "both"):
                 ok, msg = await asyncio.to_thread(
                     _play_via_go2rtc, tmp_path, self.go2rtc_url, self.go2rtc_stream
                 )
                 if ok:
-                    return f"Said: {text[:50]}..."
-                logger.warning("go2rtc playback failed: %s — falling back to local", msg)
+                    played_via.append("camera")
+                else:
+                    logger.warning("go2rtc playback failed: %s", msg)
+                    if output == "remote":
+                        return f"TTS remote playback failed: {msg}"
 
-            # Local player (used directly for "speaker", or as fallback for "myself").
-            # Use shutil.which() to resolve the real executable path — required on Windows
-            # where asyncio.create_subprocess_exec does not search PATH reliably.
-            candidates = [
-                ["mpv", "--no-terminal", "--ao=pulse", tmp_path],
-                ["mpv", "--no-terminal", tmp_path],
-                ["ffplay", "-nodisp", "-autoexit", "-loglevel", "error", tmp_path],
-            ]
-            for player_args in candidates:
-                player_name = player_args[0]
-                player_path = shutil.which(player_name)
-                if player_path is None:
-                    logger.debug("Player not found in PATH, skipping: %s", player_name)
-                    continue
-                resolved_args = [player_path, *player_args[1:]]
-                try:
-                    proc = await asyncio.create_subprocess_exec(
-                        *resolved_args,
-                        stdout=asyncio.subprocess.DEVNULL,
-                        stderr=asyncio.subprocess.PIPE,
-                    )
-                    _, stderr = await proc.communicate()
-                    if proc.returncode == 0:
-                        return f"Said: {text[:50]}..."
-                    err = stderr.decode(errors="replace").strip()
-                    logger.warning(
-                        "%s failed (exit %d): %s", player_name, proc.returncode, err[:120]
-                    )
-                except (FileNotFoundError, OSError) as e:
-                    logger.warning("Could not launch %s: %s", player_name, e)
+            # --- Local (PC speaker) ---
+            if output in ("local", "both") or (output == "remote" and not played_via):
+                local_ok = await _play_local(tmp_path)
+                if local_ok:
+                    played_via.append("local")
 
-            return "TTS playback failed (no working audio player found: tried mpv, ffplay)"
+            if not played_via:
+                return "TTS playback failed (no working audio player found: tried mpv, ffplay)"
+            return f"Said: {text[:50]}... (via {', '.join(played_via)})"
         finally:
             try:
                 os.unlink(tmp_path)
@@ -157,8 +147,7 @@ class TTSTool:
             {
                 "name": "say",
                 "description": (
-                    "Speak text aloud through your camera speaker. "
-                    "Use this to communicate with people in the room."
+                    "Speak text aloud. Use this to communicate with people in the room."
                 ),
                 "input_schema": {
                     "type": "object",
@@ -175,9 +164,39 @@ class TTSTool:
 
     async def call(self, tool_name: str, tool_input: dict) -> tuple[str, None]:
         if tool_name == "say":
-            result = await self.say(tool_input["text"], "myself")
+            result = await self.say(tool_input["text"])
             return result, None
         return f"Unknown tool: {tool_name}", None
+
+
+async def _play_local(tmp_path: str) -> bool:
+    """Play audio file on the local PC speaker. Returns True on success."""
+    candidates = [
+        ["mpv", "--no-terminal", "--ao=pulse", tmp_path],
+        ["mpv", "--no-terminal", tmp_path],
+        ["ffplay", "-nodisp", "-autoexit", "-loglevel", "error", tmp_path],
+    ]
+    for player_args in candidates:
+        player_name = player_args[0]
+        player_path = shutil.which(player_name)
+        if player_path is None:
+            logger.debug("Player not found in PATH, skipping: %s", player_name)
+            continue
+        resolved_args = [player_path, *player_args[1:]]
+        try:
+            proc = await asyncio.create_subprocess_exec(
+                *resolved_args,
+                stdout=asyncio.subprocess.DEVNULL,
+                stderr=asyncio.subprocess.PIPE,
+            )
+            _, stderr = await proc.communicate()
+            if proc.returncode == 0:
+                return True
+            err = stderr.decode(errors="replace").strip()
+            logger.warning("%s failed (exit %d): %s", player_name, proc.returncode, err[:120])
+        except (FileNotFoundError, OSError) as e:
+            logger.warning("Could not launch %s: %s", player_name, e)
+    return False
 
 
 def _play_via_go2rtc(file_path: str, go2rtc_url: str, stream_name: str) -> tuple[bool, str]:

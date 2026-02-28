@@ -92,6 +92,7 @@ cp .env.example .env
 | `CAMERA_HOST` | Adresse IP de votre caméra ONVIF/RTSP |
 | `CAMERA_USER` / `CAMERA_PASS` | Identifiants de la caméra |
 | `ELEVENLABS_API_KEY` | Pour la sortie vocale — [elevenlabs.io](https://elevenlabs.io/) |
+| `TTS_OUTPUT` | Destination audio : `local` (haut-parleur PC, défaut) \| `remote` (haut-parleur caméra) \| `both` (les deux simultanément) |
 
 ### 5. Créer votre compagne
 
@@ -231,11 +232,17 @@ Lancez `./run.sh` et commencez à discuter. Ajoutez du matériel au fur et à me
    ELEVENLABS_API_KEY=sk_...
    ELEVENLABS_VOICE_ID=...   # optionnel, utilise la voix par défaut si omis
    ```
-Il y a deux destinations de lecture :
+La destination audio est contrôlée par `TTS_OUTPUT` :
+
+```env
+TTS_OUTPUT=local    # Haut-parleur PC (défaut)
+TTS_OUTPUT=remote   # Haut-parleur caméra uniquement
+TTS_OUTPUT=both     # Haut-parleur caméra + haut-parleur PC simultanément
+```
 
 #### A) Haut-parleur de la caméra (via go2rtc)
 
-Pour diffuser l'audio via le haut-parleur intégré de la caméra, installez [go2rtc](https://github.com/AlexxIT/go2rtc/releases) manuellement :
+Utilisez `TTS_OUTPUT=remote` (ou `both`). Installez [go2rtc](https://github.com/AlexxIT/go2rtc/releases) manuellement :
 
 1. Téléchargez le binaire depuis la [page des releases](https://github.com/AlexxIT/go2rtc/releases) :
    - Linux/macOS : `go2rtc_linux_amd64` / `go2rtc_darwin_amd64`
@@ -259,9 +266,9 @@ Pour diffuser l'audio via le haut-parleur intégré de la caméra, installez [go
 
 4. familiar-ai démarre go2rtc automatiquement. Si la caméra supporte l'audio bidirectionnel, la voix sort du haut-parleur de la caméra.
 
-#### B) Haut-parleur PC local (repli)
+#### B) Haut-parleur PC local
 
-Sans go2rtc ou si la caméra ne supporte pas le backchannel audio, familiar-ai utilise **mpv** ou **ffplay** :
+Mode par défaut (`TTS_OUTPUT=local`). Utilise **mpv** ou **ffplay**. Également utilisé en repli quand `TTS_OUTPUT=remote` et que go2rtc est indisponible.
 
 | OS | Installation |
 |----|-------------|

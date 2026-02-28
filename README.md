@@ -97,6 +97,7 @@ cp .env.example .env
 | `CAMERA_HOST` | IP address of your ONVIF/RTSP camera |
 | `CAMERA_USER` / `CAMERA_PASS` | Camera credentials |
 | `ELEVENLABS_API_KEY` | For voice output — [elevenlabs.io](https://elevenlabs.io/) |
+| `TTS_OUTPUT` | Where to play audio: `local` (PC speaker, default) \| `remote` (camera speaker) \| `both` |
 
 ### 5. Create your familiar
 
@@ -237,11 +238,17 @@ Run `./run.sh` and start chatting. Add hardware as you go.
    ELEVENLABS_VOICE_ID=...   # optional, uses default voice if omitted
    ```
 
-There are two playback destinations:
+There are two playback destinations, controlled by `TTS_OUTPUT`:
+
+```env
+TTS_OUTPUT=local    # PC speaker (default)
+TTS_OUTPUT=remote   # camera speaker only
+TTS_OUTPUT=both     # camera speaker + PC speaker simultaneously
+```
 
 #### A) Camera speaker (via go2rtc)
 
-To play audio through the camera's built-in speaker, set up [go2rtc](https://github.com/AlexxIT/go2rtc/releases) manually:
+Set `TTS_OUTPUT=remote` (or `both`). Requires [go2rtc](https://github.com/AlexxIT/go2rtc/releases):
 
 1. Download the binary from the [releases page](https://github.com/AlexxIT/go2rtc/releases):
    - Linux/macOS: `go2rtc_linux_amd64` / `go2rtc_darwin_amd64`
@@ -266,9 +273,9 @@ To play audio through the camera's built-in speaker, set up [go2rtc](https://git
 
 4. familiar-ai starts go2rtc automatically at launch. If your camera supports two-way audio (backchannel), voice plays from the camera speaker.
 
-#### B) Local PC speaker (fallback)
+#### B) Local PC speaker
 
-If go2rtc is not set up, or the camera does not support backchannel audio, familiar-ai falls back to **mpv** or **ffplay**:
+The default (`TTS_OUTPUT=local`). Uses **mpv** or **ffplay**. Also used as a fallback when `TTS_OUTPUT=remote` and go2rtc is unavailable.
 
 | OS | Install |
 |----|---------|
@@ -276,7 +283,7 @@ If go2rtc is not set up, or the camera does not support backchannel audio, famil
 | Ubuntu / Debian | `sudo apt install mpv` |
 | Windows | [mpv.io/installation](https://mpv.io/installation/) — download and add to PATH, **or** `winget install ffmpeg` |
 
-> If neither go2rtc nor a local player is available, speech is still generated — it just won't play.
+> If no audio player is available, speech is still generated — it just won't play.
 
 ---
 
