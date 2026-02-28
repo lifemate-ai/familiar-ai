@@ -98,6 +98,8 @@ cp .env.example .env
 | `CAMERA_USER` / `CAMERA_PASS` | Camera credentials |
 | `ELEVENLABS_API_KEY` | For voice output — [elevenlabs.io](https://elevenlabs.io/) |
 | `TTS_OUTPUT` | Where to play audio: `local` (PC speaker, default) \| `remote` (camera speaker) \| `both` |
+| `THINKING_MODE` | Anthropic only — `auto` (default) \| `adaptive` \| `extended` \| `disabled` |
+| `THINKING_EFFORT` | Adaptive thinking effort: `high` (default) \| `medium` \| `low` \| `max` (Opus 4.6 only) |
 
 ### 5. Create your familiar
 
@@ -275,12 +277,13 @@ Set `TTS_OUTPUT=remote` (or `both`). Requires [go2rtc](https://github.com/AlexxI
 
 #### B) Local PC speaker
 
-The default (`TTS_OUTPUT=local`). Uses **mpv** or **ffplay**. Also used as a fallback when `TTS_OUTPUT=remote` and go2rtc is unavailable.
+The default (`TTS_OUTPUT=local`). Tries players in order: **paplay** → **mpv** → **ffplay**. Also used as a fallback when `TTS_OUTPUT=remote` and go2rtc is unavailable.
 
 | OS | Install |
 |----|---------|
 | macOS | `brew install mpv` |
-| Ubuntu / Debian | `sudo apt install mpv` |
+| Ubuntu / Debian | `sudo apt install mpv` (or `paplay` via `pulseaudio-utils`) |
+| WSL2 / WSLg | `sudo apt install pulseaudio-utils` — set `PULSE_SERVER=unix:/mnt/wslg/PulseServer` in `.env` |
 | Windows | [mpv.io/installation](https://mpv.io/installation/) — download and add to PATH, **or** `winget install ffmpeg` |
 
 > If no audio player is available, speech is still generated — it just won't play.

@@ -93,6 +93,8 @@ cp .env.example .env
 | `CAMERA_USER` / `CAMERA_PASS` | Identifiants de la caméra |
 | `ELEVENLABS_API_KEY` | Pour la sortie vocale — [elevenlabs.io](https://elevenlabs.io/) |
 | `TTS_OUTPUT` | Destination audio : `local` (haut-parleur PC, défaut) \| `remote` (haut-parleur caméra) \| `both` (les deux simultanément) |
+| `THINKING_MODE` | Anthropic uniquement — `auto` (défaut) \| `adaptive` \| `extended` \| `disabled` |
+| `THINKING_EFFORT` | Profondeur de la réflexion adaptative : `high` (défaut) \| `medium` \| `low` \| `max` (Opus 4.6 uniquement) |
 
 ### 5. Créer votre compagne
 
@@ -268,12 +270,13 @@ Utilisez `TTS_OUTPUT=remote` (ou `both`). Installez [go2rtc](https://github.com/
 
 #### B) Haut-parleur PC local
 
-Mode par défaut (`TTS_OUTPUT=local`). Utilise **mpv** ou **ffplay**. Également utilisé en repli quand `TTS_OUTPUT=remote` et que go2rtc est indisponible.
+Mode par défaut (`TTS_OUTPUT=local`). Essaie dans l'ordre : **paplay** → **mpv** → **ffplay**. Également utilisé en repli quand `TTS_OUTPUT=remote` et que go2rtc est indisponible.
 
 | OS | Installation |
 |----|-------------|
 | macOS | `brew install mpv` |
-| Ubuntu / Debian | `sudo apt install mpv` |
+| Ubuntu / Debian | `sudo apt install mpv` (ou `paplay` via `pulseaudio-utils`) |
+| WSL2 / WSLg | `sudo apt install pulseaudio-utils` — définir `PULSE_SERVER=unix:/mnt/wslg/PulseServer` dans `.env` |
 | Windows | [mpv.io/installation](https://mpv.io/installation/) — télécharger et ajouter au PATH, **ou** `winget install ffmpeg` |
 
 > Sans go2rtc ni lecteur local, la génération vocale (appel API ElevenLabs) fonctionne toujours — la lecture est simplement ignorée.

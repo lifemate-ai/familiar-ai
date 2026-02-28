@@ -97,6 +97,8 @@ cp .env.example .env
 | `CAMERA_USER` / `CAMERA_PASS` | カメラの認証情報 |
 | `ELEVENLABS_API_KEY` | 音声出力用 — [elevenlabs.io](https://elevenlabs.io/) |
 | `TTS_OUTPUT` | 音声出力先：`local`（PCスピーカー、デフォルト）\| `remote`（カメラスピーカー）\| `both`（両方同時） |
+| `THINKING_MODE` | Anthropic専用 — `auto`（デフォルト）\| `adaptive` \| `extended` \| `disabled` |
+| `THINKING_EFFORT` | Adaptive thinking の深度：`high`（デフォルト）\| `medium` \| `low` \| `max`（Opus 4.6のみ） |
 
 ### 5. familiarを作る
 
@@ -274,12 +276,13 @@ TTS_OUTPUT=both     # カメラスピーカー + PCスピーカー同時再生
 
 #### B) PCのスピーカーから再生
 
-デフォルト（`TTS_OUTPUT=local`）。**mpv** または **ffplay** を使用します。`TTS_OUTPUT=remote` でgo2rtcが使えない場合のフォールバックにもなります。
+デフォルト（`TTS_OUTPUT=local`）。**paplay** → **mpv** → **ffplay** の順で試みます。`TTS_OUTPUT=remote` でgo2rtcが使えない場合のフォールバックにもなります。
 
 | OS | インストール方法 |
 |----|----------------|
 | macOS | `brew install mpv` |
-| Ubuntu / Debian | `sudo apt install mpv` |
+| Ubuntu / Debian | `sudo apt install mpv`（または `pulseaudio-utils` で paplay）|
+| WSL2 / WSLg | `sudo apt install pulseaudio-utils` — `.env` に `PULSE_SERVER=unix:/mnt/wslg/PulseServer` を設定 |
 | Windows | [mpv.io/installation](https://mpv.io/installation/) からダウンロードしてPATHに追加、**または** `winget install ffmpeg` |
 
 > go2rtc・mpv・ffplay がいずれも未設定でも、音声生成自体（ElevenLabs API呼び出し）は動作します。再生がスキップされるだけです。
