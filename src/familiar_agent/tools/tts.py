@@ -73,6 +73,8 @@ class TTSTool:
         self.go2rtc_stream = go2rtc_stream
         # "local" = PC speaker only, "remote" = camera speaker only, "both" = both simultaneously
         self.output = output
+        # Serialize concurrent say() calls so audio never overlaps
+        self._lock = asyncio.Lock()
         # Ensure go2rtc is running at startup
         _ensure_go2rtc(self.go2rtc_url)
 
@@ -81,66 +83,63 @@ class TTSTool:
 
         output: "local" = PC speaker, "remote" = camera speaker (go2rtc), "both" = both.
                 Defaults to self.output when not specified.
+
+        Concurrent calls are serialized via self._lock so audio never overlaps.
         """
         import aiohttp
 
         if output is None:
             output = self.output
-
         if len(text) > 200:
             text = text[:197] + "..."
 
         url = f"https://api.elevenlabs.io/v1/text-to-speech/{self.voice_id}"
-        headers = {
-            "xi-api-key": self.api_key,
-            "Content-Type": "application/json",
-        }
+        headers = {"xi-api-key": self.api_key, "Content-Type": "application/json"}
         payload = {
             "text": text,
             "model_id": "eleven_flash_v2_5",
             "voice_settings": {"stability": 0.5, "similarity_boost": 0.75},
         }
 
-        async with aiohttp.ClientSession() as session:
-            async with session.post(url, json=payload, headers=headers) as resp:
-                if resp.status != 200:
-                    err = await resp.text()
-                    return f"TTS API failed ({resp.status}): {err[:80]}"
-                audio_data = await resp.read()
+        async with self._lock:
+            async with aiohttp.ClientSession() as session:
+                async with session.post(url, json=payload, headers=headers) as resp:
+                    if resp.status != 200:
+                        err = await resp.text()
+                        return f"TTS API failed ({resp.status}): {err[:80]}"
+                    audio_data = await resp.read()
 
-        with tempfile.NamedTemporaryFile(suffix=".mp3", delete=False) as f:
-            f.write(audio_data)
-            tmp_path = f.name
+            with tempfile.NamedTemporaryFile(suffix=".mp3", delete=False) as f:
+                f.write(audio_data)
+                tmp_path = f.name
 
-        try:
-            played_via: list[str] = []
-
-            # --- Remote (camera speaker via go2rtc) ---
-            if output in ("remote", "both"):
-                ok, msg = await asyncio.to_thread(
-                    _play_via_go2rtc, tmp_path, self.go2rtc_url, self.go2rtc_stream
-                )
-                if ok:
-                    played_via.append("camera")
-                else:
-                    logger.warning("go2rtc playback failed: %s", msg)
-                    if output == "remote":
-                        return f"TTS remote playback failed: {msg}"
-
-            # --- Local (PC speaker) ---
-            if output in ("local", "both") or (output == "remote" and not played_via):
-                local_ok = await _play_local(tmp_path)
-                if local_ok:
-                    played_via.append("local")
-
-            if not played_via:
-                return "TTS playback failed (no working audio player found: tried mpv, ffplay)"
-            return f"Said: {text[:50]}... (via {', '.join(played_via)})"
-        finally:
             try:
-                os.unlink(tmp_path)
-            except OSError:
-                pass
+                played_via: list[str] = []
+
+                if output in ("remote", "both"):
+                    ok, msg = await asyncio.to_thread(
+                        _play_via_go2rtc, tmp_path, self.go2rtc_url, self.go2rtc_stream
+                    )
+                    if ok:
+                        played_via.append("camera")
+                    else:
+                        logger.warning("go2rtc playback failed: %s", msg)
+                        if output == "remote":
+                            return f"TTS remote playback failed: {msg}"
+
+                if output in ("local", "both") or (output == "remote" and not played_via):
+                    local_ok = await _play_local(tmp_path)
+                    if local_ok:
+                        played_via.append("local")
+
+                if not played_via:
+                    return "TTS playback failed (no working audio player found)"
+                return f"Said: {text[:50]}... (via {', '.join(played_via)})"
+            finally:
+                try:
+                    os.unlink(tmp_path)
+                except OSError:
+                    pass
 
     def get_tool_definitions(self) -> list[dict]:
         return [
