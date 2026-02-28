@@ -119,6 +119,20 @@ class AgentConfig:
     )
     tools_mode: str = field(default_factory=lambda: os.environ.get("TOOLS_MODE", "prompt"))
 
+    # Thinking mode: "auto" | "adaptive" | "extended" | "disabled"
+    # "auto" = adaptive for claude-sonnet-4/opus-4, disabled for others
+    thinking_mode: str = field(default_factory=lambda: os.environ.get("THINKING_MODE", "auto"))
+
+    # Budget tokens for "extended" thinking mode (ignored in "adaptive" / "disabled")
+    thinking_budget: int = field(
+        default_factory=lambda: int(os.environ.get("THINKING_BUDGET_TOKENS", "10000"))
+    )
+
+    # Enable fast-mode-2026-02-01 beta header
+    fast_mode: bool = field(
+        default_factory=lambda: os.environ.get("FAST_MODE", "false").lower() == "true"
+    )
+
     max_tokens: int = 4096
     camera: CameraConfig = field(default_factory=CameraConfig)
     mobility: MobilityConfig = field(default_factory=MobilityConfig)
