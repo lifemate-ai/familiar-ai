@@ -197,6 +197,7 @@ class EmbodiedAgent:
         self._mobility: MobilityTool | None = None
         self._tts: TTSTool | None = None
         self._stt: STTTool | None = None
+        self._me_md: str = self._load_me_md()  # loaded once; restart to pick up changes
         self._memory = ObservationMemory()
         self._memory_tool = MemoryTool(self._memory)
         self._tom_tool = ToMTool(self._memory, default_person=config.companion_name)
@@ -305,33 +306,39 @@ class EmbodiedAgent:
         morning_ctx: str = "",
         inner_voice: str = "",
         plan_ctx: str = "",
-    ) -> str:
-        me = self._load_me_md()
-        intero = _interoception(self._started_at, self._turn_count)
-        base = SYSTEM_PROMPT.format(max_steps=MAX_ITERATIONS)
+    ) -> tuple[str, str]:
+        """Return (stable, variable) system prompt parts for prompt caching.
 
-        parts = []
-        if me:
-            parts.append(me)
-        parts.append(base)
-        parts.append(intero)
+        stable  — ME.md + core rules; never changes within a session.
+                  AnthropicBackend marks this block with cache_control.
+        variable — interoception, feelings, inner voice, plan; changes every turn.
+        """
+        base = SYSTEM_PROMPT.format(max_steps=MAX_ITERATIONS)
+        stable_parts = [p for p in [self._me_md, base] if p]
+        stable = "\n\n---\n\n".join(stable_parts)
+
+        intero = _interoception(self._started_at, self._turn_count)
+        variable_parts: list[str] = [intero]
         # Morning reconstruction takes precedence on first turn; otherwise use feelings
         if morning_ctx:
-            parts.append(morning_ctx)
+            variable_parts.append(morning_ctx)
         elif feelings_ctx:
-            parts.append(feelings_ctx)
+            variable_parts.append(feelings_ctx)
         # Inner voice: agent's own desire/impulse — NOT a user message.
         # Injected here so the model understands this is self-generated, not from the companion.
         if inner_voice:
-            parts.append(f"{_t('inner_voice_label')}\n{inner_voice}\n{_t('inner_voice_directive')}")
+            variable_parts.append(
+                f"{_t('inner_voice_label')}\n{inner_voice}\n{_t('inner_voice_directive')}"
+            )
         # TAPE: upfront action plan to anchor the react loop (mechanism 1)
         if plan_ctx:
-            parts.append(
+            variable_parts.append(
                 "[Action plan for this turn — follow it unless you discover a good reason not to]\n"
                 + plan_ctx
             )
 
-        return "\n\n---\n\n".join(parts)
+        variable = "\n\n---\n\n".join(variable_parts)
+        return stable, variable
 
     async def _infer_emotion(self, text: str) -> str:
         """Ask the LLM to label the emotion of a response. Returns label string."""

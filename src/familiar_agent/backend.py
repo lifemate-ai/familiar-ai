@@ -162,9 +162,30 @@ class AnthropicBackend:
                 flat.append(msg)
         return flat
 
+    @staticmethod
+    def _build_system_param(system: str | tuple[str, str]) -> str | list[dict]:
+        """Convert system prompt to Anthropic API format, adding cache_control when possible.
+
+        If system is a (stable, variable) tuple, the stable block gets
+        cache_control so it is reused across turns within the 5-minute window.
+        If system is a plain string (e.g. from tests or other callers), pass as-is.
+        """
+        if not isinstance(system, tuple):
+            return system
+        stable, variable = system
+        blocks: list[dict] = []
+        if stable:
+            blocks.append({"type": "text", "text": stable, "cache_control": {"type": "ephemeral"}})
+        if variable:
+            blocks.append({"type": "text", "text": variable})
+        # Degenerate: if only one block, return as plain string (no cache_control needed)
+        if len(blocks) == 1 and "cache_control" not in blocks[0]:
+            return blocks[0]["text"]
+        return blocks
+
     async def stream_turn(
         self,
-        system: str,
+        system: str | tuple[str, str],
         messages: list,
         tools: list[dict],
         max_tokens: int,
@@ -173,10 +194,11 @@ class AnthropicBackend:
         """Stream one agent turn. Returns (result, raw_content_for_assistant_message)."""
         from anthropic.types import MessageParam, ToolParam
 
+        sys_param = self._build_system_param(system)
         async with self.client.messages.stream(
             model=self.model,
             max_tokens=max_tokens,
-            system=system,
+            system=sys_param,  # type: ignore[arg-type]
             tools=cast(list[ToolParam], self._convert_tools(tools)),
             messages=cast(list[MessageParam], self._flatten_messages(messages)),
         ) as stream:
@@ -300,8 +322,15 @@ class OpenAICompatibleBackend:
             for t in tool_defs
         ]
 
-    def _flatten_messages(self, system: str, messages: list) -> list[dict]:
-        """Build flat OpenAI message list with system prepended."""
+    def _flatten_messages(self, system: str | tuple[str, str], messages: list) -> list[dict]:
+        """Build flat OpenAI message list with system prepended.
+
+        Accepts a (stable, variable) tuple from _system_prompt() and joins it
+        into a single system string — OpenAI-compatible APIs don't support
+        multi-block system prompts with cache_control.
+        """
+        if isinstance(system, tuple):
+            system = "\n\n---\n\n".join(s for s in system if s)
         flat: list[dict] = [{"role": "system", "content": system}]
         for msg in messages:
             if isinstance(msg, list):
@@ -312,15 +341,18 @@ class OpenAICompatibleBackend:
 
     async def stream_turn(
         self,
-        system: str,
+        system: str | tuple[str, str],
         messages: list,
         tools: list[dict],
         max_tokens: int,
         on_text: Callable[[str], None] | None,
     ) -> tuple[TurnResult, Any]:
+        sys_str: str = (
+            "\n\n---\n\n".join(s for s in system if s) if isinstance(system, tuple) else system
+        )
         if self.tools_mode == "prompt":
-            return await self._stream_turn_prompt(system, messages, tools, max_tokens, on_text)
-        return await self._stream_turn_native(system, messages, tools, max_tokens, on_text)
+            return await self._stream_turn_prompt(sys_str, messages, tools, max_tokens, on_text)
+        return await self._stream_turn_native(sys_str, messages, tools, max_tokens, on_text)
 
     def _build_tools_system(self, system: str, tools: list[dict]) -> str:
         return _build_tools_system(system, tools)
@@ -544,12 +576,14 @@ class KimiBackend:
 
     async def stream_turn(
         self,
-        system: str,
+        system: str | tuple[str, str],
         messages: list,
         tools: list[dict],
         max_tokens: int,
         on_text: Callable[[str], None] | None = None,
     ) -> tuple[TurnResult, Any]:
+        if isinstance(system, tuple):
+            system = "\n\n---\n\n".join(s for s in system if s)
         # Flatten nested lists (tool results are appended as lists by agent.py)
         flat_messages: list[dict] = [{"role": "system", "content": system}]
         for msg in messages:
@@ -734,12 +768,14 @@ class GeminiBackend:
 
     async def stream_turn(
         self,
-        system: str,
+        system: str | tuple[str, str],
         messages: list,
         tools: list[dict],
         max_tokens: int,
         on_text: Callable[[str], None] | None,
     ) -> tuple[TurnResult, Any]:
+        if isinstance(system, tuple):
+            system = "\n\n---\n\n".join(s for s in system if s)
         types = self._types
         config = types.GenerateContentConfig(
             system_instruction=system,
@@ -813,12 +849,13 @@ class CLIBackend:
     Config::
 
         PLATFORM=cli
-        MODEL=claude -p               # Claude Code (no separate API key needed)
-        MODEL=ollama run gemma3:27b   # any local model
-        MODEL=llm -m gpt-4o           # Simon Willison's llm CLI
+        MODEL=claude -p {}            # Claude Code — {} is replaced with the prompt
+        MODEL=ollama run gemma3:27b   # stdin-based (no {} needed)
+        MODEL=llm -m gpt-4o {}        # Simon Willison's llm CLI
 
-    The command receives the full serialised conversation on **stdin** and must
-    write its response to **stdout**.
+    If the command contains ``{}``, the serialised prompt is injected there as a
+    positional argument (good for ``claude -p`` which doesn't read stdin).
+    Otherwise the prompt is written to **stdin** (good for ``ollama run``).
     """
 
     def __init__(self, command: list[str]) -> None:
@@ -863,7 +900,9 @@ class CLIBackend:
         prefix = "User" if role == "user" else "Assistant"
         return f"{prefix}:\n{text}"
 
-    def _serialize(self, system: str, messages: list, tools: list[dict]) -> str:
+    def _serialize(self, system: str | tuple[str, str], messages: list, tools: list[dict]) -> str:
+        if isinstance(system, tuple):
+            system = "\n\n---\n\n".join(s for s in system if s)
         parts: list[str] = []
         augmented = _build_tools_system(system, tools)
         if augmented:
@@ -924,7 +963,7 @@ class CLIBackend:
 
     async def stream_turn(
         self,
-        system: str,
+        system: str | tuple[str, str],
         messages: list,
         tools: list[dict],
         max_tokens: int,
@@ -995,7 +1034,7 @@ def create_backend(
         logger.info("Using Kimi backend: %s", model)
         return KimiBackend(api_key=config.api_key, model=model)
     if config.platform == "cli":
-        raw_cmd = config.model.strip() if config.model else "claude -p"
+        raw_cmd = config.model.strip() if config.model else "claude -p {}"
         cmd = shlex.split(raw_cmd)
         logger.info("Using CLI backend: %s", " ".join(cmd))
         return CLIBackend(cmd)
