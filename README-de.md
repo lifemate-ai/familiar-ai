@@ -92,6 +92,7 @@ cp .env.example .env
 | `CAMERA_HOST` | IP-Adresse deiner ONVIF/RTSP-Kamera |
 | `CAMERA_USER` / `CAMERA_PASS` | Anmeldedaten der Kamera |
 | `ELEVENLABS_API_KEY` | Für Sprachausgabe — [elevenlabs.io](https://elevenlabs.io/) |
+| `TTS_OUTPUT` | Audioziel: `local` (PC-Lautsprecher, Standard) \| `remote` (Kameralautsprecher) \| `both` (beides gleichzeitig) |
 
 ### 5. Erstelle deinen Familiar
 
@@ -231,11 +232,17 @@ Starte `./run.sh` und fang an zu chatten. Füge Hardware später hinzu.
    ELEVENLABS_API_KEY=sk_...
    ELEVENLABS_VOICE_ID=...   # optional, verwendet Standardstimme wenn weggelassen
    ```
-Es gibt zwei Wiedergabeziele:
+Das Audioziel wird mit `TTS_OUTPUT` gesteuert:
+
+```env
+TTS_OUTPUT=local    # PC-Lautsprecher (Standard)
+TTS_OUTPUT=remote   # Nur Kameralautsprecher
+TTS_OUTPUT=both     # Kameralautsprecher + PC-Lautsprecher gleichzeitig
+```
 
 #### A) Kameralautsprecher (via go2rtc)
 
-Um Audio über den integrierten Kameralautsprecher abzuspielen, muss [go2rtc](https://github.com/AlexxIT/go2rtc/releases) manuell eingerichtet werden:
+Setze `TTS_OUTPUT=remote` (oder `both`). [go2rtc](https://github.com/AlexxIT/go2rtc/releases) muss manuell eingerichtet werden:
 
 1. Lade das Binary von der [Releases-Seite](https://github.com/AlexxIT/go2rtc/releases) herunter:
    - Linux/macOS: `go2rtc_linux_amd64` / `go2rtc_darwin_amd64`
@@ -259,9 +266,9 @@ Um Audio über den integrierten Kameralautsprecher abzuspielen, muss [go2rtc](ht
 
 4. familiar-ai startet go2rtc automatisch beim Start. Wenn die Kamera bidirektionales Audio (Backchannel) unterstützt, kommt die Stimme aus dem Kameralautsprecher.
 
-#### B) Lokaler PC-Lautsprecher (Fallback)
+#### B) Lokaler PC-Lautsprecher
 
-Ohne go2rtc oder wenn die Kamera kein Backchannel-Audio unterstützt, wird auf **mpv** oder **ffplay** zurückgefallen:
+Standard (`TTS_OUTPUT=local`). Verwendet **mpv** oder **ffplay**. Wird auch als Fallback genutzt, wenn `TTS_OUTPUT=remote` und go2rtc nicht verfügbar ist.
 
 | OS | Installation |
 |----|-------------|

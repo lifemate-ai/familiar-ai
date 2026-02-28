@@ -92,6 +92,7 @@ cp .env.example .env
 | `CAMERA_HOST` | ONVIF/RTSP 攝影機的 IP 位址 |
 | `CAMERA_USER` / `CAMERA_PASS` | 攝影機憑證 |
 | `ELEVENLABS_API_KEY` | 用於語音輸出 — [elevenlabs.io](https://elevenlabs.io/) |
+| `TTS_OUTPUT` | 音訊輸出位置：`local`（PC 喇叭，預設）\| `remote`（攝影機喇叭）\| `both`（兩者同時） |
 
 ### 5. 建立你的夥伴
 
@@ -231,11 +232,17 @@ API_KEY=sk-...
    ELEVENLABS_API_KEY=sk_...
    ELEVENLABS_VOICE_ID=...   # 可選，省略則使用預設聲音
    ```
-音訊有兩種播放方式：
+音訊播放位置由 `TTS_OUTPUT` 控制：
+
+```env
+TTS_OUTPUT=local    # PC 喇叭（預設）
+TTS_OUTPUT=remote   # 僅攝影機喇叭
+TTS_OUTPUT=both     # 攝影機喇叭 + PC 喇叭同時播放
+```
 
 #### A) 攝影機喇叭（透過 go2rtc）
 
-若要透過攝影機內建喇叭播放，需手動安裝 [go2rtc](https://github.com/AlexxIT/go2rtc/releases)：
+設定 `TTS_OUTPUT=remote`（或 `both`）時使用。需手動安裝 [go2rtc](https://github.com/AlexxIT/go2rtc/releases)：
 
 1. 從[發布頁面](https://github.com/AlexxIT/go2rtc/releases)下載二進位檔：
    - Linux/macOS：`go2rtc_linux_amd64` / `go2rtc_darwin_amd64`
@@ -259,9 +266,9 @@ API_KEY=sk-...
 
 4. familiar-ai 啟動時會自動啟動 go2rtc。若攝影機支援雙向音訊，聲音將從攝影機喇叭輸出。
 
-#### B) 本機 PC 喇叭（備用方案）
+#### B) 本機 PC 喇叭
 
-未設定 go2rtc 或攝影機不支援雙向音訊時，回退至 **mpv** 或 **ffplay**：
+預設方式（`TTS_OUTPUT=local`）。使用 **mpv** 或 **ffplay**。當 `TTS_OUTPUT=remote` 且 go2rtc 無法使用時也作為備用方案。
 
 | 作業系統 | 安裝方式 |
 |---------|---------|

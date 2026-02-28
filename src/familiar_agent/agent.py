@@ -329,7 +329,11 @@ class EmbodiedAgent:
         tts = self.config.tts
         if tts.elevenlabs_api_key:
             self._tts = TTSTool(
-                tts.elevenlabs_api_key, tts.voice_id, tts.go2rtc_url, tts.go2rtc_stream
+                tts.elevenlabs_api_key,
+                tts.voice_id,
+                tts.go2rtc_url,
+                tts.go2rtc_stream,
+                output=tts.output,
             )
 
         from .mcp_client import MCPClientManager, _resolve_config_path
