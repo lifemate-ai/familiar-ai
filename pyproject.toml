@@ -14,12 +14,13 @@ dependencies = [
     "openai-whisper",
     "sentence-transformers>=3.0.0",
     "numpy>=1.24.0",
-    "google-genai>=1.0.0",
+    "google-genai>=1.0",
     "textual>=8.0.0",
     "sounddevice>=0.5.5",
     "soundfile>=0.13.1",
     "textual-autocomplete>=4.0.6",
     "mcp>=1.0.0",
+    "google-generativeai>=0.8.6",
 ]
 
 [project.scripts]
