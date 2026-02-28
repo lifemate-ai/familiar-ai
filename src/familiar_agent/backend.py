@@ -43,6 +43,15 @@ _TOOL_CALL_RE = re.compile(r"<tool_call>(.*?)</tool_call>", re.DOTALL)
 
 logger = logging.getLogger(__name__)
 
+# ── Thinking support ───────────────────────────────────────────────────────
+
+_ADAPTIVE_THINKING_MODELS = ("sonnet-4", "opus-4")
+
+
+def _supports_adaptive_thinking(model: str) -> bool:
+    """Return True if the model supports adaptive thinking (Sonnet 4.x / Opus 4.x)."""
+    return any(m in model for m in _ADAPTIVE_THINKING_MODELS)
+
 
 # ── Shared helpers (used by OpenAICompatibleBackend and CLIBackend) ───────────
 
@@ -113,11 +122,59 @@ class TurnResult:
 class AnthropicBackend:
     """Backend using the official Anthropic SDK."""
 
-    def __init__(self, api_key: str, model: str) -> None:
+    def __init__(
+        self,
+        api_key: str,
+        model: str,
+        thinking_mode: str = "auto",
+        thinking_budget: int = 10000,
+        thinking_effort: str = "high",
+    ) -> None:
         import anthropic
 
         self.client = anthropic.AsyncAnthropic(api_key=api_key)
         self.model = model
+        self.thinking_mode = thinking_mode
+        self.thinking_budget = thinking_budget
+        self.thinking_effort = thinking_effort
+
+    def _build_thinking_params(self) -> dict:
+        """Return thinking kwargs for the Anthropic API call.
+
+        Per official docs (https://platform.claude.com/docs/en/build-with-claude/adaptive-thinking):
+        - adaptive thinking: no beta header needed (GA feature since Opus/Sonnet 4.6)
+        - adaptive mode automatically enables interleaved thinking
+        - extended mode on Sonnet 4.6 needs interleaved-thinking-2025-05-14 beta for interleaved support
+        - extended mode on Opus 4.6 does NOT support interleaved thinking even with beta header
+
+        Returns a dict that may contain:
+          - "thinking": thinking config
+          - "output_config": effort level (adaptive mode only)
+          - "betas": list of beta header strings (extended mode on Sonnet 4.6 only)
+        """
+        mode = self.thinking_mode
+        if mode == "auto":
+            mode = "adaptive" if _supports_adaptive_thinking(self.model) else "disabled"
+
+        if mode == "adaptive":
+            # No beta header required — adaptive thinking is GA on Opus 4.6 / Sonnet 4.6.
+            # Interleaved thinking is automatically enabled in adaptive mode.
+            params: dict = {"thinking": {"type": "adaptive"}}
+            if self.thinking_effort != "high":  # "high" is the default; skip if default
+                params["output_config"] = {"effort": self.thinking_effort}
+            return params
+
+        if mode == "extended":
+            # budget_tokens is deprecated on Opus 4.6 / Sonnet 4.6 but still accepted.
+            # interleaved-thinking-2025-05-14 beta enables interleaved thinking on Sonnet 4.6
+            # only (Opus 4.6 extended mode does not support interleaved thinking).
+            params = {"thinking": {"type": "enabled", "budget_tokens": self.thinking_budget}}
+            if "sonnet-4" in self.model:
+                params["betas"] = ["interleaved-thinking-2025-05-14"]
+            return params
+
+        # disabled (or unknown)
+        return {}
 
     # ── message factories ─────────────────────────────────────────
 
@@ -194,19 +251,32 @@ class AnthropicBackend:
         """Stream one agent turn. Returns (result, raw_content_for_assistant_message)."""
         from anthropic.types import MessageParam, ToolParam
 
+        thinking_params = self._build_thinking_params()
+        betas = thinking_params.pop("betas", [])
+
         sys_param = self._build_system_param(system)
-        async with self.client.messages.stream(
-            model=self.model,
-            max_tokens=max_tokens,
-            system=sys_param,  # type: ignore[arg-type]
-            tools=cast(list[ToolParam], self._convert_tools(tools)),
-            messages=cast(list[MessageParam], self._flatten_messages(messages)),
-        ) as stream:
+        # Build kwargs separately so we only add keys when they have meaningful values.
+        # Passing thinking=None, output_config=None, or extra_headers=None are not valid.
+        stream_kwargs: dict[str, Any] = {
+            "model": self.model,
+            "max_tokens": max_tokens,
+            "system": sys_param,
+            "tools": cast(list[ToolParam], self._convert_tools(tools)),
+            "messages": cast(list[MessageParam], self._flatten_messages(messages)),
+        }
+        if betas:
+            stream_kwargs["extra_headers"] = {"anthropic-beta": ",".join(betas)}
+        if "thinking" in thinking_params:
+            stream_kwargs["thinking"] = thinking_params["thinking"]
+        if "output_config" in thinking_params:
+            stream_kwargs["output_config"] = thinking_params["output_config"]
+        async with self.client.messages.stream(**stream_kwargs) as stream:  # type: ignore[arg-type]
             async for chunk in stream.text_stream:
                 if on_text:
                     on_text(chunk)
             response = await stream.get_final_message()
 
+        # ThinkingBlock has no .text attribute — hasattr check excludes it automatically
         text = "".join(b.text for b in response.content if hasattr(b, "text"))
         tool_calls = [
             ToolCall(id=b.id, name=b.name, input=b.input)
@@ -214,6 +284,8 @@ class AnthropicBackend:
             if b.type == "tool_use"
         ]
         stop = "end_turn" if response.stop_reason == "end_turn" else "tool_use"
+        # Return response.content (including ThinkingBlocks) so interleaved thinking
+        # tokens are round-tripped correctly in multi-turn conversations.
         return TurnResult(stop_reason=stop, text=text, tool_calls=tool_calls), response.content
 
     async def complete(self, prompt: str, max_tokens: int) -> str:
@@ -1040,4 +1112,10 @@ def create_backend(
         return CLIBackend(cmd)
     model = config.model or "claude-haiku-4-5-20251001"
     logger.info("Using Anthropic backend: %s", model)
-    return AnthropicBackend(api_key=config.api_key, model=model)
+    return AnthropicBackend(
+        api_key=config.api_key,
+        model=model,
+        thinking_mode=config.thinking_mode,
+        thinking_budget=config.thinking_budget,
+        thinking_effort=config.thinking_effort,
+    )

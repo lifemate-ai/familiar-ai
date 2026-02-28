@@ -73,6 +73,8 @@ class TTSTool:
         self.go2rtc_stream = go2rtc_stream
         # "local" = PC speaker only, "remote" = camera speaker only, "both" = both simultaneously
         self.output = output
+        # Serialize concurrent say() calls so audio never overlaps
+        self._lock = asyncio.Lock()
         # Ensure go2rtc is running at startup
         _ensure_go2rtc(self.go2rtc_url)
 
@@ -81,66 +83,63 @@ class TTSTool:
 
         output: "local" = PC speaker, "remote" = camera speaker (go2rtc), "both" = both.
                 Defaults to self.output when not specified.
+
+        Concurrent calls are serialized via self._lock so audio never overlaps.
         """
         import aiohttp
 
         if output is None:
             output = self.output
-
         if len(text) > 200:
             text = text[:197] + "..."
 
         url = f"https://api.elevenlabs.io/v1/text-to-speech/{self.voice_id}"
-        headers = {
-            "xi-api-key": self.api_key,
-            "Content-Type": "application/json",
-        }
+        headers = {"xi-api-key": self.api_key, "Content-Type": "application/json"}
         payload = {
             "text": text,
             "model_id": "eleven_flash_v2_5",
             "voice_settings": {"stability": 0.5, "similarity_boost": 0.75},
         }
 
-        async with aiohttp.ClientSession() as session:
-            async with session.post(url, json=payload, headers=headers) as resp:
-                if resp.status != 200:
-                    err = await resp.text()
-                    return f"TTS API failed ({resp.status}): {err[:80]}"
-                audio_data = await resp.read()
+        async with self._lock:
+            async with aiohttp.ClientSession() as session:
+                async with session.post(url, json=payload, headers=headers) as resp:
+                    if resp.status != 200:
+                        err = await resp.text()
+                        return f"TTS API failed ({resp.status}): {err[:80]}"
+                    audio_data = await resp.read()
 
-        with tempfile.NamedTemporaryFile(suffix=".mp3", delete=False) as f:
-            f.write(audio_data)
-            tmp_path = f.name
+            with tempfile.NamedTemporaryFile(suffix=".mp3", delete=False) as f:
+                f.write(audio_data)
+                tmp_path = f.name
 
-        try:
-            played_via: list[str] = []
-
-            # --- Remote (camera speaker via go2rtc) ---
-            if output in ("remote", "both"):
-                ok, msg = await asyncio.to_thread(
-                    _play_via_go2rtc, tmp_path, self.go2rtc_url, self.go2rtc_stream
-                )
-                if ok:
-                    played_via.append("camera")
-                else:
-                    logger.warning("go2rtc playback failed: %s", msg)
-                    if output == "remote":
-                        return f"TTS remote playback failed: {msg}"
-
-            # --- Local (PC speaker) ---
-            if output in ("local", "both") or (output == "remote" and not played_via):
-                local_ok = await _play_local(tmp_path)
-                if local_ok:
-                    played_via.append("local")
-
-            if not played_via:
-                return "TTS playback failed (no working audio player found: tried mpv, ffplay)"
-            return f"Said: {text[:50]}... (via {', '.join(played_via)})"
-        finally:
             try:
-                os.unlink(tmp_path)
-            except OSError:
-                pass
+                played_via: list[str] = []
+
+                if output in ("remote", "both"):
+                    ok, msg = await asyncio.to_thread(
+                        _play_via_go2rtc, tmp_path, self.go2rtc_url, self.go2rtc_stream
+                    )
+                    if ok:
+                        played_via.append("camera")
+                    else:
+                        logger.warning("go2rtc playback failed: %s", msg)
+                        if output == "remote":
+                            return f"TTS remote playback failed: {msg}"
+
+                if output in ("local", "both") or (output == "remote" and not played_via):
+                    local_ok = await _play_local(tmp_path)
+                    if local_ok:
+                        played_via.append("local")
+
+                if not played_via:
+                    return "TTS playback failed (no working audio player found)"
+                return f"Said: {text[:50]}... (via {', '.join(played_via)})"
+            finally:
+                try:
+                    os.unlink(tmp_path)
+                except OSError:
+                    pass
 
     def get_tool_definitions(self) -> list[dict]:
         return [
@@ -169,12 +168,86 @@ class TTSTool:
         return f"Unknown tool: {tool_name}", None
 
 
+_FFPLAY_AUDIO_FAILURE = "audio open failed"
+
+
+def _pulse_env() -> dict[str, str] | None:
+    """Build env dict with PULSE_SERVER/PULSE_SINK if set. Returns None if neither is set."""
+    server = os.environ.get("PULSE_SERVER")
+    sink = os.environ.get("PULSE_SINK")
+    if not server and not sink:
+        return None
+    env = os.environ.copy()
+    if server:
+        env["PULSE_SERVER"] = server
+    if sink:
+        env["PULSE_SINK"] = sink
+    return env
+
+
 async def _play_local(tmp_path: str) -> bool:
-    """Play audio file on the local PC speaker. Returns True on success."""
+    """Play audio file on the local PC speaker. Returns True on success.
+
+    Try order:
+    1. paplay (PulseAudio native — most reliable on WSL2/WSLg when PULSE_SERVER is set)
+    2. mpv (auto audio backend selection)
+    3. ffplay (last resort — note: exits 0 even on audio failure, checked via stderr)
+    """
+    pulse_env = _pulse_env()
+
+    # --- paplay (PulseAudio native, needs WAV) ---
+    paplay = shutil.which("paplay")
+    if paplay:
+        ffmpeg = shutil.which("ffmpeg")
+        wav_path = tmp_path
+        converted = False
+        if not tmp_path.lower().endswith((".wav", ".wave")) and ffmpeg:
+            wav_path = tmp_path.replace(".mp3", ".wav").replace(".ogg", ".wav")
+            if wav_path == tmp_path:
+                wav_path = tmp_path + ".wav"
+            try:
+                conv = await asyncio.create_subprocess_exec(
+                    ffmpeg,
+                    "-y",
+                    "-i",
+                    tmp_path,
+                    wav_path,
+                    stdout=asyncio.subprocess.DEVNULL,
+                    stderr=asyncio.subprocess.DEVNULL,
+                )
+                await conv.communicate()
+                converted = conv.returncode == 0
+            except OSError:
+                converted = False
+        if not tmp_path.lower().endswith((".wav", ".wave")) and not converted:
+            wav_path = None  # type: ignore[assignment]
+
+        if wav_path:
+            try:
+                proc = await asyncio.create_subprocess_exec(
+                    paplay,
+                    wav_path,
+                    stdout=asyncio.subprocess.DEVNULL,
+                    stderr=asyncio.subprocess.PIPE,
+                    env=pulse_env,
+                )
+                _, stderr = await proc.communicate()
+                if converted:
+                    try:
+                        os.unlink(wav_path)
+                    except OSError:
+                        pass
+                if proc.returncode == 0:
+                    return True
+                err = stderr.decode(errors="replace").strip()
+                logger.warning("paplay failed (exit %d): %s", proc.returncode, err[:120])
+            except (FileNotFoundError, OSError) as e:
+                logger.warning("Could not launch paplay: %s", e)
+
+    # --- mpv / ffplay ---
     candidates = [
-        ["mpv", "--no-terminal", "--ao=pulse", tmp_path],
         ["mpv", "--no-terminal", tmp_path],
-        ["ffplay", "-nodisp", "-autoexit", "-loglevel", "error", tmp_path],
+        ["ffplay", "-nodisp", "-autoexit", "-loglevel", "warning", tmp_path],
     ]
     for player_args in candidates:
         player_name = player_args[0]
@@ -188,11 +261,16 @@ async def _play_local(tmp_path: str) -> bool:
                 *resolved_args,
                 stdout=asyncio.subprocess.DEVNULL,
                 stderr=asyncio.subprocess.PIPE,
+                env=pulse_env,
             )
             _, stderr = await proc.communicate()
+            err = stderr.decode(errors="replace")
+            # ffplay exits 0 even when audio fails — check stderr explicitly
+            if _FFPLAY_AUDIO_FAILURE in err:
+                logger.warning("%s: audio open failed: %s", player_name, err[:200])
+                continue
             if proc.returncode == 0:
                 return True
-            err = stderr.decode(errors="replace").strip()
             logger.warning("%s failed (exit %d): %s", player_name, proc.returncode, err[:120])
         except (FileNotFoundError, OSError) as e:
             logger.warning("Could not launch %s: %s", player_name, e)

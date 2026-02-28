@@ -119,6 +119,19 @@ class AgentConfig:
     )
     tools_mode: str = field(default_factory=lambda: os.environ.get("TOOLS_MODE", "prompt"))
 
+    # Thinking mode: "auto" | "adaptive" | "extended" | "disabled"
+    # "auto" = adaptive for claude-sonnet-4/opus-4, disabled for others
+    thinking_mode: str = field(default_factory=lambda: os.environ.get("THINKING_MODE", "auto"))
+
+    # Budget tokens for "extended" thinking mode (ignored in "adaptive" / "disabled")
+    thinking_budget: int = field(
+        default_factory=lambda: int(os.environ.get("THINKING_BUDGET_TOKENS", "10000"))
+    )
+
+    # Effort level for adaptive thinking: "high" (default) | "medium" | "low" | "max"
+    # "max" is Opus 4.6 only. Ignored unless THINKING_MODE=adaptive (or auto on supported models).
+    thinking_effort: str = field(default_factory=lambda: os.environ.get("THINKING_EFFORT", "high"))
+
     max_tokens: int = 4096
     camera: CameraConfig = field(default_factory=CameraConfig)
     mobility: MobilityConfig = field(default_factory=MobilityConfig)
