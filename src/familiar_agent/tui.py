@@ -146,11 +146,12 @@ class FamiliarApp(App):
     def compose(self) -> ComposeResult:
         yield RichLog(id="log", highlight=False, markup=True, wrap=True)
         yield Static("", id="stream")
-        yield Input(
+        input_bar = Input(
             placeholder=_t("input_placeholder"),
             id="input-bar",
         )
-        yield AutoComplete("#input-bar", candidates=_slash_candidates)
+        yield input_bar
+        yield AutoComplete(input_bar, candidates=_slash_candidates)
         yield Footer()
 
     def on_mount(self) -> None:
