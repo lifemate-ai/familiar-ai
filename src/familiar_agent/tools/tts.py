@@ -169,12 +169,17 @@ class TTSTool:
         return f"Unknown tool: {tool_name}", None
 
 
+_FFPLAY_AUDIO_FAILURE = "audio open failed"
+
+
 async def _play_local(tmp_path: str) -> bool:
     """Play audio file on the local PC speaker. Returns True on success."""
     candidates = [
-        ["mpv", "--no-terminal", "--ao=pulse", tmp_path],
+        # mpv without --ao lets it auto-select (tries pulse, then pipewire, etc.)
         ["mpv", "--no-terminal", tmp_path],
-        ["ffplay", "-nodisp", "-autoexit", "-loglevel", "error", tmp_path],
+        # ffplay fallback — note: ffplay exits 0 even on audio open failure,
+        # so we check stderr for the failure marker
+        ["ffplay", "-nodisp", "-autoexit", "-loglevel", "warning", tmp_path],
     ]
     for player_args in candidates:
         player_name = player_args[0]
@@ -190,9 +195,13 @@ async def _play_local(tmp_path: str) -> bool:
                 stderr=asyncio.subprocess.PIPE,
             )
             _, stderr = await proc.communicate()
+            err = stderr.decode(errors="replace")
+            # ffplay exits 0 even when audio fails — check stderr explicitly
+            if _FFPLAY_AUDIO_FAILURE in err:
+                logger.warning("%s: audio open failed: %s", player_name, err[:200])
+                continue
             if proc.returncode == 0:
                 return True
-            err = stderr.decode(errors="replace").strip()
             logger.warning("%s failed (exit %d): %s", player_name, proc.returncode, err[:120])
         except (FileNotFoundError, OSError) as e:
             logger.warning("Could not launch %s: %s", player_name, e)
