@@ -93,6 +93,8 @@ cp .env.example .env
 | `CAMERA_USER` / `CAMERA_PASS` | Anmeldedaten der Kamera |
 | `ELEVENLABS_API_KEY` | Für Sprachausgabe — [elevenlabs.io](https://elevenlabs.io/) |
 | `TTS_OUTPUT` | Audioziel: `local` (PC-Lautsprecher, Standard) \| `remote` (Kameralautsprecher) \| `both` (beides gleichzeitig) |
+| `THINKING_MODE` | Nur Anthropic — `auto` (Standard) \| `adaptive` \| `extended` \| `disabled` |
+| `THINKING_EFFORT` | Tiefe des adaptiven Denkens: `high` (Standard) \| `medium` \| `low` \| `max` (nur Opus 4.6) |
 
 ### 5. Erstelle deinen Familiar
 
@@ -268,12 +270,13 @@ Setze `TTS_OUTPUT=remote` (oder `both`). [go2rtc](https://github.com/AlexxIT/go2
 
 #### B) Lokaler PC-Lautsprecher
 
-Standard (`TTS_OUTPUT=local`). Verwendet **mpv** oder **ffplay**. Wird auch als Fallback genutzt, wenn `TTS_OUTPUT=remote` und go2rtc nicht verfügbar ist.
+Standard (`TTS_OUTPUT=local`). Probiert der Reihe nach: **paplay** → **mpv** → **ffplay**. Wird auch als Fallback genutzt, wenn `TTS_OUTPUT=remote` und go2rtc nicht verfügbar ist.
 
 | OS | Installation |
 |----|-------------|
 | macOS | `brew install mpv` |
-| Ubuntu / Debian | `sudo apt install mpv` |
+| Ubuntu / Debian | `sudo apt install mpv` (oder `paplay` via `pulseaudio-utils`) |
+| WSL2 / WSLg | `sudo apt install pulseaudio-utils` — `PULSE_SERVER=unix:/mnt/wslg/PulseServer` in `.env` setzen |
 | Windows | [mpv.io/installation](https://mpv.io/installation/) — herunterladen und zu PATH hinzufügen, **oder** `winget install ffmpeg` |
 
 > Ohne go2rtc und lokalen Player funktioniert die Sprachgenerierung (ElevenLabs API) weiterhin — die Wiedergabe wird lediglich übersprungen.

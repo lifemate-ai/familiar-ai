@@ -93,6 +93,8 @@ cp .env.example .env
 | `CAMERA_USER` / `CAMERA_PASS` | 摄像头凭证 |
 | `ELEVENLABS_API_KEY` | 用于语音输出 — [elevenlabs.io](https://elevenlabs.io/) |
 | `TTS_OUTPUT` | 音频输出位置：`local`（PC 扬声器，默认）\| `remote`（摄像头扬声器）\| `both`（两者同时） |
+| `THINKING_MODE` | 仅 Anthropic — `auto`（默认）\| `adaptive` \| `extended` \| `disabled` |
+| `THINKING_EFFORT` | Adaptive thinking 深度：`high`（默认）\| `medium` \| `low` \| `max`（仅 Opus 4.6） |
 
 ### 5. 创建你的伙伴
 
@@ -268,12 +270,13 @@ TTS_OUTPUT=both     # 摄像头扬声器 + PC 扬声器同时播放
 
 #### B) 本地 PC 扬声器
 
-默认方式（`TTS_OUTPUT=local`）。使用 **mpv** 或 **ffplay**。当 `TTS_OUTPUT=remote` 且 go2rtc 不可用时也作为回退方案。
+默认方式（`TTS_OUTPUT=local`）。依次尝试 **paplay** → **mpv** → **ffplay**。当 `TTS_OUTPUT=remote` 且 go2rtc 不可用时也作为回退方案。
 
 | 操作系统 | 安装方式 |
 |---------|---------|
 | macOS | `brew install mpv` |
-| Ubuntu / Debian | `sudo apt install mpv` |
+| Ubuntu / Debian | `sudo apt install mpv`（或通过 `pulseaudio-utils` 使用 paplay）|
+| WSL2 / WSLg | `sudo apt install pulseaudio-utils` — 在 `.env` 中设置 `PULSE_SERVER=unix:/mnt/wslg/PulseServer` |
 | Windows | 从 [mpv.io/installation](https://mpv.io/installation/) 下载并添加到 PATH，**或** `winget install ffmpeg` |
 
 > 即使没有 go2rtc 或本地播放器，语音生成本身（ElevenLabs API 调用）仍可正常工作，只是不会播放。
