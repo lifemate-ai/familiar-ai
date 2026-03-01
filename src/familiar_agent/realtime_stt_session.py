@@ -21,6 +21,11 @@ import logging
 import os
 import time
 from collections.abc import Callable
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from .tools.realtime_stt import RealtimeSttClient
+    from .tools.mic import MicCapture
 
 logger = logging.getLogger(__name__)
 
@@ -55,11 +60,11 @@ class RealtimeSttSession:
 
     def __init__(self, api_key: str) -> None:
         self._api_key = api_key
-        self._stt_client = None
-        self._mic_capture = None
+        self._stt_client: RealtimeSttClient | None = None
+        self._mic_capture: MicCapture | None = None
         self._relay_task: asyncio.Task | None = None
         self._partial_task: asyncio.Task | None = None
-        self._committed_queue: asyncio.Queue[str] | None = None
+        self._committed_queue: asyncio.Queue[str | None] | None = None
 
         # Deduplication state
         self._last_text = ""
@@ -77,7 +82,7 @@ class RealtimeSttSession:
     async def start(
         self,
         loop: asyncio.AbstractEventLoop,
-        committed_queue: asyncio.Queue[str],
+        committed_queue: asyncio.Queue[str | None],
     ) -> None:
         """Connect the STT WebSocket and start microphone capture."""
         from .tools.realtime_stt import RealtimeSttClient  # noqa: PLC0415
@@ -120,6 +125,7 @@ class RealtimeSttSession:
 
     async def _committed_relay(self) -> None:
         assert self._stt_client is not None
+        assert self._stt_client.on_committed is not None
         assert self._committed_queue is not None
         while True:
             text = await self._stt_client.on_committed.get()
@@ -136,6 +142,7 @@ class RealtimeSttSession:
 
     async def _partial_relay(self) -> None:
         assert self._stt_client is not None
+        assert self._stt_client.on_partial is not None
         while True:
             text = await self._stt_client.on_partial.get()
             if self.on_partial:
