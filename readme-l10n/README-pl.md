@@ -1,4 +1,3 @@
-```markdown
 # familiar-ai 🐾
 
 **Sztuczna inteligencja, która żyje obok ciebie** — ma oczy, głos, nogi i pamięć.
@@ -376,4 +375,3 @@ Jeśli nie wiesz, od czego zacząć, [otwórz zgłoszenie](https://github.com/li
 ## Licencja
 
 [MIT](./LICENSE)
-```

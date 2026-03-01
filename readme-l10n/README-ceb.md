@@ -1,4 +1,3 @@
-```markdown
 # familiar-ai 🐾
 
 **Usa ka AI nga nagpuyo uban kanimo** — nga adunay mata, tingog, mga tiil, ug hinumduman.
@@ -377,4 +376,3 @@ Kung ikaw nagduha-duha kung asa magsugod, [ablihi ang usa ka isyu](https://githu
 ## Lisensya
 
 [MIT](./LICENSE)
-```

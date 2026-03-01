@@ -1,4 +1,3 @@
-```markdown
 # familiar-ai 🐾
 
 **AI, kuris gyvena šalia tavęs** — su akimis, balsu, kojomis ir atmintimi.
@@ -377,4 +376,3 @@ Jei nesate tikri, nuo ko pradėti, [atidaryk klausimą](https://github.com/lifem
 ## Licencija
 
 [MIT](./LICENSE)
-```

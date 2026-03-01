@@ -1,4 +1,3 @@
-```markdown
 # familiar-ai 🐾
 
 **Un'IA che vive accanto a te** — con occhi, voce, gambe e memoria.
@@ -377,4 +376,3 @@ Se non sei sicuro da dove iniziare, [apri un problema](https://github.com/lifema
 ## Licenza
 
 [MIT](./LICENSE)
-```

@@ -1,4 +1,3 @@
-```markdown
 # familiar-ai 🐾
 
 **Una IA que vive junto a ti** — con ojos, voz, piernas y memoria.
@@ -377,4 +376,3 @@ Si no estás seguro de por dónde empezar, [abre un problema](https://github.com
 ## Licencia
 
 [MIT](./LICENSE)
-```

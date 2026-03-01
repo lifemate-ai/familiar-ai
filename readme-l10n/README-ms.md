@@ -1,4 +1,3 @@
-```
 # familiar-ai 🐾
 
 **Satu AI yang hidup bersama anda** — dengan mata, suara, kaki, dan ingatan.
@@ -377,4 +376,3 @@ Jika anda tidak pasti di mana untuk bermula, [buka isu](https://github.com/lifem
 ## Lesen
 
 [MIT](./LICENSE)
-```

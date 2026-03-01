@@ -1,4 +1,3 @@
-```markdown
 # familiar-ai 🐾
 
 **An AI that lives alongside you** — with eyes, voice, legs, and memory.
@@ -377,4 +376,3 @@ familiar-ai এটা খোলা পৰীক্ষা। যদি এইট�
 ## License
 
 [MIT](./LICENSE)
-```

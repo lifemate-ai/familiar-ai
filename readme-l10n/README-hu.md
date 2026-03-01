@@ -1,4 +1,3 @@
-```markdown
 # familiar-ai 🐾
 
 **Egy AI, ami melletted él** — szemekkel, hanggal, lábakkal és memóriával.
@@ -377,4 +376,3 @@ Ha nem vagy biztos benne, hol kezdj, [nyiss egy hibát](https://github.com/lifem
 ## Licenc
 
 [MIT](./LICENSE)
-```

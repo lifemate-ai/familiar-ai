@@ -1,4 +1,3 @@
-```markdown
 # familiar-ai 🐾
 
 **Nglembara AI sing urip bebarengan karo sampeyan** — kanthi mripat, swara, sikil, lan memori.
@@ -377,4 +376,3 @@ Yen sampeyan ora yakin kudu miwiti ngendi, [buka masalah](https://github.com/lif
 ## Lisensi
 
 [MIT](./LICENSE)
-```
