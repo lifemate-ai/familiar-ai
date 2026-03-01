@@ -1,4 +1,3 @@
-```markdown
 # familiar-ai 🐾
 
 **AI koja živi uz vas** — sa očima, glasom, nogama i memorijom.
@@ -377,4 +376,3 @@ Ako niste sigurni gde da počnete, [otvorite problem](https://github.com/lifemat
 ## Licenca
 
 [MIT](./LICENSE)
-```

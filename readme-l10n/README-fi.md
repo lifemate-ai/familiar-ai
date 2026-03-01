@@ -1,4 +1,3 @@
-```markdown
 # familiar-ai 🐾
 
 **AI, joka elää kanssasi** — silmien, äänen, jalkojen ja muistin kanssa.
@@ -377,4 +376,3 @@ Jos olet epävarma, mistä aloittaa, [avaa ongelma](https://github.com/lifemate-
 ## Lisenssi
 
 [MIT](./LICENSE)
-```

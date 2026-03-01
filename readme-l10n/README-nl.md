@@ -1,4 +1,3 @@
-```markdown
 # familiar-ai 🐾
 
 **Een AI die naast je leeft** — met ogen, stem, benen en geheugen.
@@ -377,4 +376,3 @@ Als je niet zeker weet waar je moet beginnen, [open een issue](https://github.co
 ## Licentie
 
 [MIT](./LICENSE)
-```

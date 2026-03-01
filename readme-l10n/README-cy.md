@@ -1,4 +1,3 @@
-```markdown
 # familiar-ai 🐾
 
 **AI sy'n byw ochr yn ochr â chi** — gyda llygaid, llais, traed, a chof.
@@ -377,4 +376,3 @@ Os ydych yn ansicr ble i ddechrau, [agorwch fater](https://github.com/lifemate-a
 ## Trwydded
 
 [MIT](./LICENSE)
-```

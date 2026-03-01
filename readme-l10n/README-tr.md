@@ -1,4 +1,3 @@
-```markdown
 # familiar-ai 🐾
 
 **Sizinle birlikte yaşayan bir AI** — gözleri, sesi, bacakları ve hafızası ile.
@@ -376,4 +375,3 @@ Nereden başlayacağınızdan emin değilseniz, [bir sorun açın](https://githu
 ## Lisans
 
 [MIT](./LICENSE)
-```

@@ -1,4 +1,3 @@
-```markdown
 # familiar-ai 🐾
 
 **A AI a chónaíonn le do taobh** — le súile, guth, cosa, agus cuimhne.
@@ -377,4 +376,3 @@ Má tá sé deacair ort ar bith an leagan, [oscail ceist](https://github.com/lif
 ## Ceadúnas
 
 [MIT](./LICENSE)
-```

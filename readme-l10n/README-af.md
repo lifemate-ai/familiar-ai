@@ -1,4 +1,3 @@
-```markdown
 # familiar-ai 🐾
 
 **'n KI wat saamdien jou leef** — met oë, stem, bene, en geheue.
@@ -376,4 +375,3 @@ As jy nie seker is waar om te begin nie, [oop 'n probleem](https://github.com/li
 ## Lisensie
 
 [MIT](./LICENSE)
-```

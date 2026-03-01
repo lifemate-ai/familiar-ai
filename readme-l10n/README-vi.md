@@ -1,4 +1,3 @@
-```markdown
 # familiar-ai 🐾
 
 **Một AI sống bên cạnh bạn** — với đôi mắt, giọng nói, đôi chân và trí nhớ.
@@ -377,4 +376,3 @@ Nếu bạn không chắc chắn bắt đầu từ đâu, [mở một vấn đ�
 ## Giấy phép
 
 [MIT](./LICENSE)
-```

@@ -1,4 +1,3 @@
-```markdown
 # familiar-ai 🐾
 
 **AI ambayo inaishi pamoja nawe** — yenye macho, sauti, miguu, na kumbukumbu.
@@ -377,4 +376,3 @@ Ikiwa hujui wapi kuanzia, [fungua tatizo](https://github.com/lifemate-ai/familia
 ## Leseni
 
 [MIT](./LICENSE)
-```

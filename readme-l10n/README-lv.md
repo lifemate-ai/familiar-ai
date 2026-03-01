@@ -1,4 +1,3 @@
-```markdown
 # familiar-ai 🐾
 
 **Mākslīgais intelekts, kas dzīvo līdzās tevi** — ar acīm, balsi, kājām un atmiņu.
@@ -377,4 +376,3 @@ Ja neesi pārliecināts, ar ko sākt, [atver problēmu](https://github.com/lifem
 ## Licence
 
 [MIT](./LICENSE)
-```

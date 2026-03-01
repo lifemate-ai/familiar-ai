@@ -1,4 +1,3 @@
-```markdown
 # familiar-ai 🐾
 
 **Wani AI da ke rayuwa tare da ku** — tare da idanu, murya, ƙafafu, da ƙwaƙwalwa.
@@ -377,4 +376,3 @@ Idan baku ga inda za ku fara ba, [bude batu](https://github.com/lifemate-ai/fami
 ## Lasisi
 
 [MIT](./LICENSE)
-```

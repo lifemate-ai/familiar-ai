@@ -1,4 +1,3 @@
-```markdown
 # familiar-ai 🐾
 
 **Umělá inteligence, která žije po boku vás** — s očima, hlasem, nohama a pamětí.
@@ -376,4 +375,3 @@ Pokud si nejste jisti, kde začít, [otevřete problém](https://github.com/life
 ## Licence
 
 [MIT](./LICENSE)
-```
