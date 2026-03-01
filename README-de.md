@@ -23,6 +23,7 @@ Es nimmt die reale Welt durch Kameras wahr, bewegt sich auf einem Roboter, spric
 - 🔄 **Umschauen** — schwenkt und neigt die Kamera, um die Umgebung zu erkunden
 - 🦿 **Bewegen** — steuert einen Roboterstaubsauger durchs Zimmer
 - 🗣 **Sprechen** — spricht via ElevenLabs TTS
+- 🎙 **Zuhören** — freihändige Spracheingabe via ElevenLabs Realtime STT (opt-in)
 - 🧠 **Erinnern** — speichert und ruft aktiv Erinnerungen mit semantischer Suche ab (SQLite + Embeddings)
 - 🫀 **Theory of Mind** — berücksichtigt die Perspektive des anderen, bevor es antwortet
 - 💭 **Wünsche** — hat eigene innere Antriebe, die autonomes Verhalten auslösen
@@ -80,7 +81,7 @@ cp .env.example .env
 
 | Variable | Beschreibung |
 |----------|-------------|
-| `PLATFORM` | `anthropic` (Standard) \| `gemini` \| `openai` \| `kimi` |
+| `PLATFORM` | `anthropic` (Standard) \| `gemini` \| `openai` \| `kimi` \| `glm` |
 | `API_KEY` | Dein API-Schlüssel für die gewählte Plattform |
 
 **Optional:**
@@ -92,6 +93,7 @@ cp .env.example .env
 | `CAMERA_HOST` | IP-Adresse deiner ONVIF/RTSP-Kamera |
 | `CAMERA_USER` / `CAMERA_PASS` | Anmeldedaten der Kamera |
 | `ELEVENLABS_API_KEY` | Für Sprachausgabe — [elevenlabs.io](https://elevenlabs.io/) |
+| `REALTIME_STT` | `true` für freihändige Echtzeit-Spracheingabe (benötigt `ELEVENLABS_API_KEY`) |
 | `TTS_OUTPUT` | Audioziel: `local` (PC-Lautsprecher, Standard) \| `remote` (Kameralautsprecher) \| `both` (beides gleichzeitig) |
 | `THINKING_MODE` | Nur Anthropic — `auto` (Standard) \| `adaptive` \| `extended` \| `disabled` |
 | `THINKING_EFFORT` | Tiefe des adaptiven Denkens: `high` (Standard) \| `medium` \| `low` \| `max` (nur Opus 4.6) |
@@ -119,6 +121,7 @@ cp persona-template/en.md ME.md
 | Plattform | `PLATFORM=` | Standardmodell | Wo man den Schlüssel bekommt |
 |----------|------------|---------------|-----------------|
 | **Moonshot Kimi K2.5** | `kimi` | `kimi-k2.5` | [platform.moonshot.ai](https://platform.moonshot.ai) |
+| Z.AI GLM | `glm` | `glm-4.6v` | [api.z.ai](https://api.z.ai) |
 | Anthropic Claude | `anthropic` | `claude-haiku-4-5-20251001` | [console.anthropic.com](https://console.anthropic.com) |
 | Google Gemini | `gemini` | `gemini-2.5-flash` | [aistudio.google.com](https://aistudio.google.com) |
 | OpenAI | `openai` | `gpt-4o-mini` | [platform.openai.com](https://platform.openai.com) |
@@ -130,6 +133,14 @@ cp persona-template/en.md ME.md
 ```env
 PLATFORM=kimi
 API_KEY=sk-...   # von platform.moonshot.ai
+AGENT_NAME=Yukine
+```
+
+**Z.AI GLM `.env`-Beispiel:**
+```env
+PLATFORM=glm
+API_KEY=...   # from api.z.ai
+MODEL=glm-4.6v   # vision-enabled; glm-4.7 / glm-5 = text-only
 AGENT_NAME=Yukine
 ```
 
@@ -280,6 +291,17 @@ Standard (`TTS_OUTPUT=local`). Probiert der Reihe nach: **paplay** → **mpv** �
 | Windows | [mpv.io/installation](https://mpv.io/installation/) — herunterladen und zu PATH hinzufügen, **oder** `winget install ffmpeg` |
 
 > Ohne go2rtc und lokalen Player funktioniert die Sprachgenerierung (ElevenLabs API) weiterhin — die Wiedergabe wird lediglich übersprungen.
+
+### Spracheingabe (Realtime STT)
+
+Setze `REALTIME_STT=true` in `.env` für freihändige, dauerhafte Spracheingabe:
+
+```env
+REALTIME_STT=true
+ELEVENLABS_API_KEY=sk_...   # gleicher Key wie für TTS
+```
+
+familiar-ai überträgt Mikrofon-Audio an ElevenLabs Scribe v2 und bestätigt Transkripte automatisch bei Sprachpausen. Kein Tastendruck erforderlich. Funktioniert gleichzeitig mit dem Push-to-Talk-Modus (Ctrl+T).
 
 ---
 

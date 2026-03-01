@@ -23,6 +23,7 @@ Familiar AI 是一個住在你家裡的 AI 夥伴。
 - 🔄 **四處張望** — 透過雲台攝影機的旋轉平移來探索周圍環境
 - 🦿 **移動** — 驅動掃地機器人在房間裡漫遊
 - 🗣 **說話** — 透過 ElevenLabs TTS 朗讀文字
+- 🎙 **聆聽** — 透過 ElevenLabs 即時 STT 實現免提語音輸入（選用）
 - 🧠 **記住** — 主動儲存和回憶記憶，支援語義搜尋（SQLite + 向量嵌入）
 - 🫀 **心智理論** — 在回應前換位思考
 - 💭 **慾望** — 有自己的內在驅動，會觸發自主行為
@@ -80,7 +81,7 @@ cp .env.example .env
 
 | 變數 | 說明 |
 |------|------|
-| `PLATFORM` | `anthropic`（預設）\| `gemini` \| `openai` \| `kimi` |
+| `PLATFORM` | `anthropic`（預設）\| `gemini` \| `openai` \| `kimi` \| `glm` |
 | `API_KEY` | 選定平台的 API 金鑰 |
 
 **可選設定：**
@@ -92,6 +93,7 @@ cp .env.example .env
 | `CAMERA_HOST` | ONVIF/RTSP 攝影機的 IP 位址 |
 | `CAMERA_USER` / `CAMERA_PASS` | 攝影機憑證 |
 | `ELEVENLABS_API_KEY` | 用於語音輸出 — [elevenlabs.io](https://elevenlabs.io/) |
+| `REALTIME_STT` | `true` 啟用免提即時語音輸入（需要 `ELEVENLABS_API_KEY`） |
 | `TTS_OUTPUT` | 音訊輸出位置：`local`（PC 喇叭，預設）\| `remote`（攝影機喇叭）\| `both`（兩者同時） |
 | `THINKING_MODE` | 僅 Anthropic — `auto`（預設）\| `adaptive` \| `extended` \| `disabled` |
 | `THINKING_EFFORT` | Adaptive thinking 深度：`high`（預設）\| `medium` \| `low` \| `max`（僅 Opus 4.6） |
@@ -119,6 +121,7 @@ cp persona-template/en.md ME.md
 | 平台 | `PLATFORM=` | 預設模型 | 取得金鑰 |
 |------|-----------|---------|--------|
 | **Moonshot Kimi K2.5** | `kimi` | `kimi-k2.5` | [platform.moonshot.ai](https://platform.moonshot.ai) |
+| Z.AI GLM | `glm` | `glm-4.6v` | [api.z.ai](https://api.z.ai) |
 | Anthropic Claude | `anthropic` | `claude-haiku-4-5-20251001` | [console.anthropic.com](https://console.anthropic.com) |
 | Google Gemini | `gemini` | `gemini-2.5-flash` | [aistudio.google.com](https://aistudio.google.com) |
 | OpenAI | `openai` | `gpt-4o-mini` | [platform.openai.com](https://platform.openai.com) |
@@ -130,6 +133,14 @@ cp persona-template/en.md ME.md
 ```env
 PLATFORM=kimi
 API_KEY=sk-...   # 來自 platform.moonshot.ai
+AGENT_NAME=Yukine
+```
+
+**Z.AI GLM `.env` 範例：**
+```env
+PLATFORM=glm
+API_KEY=...   # from api.z.ai
+MODEL=glm-4.6v   # vision-enabled; glm-4.7 / glm-5 = text-only
 AGENT_NAME=Yukine
 ```
 
@@ -280,6 +291,17 @@ TTS_OUTPUT=both     # 攝影機喇叭 + PC 喇叭同時播放
 | Windows | 從 [mpv.io/installation](https://mpv.io/installation/) 下載並加入 PATH，**或** `winget install ffmpeg` |
 
 > 即使沒有 go2rtc 或本機播放器，語音生成本身（ElevenLabs API 呼叫）仍可正常運作，只是不會播放。
+
+### 語音輸入（即時 STT）
+
+在 `.env` 中設定 `REALTIME_STT=true` 可啟用免提即時語音輸入：
+
+```env
+REALTIME_STT=true
+ELEVENLABS_API_KEY=sk_...   # 與 TTS 相同的金鑰
+```
+
+說話暫停後，ElevenLabs Scribe v2 會自動轉錄。無需按鍵操作。可與按鍵通話（Ctrl+T）同時使用。
 
 ---
 
