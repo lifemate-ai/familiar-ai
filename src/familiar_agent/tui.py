@@ -522,6 +522,10 @@ class FamiliarApp(App):
         if not self._agent_running:
             return
         self._cancel_event.set()
+        # Directly cancel the task on every ESC press — the watcher only fires once,
+        # so repeated ESC presses must hit the task directly.
+        if self._agent_task and not self._agent_task.done():
+            self._agent_task.cancel()
         self._log_system(f"[dim]{INTERRUPT_MSG}[/dim]")
 
     def action_start_ptt(self) -> None:
