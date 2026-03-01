@@ -819,6 +819,166 @@ class KimiBackend:
             return ""
 
 
+class GLMBackend:
+    """Backend for Z.AI GLM API (https://api.z.ai).
+
+    GLM uses a standard OpenAI-compatible API with native function calling.
+    No special round-trip fields (unlike Kimi's reasoning_content).
+
+    Configuration::
+
+        PLATFORM=glm
+        ZAI_API_KEY=<your-key>          # or API_KEY
+        MODEL=glm-4.7                   # default
+    """
+
+    _BASE_URL = "https://api.z.ai/api/paas/v4"
+
+    def __init__(self, api_key: str, model: str) -> None:
+        from openai import AsyncOpenAI
+
+        self.client = AsyncOpenAI(api_key=api_key, base_url=self._BASE_URL)
+        self.model = model
+
+    # ── message factories ─────────────────────────────────────────
+
+    def make_user_message(self, content: str | list) -> dict:
+        return {"role": "user", "content": content}
+
+    def make_assistant_message(self, result: TurnResult, raw_content: Any) -> dict:  # noqa: ARG002
+        return raw_content
+
+    def make_tool_results(
+        self,
+        tool_calls: list[ToolCall],
+        results: list[tuple[str, str | None]],
+    ) -> list[dict]:
+        msgs: list[dict] = []
+        for tc, (text, image) in zip(tool_calls, results):
+            msgs.append({"role": "tool", "tool_call_id": tc.id, "content": text})
+            if image:
+                msgs.append(
+                    {
+                        "role": "user",
+                        "content": [
+                            {
+                                "type": "image_url",
+                                "image_url": {"url": f"data:image/jpeg;base64,{image}"},
+                            }
+                        ],
+                    }
+                )
+        return msgs
+
+    def make_system_message(self, content: str) -> dict:
+        return {"role": "system", "content": content}
+
+    # ── streaming turn ─────────────────────────────────────────────
+
+    async def stream_turn(
+        self,
+        system: str | tuple[str, str],
+        messages: list,
+        tools: list[dict],
+        max_tokens: int,
+        on_text: Callable[[str], None] | None = None,
+    ) -> tuple[TurnResult, Any]:
+        if isinstance(system, tuple):
+            system = "\n\n---\n\n".join(s for s in system if s)
+
+        flat_messages: list[dict] = [{"role": "system", "content": system}]
+        for msg in messages:
+            if isinstance(msg, list):
+                flat_messages.extend(msg)
+            else:
+                flat_messages.append(msg)
+
+        oai_tools = [
+            {
+                "type": "function",
+                "function": {
+                    "name": t["name"],
+                    "description": t.get("description", ""),
+                    "parameters": t.get("input_schema", {}),
+                },
+            }
+            for t in tools
+        ]
+
+        kwargs: dict[str, Any] = {
+            "model": self.model,
+            "max_tokens": max_tokens,
+            "messages": flat_messages,
+            "stream": True,
+        }
+        if oai_tools:
+            kwargs["tools"] = oai_tools
+
+        stream = await self.client.chat.completions.create(**kwargs)
+
+        text_chunks: list[str] = []
+        raw_tcs: dict[int, dict] = {}
+        finish_reason: str | None = None
+
+        async for chunk in stream:
+            choice = chunk.choices[0]
+            delta = choice.delta
+            finish_reason = choice.finish_reason or finish_reason
+
+            if delta.content:
+                text_chunks.append(delta.content)
+                if on_text:
+                    on_text(delta.content)
+
+            if delta.tool_calls:
+                for tc_delta in delta.tool_calls:
+                    idx = tc_delta.index
+                    if idx not in raw_tcs:
+                        raw_tcs[idx] = {"id": "", "name": "", "arguments": ""}
+                    if tc_delta.id:
+                        raw_tcs[idx]["id"] = tc_delta.id
+                    if tc_delta.function and tc_delta.function.name:
+                        raw_tcs[idx]["name"] = tc_delta.function.name
+                    if tc_delta.function and tc_delta.function.arguments:
+                        raw_tcs[idx]["arguments"] += tc_delta.function.arguments
+
+        text = "".join(text_chunks)
+        tool_calls: list[ToolCall] = []
+        for idx in sorted(raw_tcs.keys()):
+            tc = raw_tcs[idx]
+            try:
+                input_data = json.loads(tc["arguments"])
+            except (json.JSONDecodeError, KeyError):
+                input_data = {}
+            tool_calls.append(ToolCall(id=tc["id"], name=tc["name"], input=input_data))
+
+        stop = "tool_use" if finish_reason == "tool_calls" else "end_turn"
+
+        raw_assistant: dict[str, Any] = {"role": "assistant", "content": text or ""}
+        if tool_calls:
+            raw_assistant["tool_calls"] = [
+                {
+                    "id": tc.id,
+                    "type": "function",
+                    "function": {"name": tc.name, "arguments": json.dumps(tc.input)},
+                }
+                for tc in tool_calls
+            ]
+        return TurnResult(stop_reason=stop, text=text, tool_calls=tool_calls), raw_assistant
+
+    async def complete(self, prompt: str, max_tokens: int) -> str:
+        try:
+            resp = await self.client.chat.completions.create(
+                model=self.model,
+                max_tokens=max_tokens,
+                messages=[{"role": "user", "content": prompt}],
+            )
+            return (resp.choices[0].message.content or "").strip()
+        except Exception as e:
+            logger.warning("complete() failed: %s", e)
+            return ""
+
+
 class GeminiBackend:
     """Backend using the official Google Generative AI SDK (google-generativeai).
 
@@ -1112,7 +1272,14 @@ class CLIBackend:
 
 def create_backend(
     config: "AgentConfig",
-) -> AnthropicBackend | OpenAICompatibleBackend | KimiBackend | GeminiBackend | CLIBackend:
+) -> (
+    AnthropicBackend
+    | OpenAICompatibleBackend
+    | KimiBackend
+    | GLMBackend
+    | GeminiBackend
+    | CLIBackend
+):
     """Factory: pick backend based on PLATFORM env var / config.
 
     Supported values for PLATFORM:
@@ -1120,6 +1287,7 @@ def create_backend(
       gemini     — Google Gemini via native google-genai SDK
       openai     — OpenAI API (or compatible via BASE_URL)
       kimi       — Moonshot AI Kimi K2.5 (api.moonshot.ai/v1)
+      glm        — Z.AI GLM API (api.z.ai/api/paas/v4); set ZAI_API_KEY
       cli        — any CLI LLM tool via stdin/stdout (MODEL = the command)
                    e.g. MODEL="claude -p"  or  MODEL="ollama run gemma3:27b"
     """
@@ -1160,6 +1328,13 @@ def create_backend(
         model = config.model or "kimi-k2.5"
         logger.info("Using Kimi backend: %s", model)
         return KimiBackend(api_key=config.api_key, model=model)
+    if config.platform == "glm":
+        # Z.AI GLM — OpenAI-compatible, native tool calling
+        # API key: ZAI_API_KEY (falls back to API_KEY)
+        api_key = os.environ.get("ZAI_API_KEY") or config.api_key
+        model = config.model or "glm-4.7"
+        logger.info("Using GLM backend: %s", model)
+        return GLMBackend(api_key=api_key, model=model)
     if config.platform == "cli":
         raw_cmd = config.model.strip() if config.model else "claude -p {}"
         cmd = shlex.split(raw_cmd)

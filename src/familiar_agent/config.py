@@ -103,7 +103,7 @@ class AgentConfig:
         default_factory=lambda: os.environ.get("COMPANION_NAME", _default_companion_name())
     )
 
-    # Platform: "anthropic" | "gemini" | "openai" | "kimi"
+    # Platform: "anthropic" | "gemini" | "openai" | "kimi" | "glm"
     platform: str = field(default_factory=lambda: os.environ.get("PLATFORM", "anthropic"))
 
     # Unified API key (used for whichever platform is selected)
