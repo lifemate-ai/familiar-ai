@@ -302,6 +302,14 @@ def _mcp_command(args: list[str]) -> None:
 
 
 def main() -> None:
+    # Use uvloop for faster I/O throughput when available (Linux / WSL2)
+    try:
+        import uvloop
+
+        uvloop.install()
+    except ImportError:
+        pass
+
     if len(sys.argv) > 1 and sys.argv[1] == "mcp":
         _mcp_command(sys.argv[2:])
         return
