@@ -11,6 +11,7 @@ from datetime import datetime
 from .backend import create_backend
 from .config import AgentConfig
 from .desires import detect_worry_signal
+from .exploration import ExplorationTracker
 from .tape import check_plan_blocked, generate_plan, generate_replan
 from .tools.camera import CameraTool
 from .tools.coding import CodingTool
@@ -341,6 +342,7 @@ class EmbodiedAgent:
         self._memory_tool = MemoryTool(self._memory)
         self._tom_tool = ToMTool(self._memory, default_person=config.companion_name)
         self._coding = CodingTool(config.coding)
+        self._exploration = ExplorationTracker()
 
         from .mcp_client import MCPClientManager
 
@@ -411,7 +413,13 @@ class EmbodiedAgent:
         coding_tools = {"read_file", "edit_file", "glob", "grep", "bash"}
 
         if name in camera_tools and self._camera:
-            return await self._camera.call(name, tool_input)
+            result = await self._camera.call(name, tool_input)
+            if name == "look":
+                self._exploration.record_move(
+                    tool_input.get("direction", "center"),
+                    tool_input.get("degrees", 30),
+                )
+            return result
         elif name in mobility_tools and self._mobility:
             return await self._mobility.call(name, tool_input)
         elif name in tts_tools and self._tts:
@@ -481,8 +489,16 @@ class EmbodiedAgent:
                 + plan_ctx
             )
 
+        exploration_ctx = self._exploration_context()
+        if exploration_ctx:
+            variable_parts.append(exploration_ctx)
+
         variable = "\n\n---\n\n".join(variable_parts)
         return stable, variable
+
+    def _exploration_context(self) -> str:
+        """Return exploration history for ICL-based direction steering."""
+        return self._exploration.context_for_prompt(n=5)
 
     async def _infer_emotion(self, text: str) -> str:
         """Ask the LLM to label the emotion of a response. Returns label string."""
@@ -742,11 +758,28 @@ class EmbodiedAgent:
                     await self._tts.call("say", {"text": spoken})
 
                 if final_text and final_text != "(no response)":
-                    # Save observation
+                    # Save observation and compute novelty for ICL exploration
                     if camera_used:
                         await self._memory.save_async(
                             final_text[:500], direction="観察", kind="observation"
                         )
+                        # Novelty = how different this observation is from recent ones.
+                        # recall_async returns records sorted by cosine similarity (highest first).
+                        # The most similar past observation's score ≈ redundancy; invert it.
+                        recent_obs = await self._memory.recall_async(
+                            final_text[:200], n=6, kind="observation"
+                        )
+                        # Skip the just-saved record (index 0 is itself); use next ones
+                        past_scores = [m.get("score", 0.5) for m in recent_obs[1:4]]
+                        if past_scores:
+                            avg_similarity = sum(past_scores) / len(past_scores)
+                            novelty = 1.0 - avg_similarity  # low similarity → high novelty
+                        else:
+                            novelty = 0.8  # first observation is always novel
+                        novelty = max(0.0, min(1.0, novelty))
+                        self._exploration.record_novelty(novelty)
+                        if desires is not None:
+                            desires.boost("look_around", novelty * 0.3)
 
                     # Save emotional memory of this conversation exchange
                     emotion = await self._infer_emotion(final_text)
