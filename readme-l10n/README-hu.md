@@ -1,56 +1,64 @@
+```markdown
 # familiar-ai 🐾
 
-**Egy AI, ami melletted él** — szemekkel, hanggal, lábakkal és memóriával.
+**Egy AI, ami veled él** — szemekkel, hanggal, lábakkal és memóriával.
 
 [![Lint](https://github.com/kmizu/familiar-ai/actions/workflows/lint.yml/badge.svg)](https://github.com/kmizu/familiar-ai/actions/workflows/lint.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](./LICENSE)
 [![Python 3.10+](https://img.shields.io/badge/python-3.10+-blue.svg)](https://www.python.org/)
 [![GitHub Sponsors](https://img.shields.io/github/sponsors/kmizu?style=flat&logo=github&color=ea4aaa)](https://github.com/sponsors/kmizu)
 
-[→ English README](../README.md)
+🌍 [Elérhető 74 nyelven](./SUPPORTED_LANGUAGES.md)
 
 ---
 
 [![Demo video](https://img.youtube.com/vi/hiR9uWRnjt4/0.jpg)](https://youtube.com/shorts/hiR9uWRnjt4)
 
-familiar-ai egy AI társ, ami a te otthonodban él. 
-Pár perc alatt beállíthatod. Nincs szükség kódolásra.
+familiar-ai egy AI társ, amely az otthonodban él.
+Pár perc alatt beállíthatod. Kódolásra nincs szükség.
 
-Valóságot érzékel kamerákon keresztül, robot testén mozog, hangosan beszél és emlékszik, amit lát. Adj neki nevet, írd meg a személyiségét, és hagyd, hogy veled éljen.
+A valós világot kamerákon keresztül érzékeli, robot testén mozog, hangosan beszél és emlékszik arra, amit lát. Adj neki nevet, írd meg a személyiségét, és hagyd, hogy veled éljen.
 
-## Mit tud csinálni
+## Mit tud tenni
 
-- 👁 **Lát** — képeket készít egy Wi-Fi PTZ kameráról vagy USB webkameráról
-- 🔄 **Körülnéz** — forgatja és döntögeti a kamerát, hogy felfedezze a környezetét
-- 🦿 **Mozog** — egy robot porszívót irányít, hogy bejárja a szobát
+- 👁 **Lát** — képeket rögzít egy Wi-Fi PTZ kamerából vagy USB webkamerából
+- 🔄 **Körbenéz** — mozgatja a kamerát, hogy felfedezze a környezetét
+- 🦿 **Mozog** — egy robotporszívót irányít, hogy bejárja a szobát
 - 🗣 **Beszél** — az ElevenLabs TTS segítségével beszél
-- 🎙 **Hallgat** — hands-free hangbevitelt biztosít az ElevenLabs Realtime STT-n keresztül (opcionális)
-- 🧠 **Emlékezik** — aktívan tárolja és felidézi az emlékeket szemantikus kereséssel (SQLite + embeddingek)
-- 🫀 **Teória az elmében** — figyelembe veszi a másik személy nézőpontját, mielőtt válaszol
-- 💭 **Vágy** — saját belső hajtóerői vannak, amelyek autonóm viselkedést váltanak ki
+- 🎙 **Hallgat** — kéz nélküli hangbeviteli lehetőség az ElevenLabs Realtime STT-vel (opcionális)
+- 🧠 **Emlékezik** — aktívan tárol és hívja elő az emlékeket szemantikai kereséssel (SQLite + beágyazások)
+- 🫀 **Elméleti tudat** — figyelembe veszi a másik személy nézőpontját, mielőtt válaszolna
+- 💭 **Vágy** — saját belső impulzusai vannak, amelyek önálló viselkedést váltanak ki
 
 ## Hogyan működik
 
-familiar-ai egy [ReAct](https://arxiv.org/abs/2210.03629) ciklust futtat, amelyet az általad választott LLM tölt fel. A világot eszközökön keresztül érzékeli, gondolkodik arról, mit tegyen ezután, és cselekszik — akárcsak egy ember tenné.
+A familiar-ai egy [ReAct](https://arxiv.org/abs/2210.03629) ciklust futtat, amelyet a választott LLM hajt. A világot eszközökön keresztül érzékeli, gondolkodik arról, mit tegyen legközelebb, és cselekszik — pont úgy, mint egy ember.
 
 ```
 user input
-  → think → act (camera / move / speak / remember) → observe → think → ...
+  → think → act (kamera / mozgás / beszéd / emlékezés) → megfigyel → gondolkodik → ...
 ```
 
-Amikor inaktív, saját vágyainak megfelelően cselekszik: kíváncsiság, vágy, hogy kinézzen, hiányzik a vele élő személy.
+Tétlen állapotban saját vágyai szerint cselekszik: kíváncsiság, vágy, hogy kinézzen, hiányzik a vele élő személy.
 
 ## Kezdés
 
 ### 1. Telepítsd az uv-t
 
+**macOS / Linux / WSL2:**
 ```bash
 curl -LsSf https://astral.sh/uv/install.sh | sh
 ```
 
+**Windows (PowerShell):**
+```powershell
+powershell -ExecutionPolicy ByPass -c "irm https://astral.sh/uv/install.ps1 | iex"
+```
+Vagy: `winget install astral-sh.uv`
+
 ### 2. Telepítsd az ffmpeg-et
 
-Az ffmpeg **szükséges** a kameraképek rögzítéséhez és az audio lejátszásához.
+Az ffmpeg **szükséges** a kamera képrögzítéshez és audiolejátszáshoz.
 
 | OS | Parancs |
 |----|---------|
@@ -58,7 +66,7 @@ Az ffmpeg **szükséges** a kameraképek rögzítéséhez és az audio lejátsz�
 | Ubuntu / Debian | `sudo apt install ffmpeg` |
 | Fedora / RHEL | `sudo dnf install ffmpeg` |
 | Arch Linux | `sudo pacman -S ffmpeg` |
-| Windows | `winget install ffmpeg` — vagy töltsd le a [ffmpeg.org](https://ffmpeg.org/download.html) webhelyről és add hozzá a PATH-hoz |
+| Windows | `winget install ffmpeg` — vagy töltsd le a [ffmpeg.org](https://ffmpeg.org/download.html) oldaláról, majd add hozzá a PATH-hoz |
 | Raspberry Pi | `sudo apt install ffmpeg` |
 
 Ellenőrizd: `ffmpeg -version`
@@ -71,56 +79,63 @@ cd familiar-ai
 uv sync
 ```
 
-### 4. Konfigurálás
+### 4. Konfiguráld
 
 ```bash
 cp .env.example .env
-# Edit .env with your settings
+# Editáld a .env fájlt a beállításaidnak megfelelően
 ```
 
-**Minimálisan szükséges:**
+**Minimális követelmények:**
 
 | Változó | Leírás |
-|---------|--------|
+|----------|-------------|
 | `PLATFORM` | `anthropic` (alapértelmezett) \| `gemini` \| `openai` \| `kimi` \| `glm` |
-| `API_KEY` | Az API kulcsod a választott platform számára |
+| `API_KEY` | A választott platformhoz szükséges API kulcs |
 
 **Opcionális:**
 
 | Változó | Leírás |
-|---------|--------|
-| `MODEL` | Modell név (platformonként értelmes alapértelmezettek) |
-| `AGENT_NAME` | A TUI-ban megjelenő név (pl. `Yukine`) |
+|----------|-------------|
+| `MODEL` | Modell neve (értelmes alapértelmezettek platformonként) |
+| `AGENT_NAME` | Mega jelenítő név a TUI-ban (pl. `Yukine`) |
 | `CAMERA_HOST` | Az ONVIF/RTSP kamerád IP címe |
-| `CAMERA_USER` / `CAMERA_PASS` | Kamerabelépési adatok |
+| `CAMERA_USER` / `CAMERA_PASS` | Kamera hitelesítő adatok |
 | `ELEVENLABS_API_KEY` | A hangkimenethez — [elevenlabs.io](https://elevenlabs.io/) |
-| `REALTIME_STT` | `true` az állandó hands-free hangbeviteli engedélyezéshez (szükséges `ELEVENLABS_API_KEY`) |
-| `TTS_OUTPUT` | Hol játssza le az audio-t: `local` (PC hangszóró, alapértelmezett) \| `remote` (kamera hangszóró) \| `both` |
-| `THINKING_MODE` | Csak anthroplg — `auto` (alapértelmezett) \| `adaptive` \| `extended` \| `disabled` |
+| `REALTIME_STT` | `true`, hogy engedélyezd az állandó kéz nélküli hangbevitelt (megköveteli az `ELEVENLABS_API_KEY`-t) |
+| `TTS_OUTPUT` | Hol játsszák le az audio-t: `local` (PC hangszóró, alapértelmezett) \| `remote` (kamera hangszóró) \| `both` |
+| `THINKING_MODE` | Csak Anthropic — `auto` (alapértelmezett) \| `adaptive` \| `extended` \| `disabled` |
 | `THINKING_EFFORT` | Adaptív gondolkodási erőfeszítés: `high` (alapértelmezett) \| `medium` \| `low` \| `max` (csak Opus 4.6) |
 
-### 5. Hozd létre a familiárt
+### 5. Hozd létre a familiádat
 
 ```bash
 cp persona-template/en.md ME.md
-# Edit ME.md — give it a name and personality
+# Editáld a ME.md-t — adj neki nevet és személyiséget
 ```
 
-### 6. Futtatás
+### 6. Futtasd
 
+**macOS / Linux / WSL2:**
 ```bash
-./run.sh             # Textual TUI (ajánlott)
+./run.sh             # Szöveges TUI (ajánlott)
 ./run.sh --no-tui    # Egyszerű REPL
+```
+
+**Windows:**
+```bat
+run.bat              # Szöveges TUI (ajánlott)
+run.bat --no-tui     # Egyszerű REPL
 ```
 
 ---
 
-## LLM kiválasztása
+## LLM választás
 
-> **Ajánlott: Kimi K2.5** — a legjobb ügynöki teljesítmény, amit eddig teszteltünk. Észleli a kontextust, követő kérdéseket tesz fel, és autonóm módon cselekszik más modellekhez képest. Árban hasonló a Claude Haiku-hoz.
+> **Ajánlott: Kimi K2.5** — eddig tesztelt legjobb ügynöki teljesítmény. Észleli a kontextust, további kérdéseket tesz fel, és olyan módokon cselekszik, ahogyan más modellek nem. Árazása hasonló a Claude Haikuhoz.
 
-| Platform | `PLATFORM=` | Alapértelmezett modell | Hol kapható a kulcs |
-|----------|------------|------------------------|---------------------|
+| Platform | `PLATFORM=` | Alapértelmezett modell | Hol szerezd be a kulcsot |
+|----------|------------|---------------|-----------------|
 | **Moonshot Kimi K2.5** | `kimi` | `kimi-k2.5` | [platform.moonshot.ai](https://platform.moonshot.ai) |
 | Z.AI GLM | `glm` | `glm-4.6v` | [api.z.ai](https://api.z.ai) |
 | Anthropic Claude | `anthropic` | `claude-haiku-4-5-20251001` | [console.anthropic.com](https://console.anthropic.com) |
@@ -133,23 +148,23 @@ cp persona-template/en.md ME.md
 **Kimi K2.5 `.env` példa:**
 ```env
 PLATFORM=kimi
-API_KEY=sk-...   # a platform.moonshot.ai oldalról
+API_KEY=sk-...   # a platform.moonshot.ai-tól
 AGENT_NAME=Yukine
 ```
 
 **Z.AI GLM `.env` példa:**
 ```env
 PLATFORM=glm
-API_KEY=...   # az api.z.ai oldalról
-MODEL=glm-4.6v   # vision-enabled; glm-4.7 / glm-5 = csak text
+API_KEY=...   # az api.z.ai-tól
+MODEL=glm-4.6v   # látás engedélyezve; glm-4.7 / glm-5 = csak szöveg
 AGENT_NAME=Yukine
 ```
 
 **Google Gemini `.env` példa:**
 ```env
 PLATFORM=gemini
-API_KEY=AIza...   # az aistudio.google.com oldalról
-MODEL=gemini-2.5-flash  # vagy gemini-2.5-pro a nagyobb képességekhez
+API_KEY=AIza...   # az aistudio.google.com-tól
+MODEL=gemini-2.5-flash  # vagy gemini-2.5-pro a nagyobb képességért
 AGENT_NAME=Yukine
 ```
 
@@ -157,27 +172,27 @@ AGENT_NAME=Yukine
 ```env
 PLATFORM=openai
 BASE_URL=https://openrouter.ai/api/v1
-API_KEY=sk-or-...   # az openrouter.ai oldalról
-MODEL=mistralai/mistral-7b-instruct  # opcionális: modell megadása
+API_KEY=sk-or-...   # az openrouter.ai-tól
+MODEL=mistralai/mistral-7b-instruct  # opcionális: a modell megadása
 AGENT_NAME=Yukine
 ```
 
-> **Megjegyzés:** A helyi/NVIDIA modellek letiltásához egyszerűen ne állítsd be a `BASE_URL`-t helyi végpontra, mint pl. `http://localhost:11434/v1`. Használj a felhőszolgáltatókat helyette.
+> **Megjegyzés:** A helyi/NVIDIA modellek letiltásához egyszerűen ne állítsd be a `BASE_URL`-t olyan helyi végpontokra, mint a `http://localhost:11434/v1`. Használj felhőszolgáltatókat helyette.
 
 **CLI eszköz `.env` példa:**
 ```env
 PLATFORM=cli
 MODEL=llm -m gemma3 {}        # llm CLI (https://llm.datasette.io) — {} = prompt arg
-# MODEL=ollama run gemma3:27b  # Ollama — nincs {}, a prompt stdin-on keresztül megy
+# MODEL=ollama run gemma3:27b  # Ollama — no {}, prompt stdin-on keresztül
 ```
 
 ---
 
 ## MCP Szerverek
 
-familiar-ai bármilyen [MCP (Model Context Protocol)](https://modelcontextprotocol.io) szerverhez csatlakozhat. Ez lehetővé teszi, hogy külső memóriát, fájlrendszer hozzáférést, webes keresést vagy bármilyen más eszközt csatlakoztass.
+A familiar-ai csatlakozhat bármely [MCP (Model Context Protocol)](https://modelcontextprotocol.io) szerverhez. Ez lehetővé teszi, hogy külső memóriát, fájlkezelési hozzáférést, webkeresést vagy bármely más eszközt csatlakoztass.
 
-Állítsd be a szervereket a `~/.familiar-ai.json` fájlban (ugyanabban a formátumban, mint a Claude Code):
+A szerverek konfigurálása a `~/.familiar-ai.json` fájlban történik (ugyanaz a formátum, mint a Claude Kód):
 
 ```json
 {
@@ -196,41 +211,41 @@ familiar-ai bármilyen [MCP (Model Context Protocol)](https://modelcontextprotoc
 ```
 
 Két szállítási típus támogatott:
-- **`stdio`**: elindít egy helyi subprocess-t (`command` + `args`)
-- **`sse`**: csatlakozik egy HTTP+SSE szerverhez (`url`)
+- **`stdio`**: helyi alfolyamat indítása (`command` + `args`)
+- **`sse`**: csatlakozás egy HTTP+SSE szerverhez (`url`)
 
-A konfigurációs fájl helyét a `MCP_CONFIG=/path/to/config.json` beállítással felülírhatod.
+A konfigurációs fájl helyének felülírása a `MCP_CONFIG=/path/to/config.json` beállítással.
 
 ---
 
 ## Hardver
 
-familiar-ai működik bármilyen hardverrel, amit van — vagy akár hardver nélkül is.
+A familiar-ai működik bármilyen hardverrel, amit rendelkezel — vagy egyáltalán nem is.
 
-| Rész | Mit csinál | Példa | Kötelező? |
-|------|------------|--------|-----------|
-| Wi-Fi PTZ kamera | Szemek + nyak | Tapo C220 (~30$) | **Ajánlott** |
-| USB webkamera | Szemek (fix) | Bármely UVC kamera | **Ajánlott** |
-| Robotporszívó | Lábak | Bármely Tuya-kompatibilis modell | Nem |
+| Rész | Mit csinál | Példa | Szükséges? |
+|------|-------------|---------|-----------|
+| Wi-Fi PTZ kamera | Szemek + nyak | Tapo C220 (~$30) | **Ajánlott** |
+| USB webkamera | Szemek (fix) | Bármilyen UVC kamera | **Ajánlott** |
+| Robotporszívó | Lábak | Bármilyen Tuya-kompatibilis modell | Nem |
 | PC / Raspberry Pi | Agy | Bármi, ami Python-t futtat | **Igen** |
 
-> **A kamera erősen ajánlott.** Nélküle a familiar-ai még tud beszélni - de nem látja a világot, ami az egész lényege.
+> **A kamera erősen ajánlott.** Nélküle a familiar-ai még mindig tud beszélni — de nem látja a világot, ami ennek az egésznek az alapja.
 
 ### Minimális beállítás (nincs hardver)
 
-Csak ki akarod próbálni? Csak egy API kulcsra van szükséged:
+Csak ki szeretnéd próbálni? Csak egy API kulcsra van szükséged:
 
 ```env
 PLATFORM=kimi
 API_KEY=sk-...
 ```
 
-Futtasd a `./run.sh`-ot és kezdd el a csevejt. Adj hozzá hardvert, ahogy haladsz.
+Futtasd a `./run.sh`-t (macOS/Linux/WSL2) vagy `run.bat`-t (Windows), és kezdj el csevegni. Adj hozzá hardvert, ahogy haladsz.
 
 ### Wi-Fi PTZ kamera (Tapo C220)
 
-1. A Tapo alkalmazásban: **Beállítások → Haladó → Kamera fiók** — hozz létre egy helyi fiókot (nem TP-Link fiókot)
-2. Találd meg a kamera IP címét az routered eszközlistájában
+1. A Tapo alkalmazásban: **Beállítások → Haladó → Kamera Fiók** — hozz létre egy helyi fiókot (nem TP-Link fiókot)
+2. Találd meg a kamera IP címét a routered eszközlistáján
 3. Állítsd be a `.env`-ben:
    ```env
    CAMERA_HOST=192.168.1.xxx
@@ -244,10 +259,10 @@ Futtasd a `./run.sh`-ot és kezdd el a csevejt. Adj hozzá hardvert, ahogy halad
 2. Állítsd be a `.env`-ben:
    ```env
    ELEVENLABS_API_KEY=sk_...
-   ELEVENLABS_VOICE_ID=...   # opcionális, alapértelmezett hang használata, ha elhagyod
+   ELEVENLABS_VOICE_ID=...   # opcionális, alapértelmezett hangot használ, ha kihagyják
    ```
 
-Két lejátszási célpont van, amelyeket a `TTS_OUTPUT` vezérel:
+Két lejátszási célpont van, amelyet a `TTS_OUTPUT` vezérel:
 
 ```env
 TTS_OUTPUT=local    # PC hangszóró (alapértelmezett)
@@ -257,9 +272,9 @@ TTS_OUTPUT=both     # kamera hangszóró + PC hangszóró egyszerre
 
 #### A) Kamera hangszóró (a go2rtc-n keresztül)
 
-Állítsd be `TTS_OUTPUT=remote` (vagy `both`). Szükséges a [go2rtc](https://github.com/AlexxIT/go2rtc/releases):
+Állítsd be a `TTS_OUTPUT=remote` (vagy `both`). Megköveteli a [go2rtc](https://github.com/AlexxIT/go2rtc/releases) használatát:
 
-1. Töltsd le a binárist a [kiadási oldalról](https://github.com/AlexxIT/go2rtc/releases):
+1. Töltsd le a binárist a [kiadások oldaláról](https://github.com/AlexxIT/go2rtc/releases):
    - Linux/macOS: `go2rtc_linux_amd64` / `go2rtc_darwin_amd64`
    - **Windows: `go2rtc_win64.exe`**
 
@@ -272,107 +287,108 @@ TTS_OUTPUT=both     # kamera hangszóró + PC hangszóró egyszerre
    %USERPROFILE%\.cache\embodied-claude\go2rtc\go2rtc.exe
    ```
 
-3. Hozd létre a `go2rtc.yaml`-t ugyanabban a könyvtárban:
+3. Hozz létre `go2rtc.yaml` fájlt ugyanabban a könyvtárban:
    ```yaml
    streams:
      tapo_cam:
        - rtsp://YOUR_CAM_USER:YOUR_CAM_PASS@YOUR_CAM_IP/stream1
    ```
-   Használj helyi kamera fiók adatokat (ne használd a TP-Link felhőfiókodat).
+   Használj helyi kamera fiók hitelesítő adatokat (ne a TP-Link felhőfiókot).
 
-4. A familiar-ai automatikusan elindítja a go2rtc-t indításkor. Ha a kamerád támogatja a kétirányú audio-t (visszacsatolás), a hang a kamera hangszórójából szólal meg.
+4. A familiar-ai automatikusan elindítja a go2rtc-t indításkor. Ha a kamerád támogatja a kétirányú hangot (visszacsatolás), a hang a kamera hangszórójából szól.
 
 #### B) Helyi PC hangszóró
 
-Az alapértelmezett (`TTS_OUTPUT=local`). A következő lejátszókat próbálja meg: **paplay** → **mpv** → **ffplay**. Ezt is használja visszaesésként, amikor a `TTS_OUTPUT=remote` be van állítva, és a go2rtc nem elérhető.
+Az alapértelmezett (`TTS_OUTPUT=local`). Folytonossági sorrendben próbálja ki a lejátszók listáját: **paplay** → **mpv** → **ffplay**. Ezt is használja visszaeséskor, ha a `TTS_OUTPUT=remote` és a go2rtc nem elérhető.
 
 | OS | Telepítés |
-|----|-----------|
+|----|---------|
 | macOS | `brew install mpv` |
-| Ubuntu / Debian | `sudo apt install mpv` (vagy `paplay` a `pulseaudio-utils`-on keresztül) |
-| WSL2 / WSLg | `sudo apt install pulseaudio-utils` — állítsd be a `PULSE_SERVER=unix:/mnt/wslg/PulseServer` a `.env`-ben |
+| Ubuntu / Debian | `sudo apt install mpv` (vagy `paplay` a `pulseaudio-utils` révén) |
+| WSL2 / WSLg | `sudo apt install pulseaudio-utils` — állítsd be a `PULSE_SERVER=unix:/mnt/wslg/PulseServer`-t a `.env`-ben |
 | Windows | [mpv.io/installation](https://mpv.io/installation/) — töltsd le és add hozzá a PATH-hoz, **vagy** `winget install ffmpeg` |
 
-> Ha nem áll rendelkezésre semmilyen audio lejátszó, a beszéd még mindig generálódik — csak nem fog megszólalni.
+> Ha nincs elérhető hangjátszó, a beszéd továbbra is generálódik — csak nem fog lejátszódni.
 
 ### Hangbevitel (Realtime STT)
 
-Állítsd be a `REALTIME_STT=true` a `.env`-ben az állandó, hands-free hangbevitelhez:
+Állítsd be a `REALTIME_STT=true`-t a `.env`-ben az állandó, kéz nélküli hangbevitelhez:
 
 ```env
 REALTIME_STT=true
-ELEVENLABS_API_KEY=sk_...   # ugyanaz a kulcs, mint a TTS
+ELEVENLABS_API_KEY=sk_...   # ugyanaz a kulcs, mint a TTS-hez
 ```
 
-familiar-ai streameli a mikrofon audioját az ElevenLabs Scribe v2-re, és automatikusan rögzíti a leiratokat, amikor megállsz beszélni. Nincs szükség gombnyomásra. Együttműködik a tolószót gomb (Ctrl+T) üzemmóddal.
+A familiar-ai a mikrofon audioját streameli az ElevenLabs Scribe v2-nek, és automatikusan elmenti a jegyzeteket, amikor megállsz a beszédben. Gombnyomás nem szükséges. Együttműködik a push-to-talk móddal (Ctrl+T).
 
 ---
 
 ## TUI
 
-familiar-ai egy terminál UI-t tartalmaz, ami a [Textual](https://textual.textualize.io/) segítségével készült:
+A familiar-ai tartalmaz egy terminál UI-t, amelyet a [Textual](https://textual.textualize.io/) épít:
 
 - Görgethető beszélgetési előzmények élő szöveggel
-- Tab-befejezés a `/quit`, `/clear` parancsokhoz
-- Megszakíthatod az ügynököt a gondolkodás közben, ha írsz
-- **Beszélgetési napló** automatikusan mentésre kerül a `~/.cache/familiar-ai/chat.log` fájlba
+- Tab-kiegészítés a `/quit`, `/clear` parancsokhoz
+- Meg lehet szakítani az ügynököt a gondolkodás közben, ha írni kezdesz
+- **Beszélgetési napló** automatikusan elmentésre kerül a `~/.cache/familiar-ai/chat.log`-ba
 
-A napló követéséhez egy másik terminálban (hasznos a másolás/beillesztéshez):
+A napló követéséhez egy másik terminálban (hasznos a másoláshoz-beillesztéshez):
 ```bash
 tail -f ~/.cache/familiar-ai/chat.log
 ```
 
 ---
 
-## Személyiség (ME.md)
+## Persona (ME.md)
 
-A familiar személyisége a `ME.md` fájlban él. Ez a fájl gitignore-olt — csak a tiéd.
+A familiar-d személyisége a `ME.md`-ben él. Ez a fájl gitignored — csak a tiéd.
 
-Lásd a [`persona-template/en.md`](./persona-template/en.md) fájlt egy példáért, vagy a [`persona-template/ja.md`](./persona-template/ja.md) fájlt egy japán verzióért.
+Nézd meg a [`persona-template/en.md`](./persona-template/en.md) példát, vagy a [`persona-template/ja.md`](./persona-template/ja.md) japán verziót.
 
 ---
 
 ## GYIK
 
 **K: Működik GPU nélkül?**
-Igen. Az embedding modell (multilingual-e5-small) szépen működik CPU-n. A GPU gyorsabbá teszi, de nem kötelező.
+Igen. A beágyazó modell (multilingual-e5-small) szépen fut CPU-n. A GPU gyorsabbá teszi, de nem kötelező.
 
-**K: Használhatok más kamerát, mint Tapo?**
-Bármely kamera, amely támogatja az ONVIF + RTSP-t, működnie kell. A Tapo C220-at teszteltük.
+**K: Használhatok más kamerát, mint a Tapo?**
+Bármilyen kamera, amely támogatja az ONVIF + RTSP-t, működnie kell. A Tapo C220 a tesztelt modell.
 
-**K: Az adataim eljutnak más helyre?**
-A képek és szövegek a választott LLM API-hoz kerülnek feldolgozásra. Az emlékek helyileg tárolódnak a `~/.familiar_ai/` mappában.
+**K: Az adataim eljutnak valahová?**
+A képek és szövegek a választott LLM API-ra kerülnek feldolgozásra. Az emlékek helyben tárolódnak a `~/.familiar_ai/`-ban.
 
-**K: Miért írja az ügynök `（...）` helyett a beszédet?**
-Győződj meg róla, hogy az `ELEVENLABS_API_KEY` be van állítva. Nélküle a hang letiltva van, és az ügynök visszaesik a szövegre.
+**K: Miért ír az ügynök `（...）`-et beszélés helyett?**
+Győződj meg róla, hogy az `ELEVENLABS_API_KEY` be van állítva. Nélküle a hang letiltódik, és az ügynök visszaesik a szöveghez.
 
 ## Technikai háttér
 
-Kíváncsi vagy, hogyan működik? Lásd a [docs/technical.md](./docs/technical.md) fájlt a familiar-ai mögötti kutatásról és tervezési döntésekről — ReAct, SayCan, Reflexion, Voyager, a vágy rendszer és sok más.
+Kíváncsi vagy, hogyan működik? Nézd meg a [docs/technical.md](./docs/technical.md) fájlt a familiar-ai mögött meghúzódó kutatásról és tervezési döntésekről — ReAct, SayCan, Reflexion, Voyager, a vágy rendszer, és még sok más.
 
 ---
 
 ## Hozzájárulás
 
-familiar-ai egy nyílt kísérlet. Ha bármelyik rész ezt rezonálja veled — technikai vagy filozófiai szempontból — a hozzájárulások nagyon welcome.
+A familiar-ai egy nyílt kísérlet. Ha bármi ebből rezonál veled — technikai vagy filozófiai értelemben — a hozzájárulások nagyon üdvözlendőek.
 
-**Jó kezdeti pontok:**
+**Jó kezdő helyek:**
 
-| Terület | Mire van szükség |
-|---------|------------------|
-| Új hardver | Támogatás több kamerához (RTSP, IP Webcam), mikrofonokhoz, actuátorokhoz |
-| Új eszközök | Webes keresés, otthoni automatizálás, naptár, bármi MCP-n keresztül |
-| Új háttér | Bármely LLM vagy helyi modell, ami megfelel a `stream_turn` interfésznek |
-| Személyiség sablonok | ME.md sablonok különböző nyelvekhez és személyiségekhez |
-| Kutatás | Jobb vágy modellek, memóriakeresés, elmélet az elmében promping |
-| Dokumentáció | Útmutatók, bemutatók, fordítások |
+| Terület | Mi szükséges |
+|------|---------------|
+| Új hardver | Támogatás több kamerához (RTSP, IP Webcam), mikrofonok, aktorok |
+| Új eszközök | Webkeresés, okosház, naptár, bármi MCP-n keresztül |
+| Új hátterek | Bármely LLM vagy helyi modell, amely megfelel a `stream_turn` interfésznek |
+| Persona sablonok | ME.md sablonok különböző nyelvekhez és személyiségekhez |
+| Kutatás | Jobb vágy modellek, memória visszakeresés, elméleti tudat ösztönzés |
+| Dokumentáció | Oktatók, útmutatók, fordítások |
 
-Lásd a [CONTRIBUTING.md](./CONTRIBUTING.md) fájlt a fejlesztési beállításhoz, kód stílushoz és PR irányelvekhez.
+Nézd meg a [CONTRIBUTING.md](./CONTRIBUTING.md) fájlt a fejlesztői beállításhoz, kódstílushoz és PR irányelvekhez.
 
-Ha nem vagy biztos benne, hol kezdj, [nyiss egy hibát](https://github.com/lifemate-ai/familiar-ai/issues) — szívesen segítek a helyes irányba.
+Ha nem vagy biztos benne, hol kezdd, [nyiss egy problémát](https://github.com/lifemate-ai/familiar-ai/issues) — szívesen mutatok az irányba.
 
 ---
 
 ## Licenc
 
 [MIT](./LICENSE)
+```

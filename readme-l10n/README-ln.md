@@ -1,56 +1,63 @@
 # familiar-ai 🐾
 
-**Nzamba ya AI oyo ebimaka na yo** — na miso, yango ekome, maboko, mpe motema.
+**E AI oyo elala na mabele na yo** — na miso, lokó, makabo, mpe esika ya kofanda.
 
 [![Lint](https://github.com/kmizu/familiar-ai/actions/workflows/lint.yml/badge.svg)](https://github.com/kmizu/familiar-ai/actions/workflows/lint.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](./LICENSE)
 [![Python 3.10+](https://img.shields.io/badge/python-3.10+-blue.svg)](https://www.python.org/)
 [![GitHub Sponsors](https://img.shields.io/github/sponsors/kmizu?style=flat&logo=github&color=ea4aaa)](https://github.com/sponsors/kmizu)
 
-[→ English README](../README.md)
+🌍 [E available na mitá 74](./SUPPORTED_LANGUAGES.md)
 
 ---
 
 [![Demo video](https://img.youtube.com/vi/hiR9uWRnjt4/0.jpg)](https://youtube.com/shorts/hiR9uWRnjt4)
 
-familiar-ai ezali komikala ya AI oyo eza na ndaku na yo.
-Sima ya mabe. Kosala code te.
+familiar-ai ezali AI oyo ezali na ndako na yo.
+Pesa yango ntango moke. Te mosala ya kombozola ezali lisusu na esika.
 
-Ekomi ntango ya moke mpo na komona mokili ya solo na ba kamera, ebandaka mpo na mobali ya robot, ebongisi na sonn, mpe etala makambo oyo eyebanaka. Tanga yango, ezali na nzela ya elanga, mpe bolingi na yango.
+Elandaka mabele ya solo na nzela ya ba kamera, ezali kobanga na moto ya roboti, ezali koloba na nzela ya lakanisi, mpe ebandeli koyeba oyo ezozanga. Pesa yango kombo, yemba nzela na yango, mpe letela yango elala na yo.
 
-## Mokomi ya mpona
+## Oyo ezali na yango
 
-- 👁 **Koma** — ebandeli bisika eltungi ebandeli na kamera ya Wi-Fi PTZ to USB webcam
-- 🔄 **Kota** — ebanda mpe etya kamera mpo na koluka bisika
-- 🦿 **Kima** — ezanga robot vacuum mpo na kopambola na ndaku
-- 🗣 **Koloba** — koloba na ElevenLabs TTS
-- 🎙 **Kotala** — koluka nzela ya limemya ya libanda na ElevenLabs Realtime STT (opt-in)
-- 🧠 **Koyeba** — ekomisa mpe elobaka ndele pamba na semantiki (SQLite + embeddings)
-- 🫀 **Teorie ya Moto** — ezwa mosala ya mokonzi ya ndenge ya mosala
-- 💭 **Bolingo** — ezinga na nakongisi ya na konekela bokeseni ya moto
+- 👁 **Kakisa** — ezua maboko na ba kamera ya Wi-Fi PTZ to ba webcam ya USB
+- 🔄 **Zala niboko** — pesaka mokumba mpe otaki kameran na elongo ya makambo
+- 🦿 **Luka** — kondima boyfriend ya roboti mpo na koluka na se
+- 🗣 **Loba** — lobá na nzela ya ElevenLabs TTS
+- 🎙 **Yeba** — nzela ya mabe mpo na yebisa nga na nzela ya ElevenLabs Realtime STT (okitani)
+- 🧠 **Koyeba** — ebandaka mpe ezosala koya na banzela ya semantiki (SQLite + embeddings)
+- 🫀 **Tala ya Motema** — elanda esika ya moto mosusu mpo na koboya
+- 💭 **Biso** — ezali na bisaleli na yango ekoki boluka ya masolo
 
-## Ntango ekotaka
+## Ndenge esalaka
 
-familiar-ai etonda na [ReAct](https://arxiv.org/abs/2210.03629) loop oyo etondisaka na LLM ya yo. Ekomi mokili na banzela, elakaka esika ya kosala, mpe elobaka — lokola moto.
+familiar-ai ezalaka na [ReAct](https://arxiv.org/abs/2210.03629) loop oyo eza na nzela ya LLM oyo olingi. Elandaka mabele na ba ngenga, elaki maka oyo ekoki osala nsima, mpe esalaka — lokola moto akoki.
 
 ```
 user input
-  → think → act (camera / move / speak / remember) → observe → think → ...
+  → kanga → salaka (kamerá / luka / loba / koyeba) → tala → kanga → ...
 ```
 
-Ntango ezangi mosala, ekomaka na biluni ya yango: nse, koluka komona na etumbeli, kokangaka moto oyo eza na ye.
+Ntango ezali na saaté, esalaka na bisaleli na yango: best example, koluka na kolanda, koluka oyo epesaka bolingo.
 
-## Komela
+## Kokota na mabele
 
-### 1. Kokoma uv
+### 1. Konyeka uv
 
+**macOS / Linux / WSL2:**
 ```bash
 curl -LsSf https://astral.sh/uv/install.sh | sh
 ```
 
-### 2. Kokoma ffmpeg
+**Windows (PowerShell):**
+```powershell
+powershell -ExecutionPolicy ByPass -c "irm https://astral.sh/uv/install.ps1 | iex"
+```
+To: `winget install astral-sh.uv`
 
-ffmpeg ezali **kolimbaka** mpo na kotalela bisika ya kamera mpe nzela ya sango.
+### 2. Konyeka ffmpeg
+
+ffmpeg ezali **soki ezokoma** mpo na kodita maboko na kamera mpe na kompeka ya yayi.
 
 | OS | Komanda |
 |----|---------|
@@ -58,12 +65,12 @@ ffmpeg ezali **kolimbaka** mpo na kotalela bisika ya kamera mpe nzela ya sango.
 | Ubuntu / Debian | `sudo apt install ffmpeg` |
 | Fedora / RHEL | `sudo dnf install ffmpeg` |
 | Arch Linux | `sudo pacman -S ffmpeg` |
-| Windows | `winget install ffmpeg` — tokana na [ffmpeg.org](https://ffmpeg.org/download.html) mpe uko na PATH |
+| Windows | `winget install ffmpeg` — to zala na [ffmpeg.org](https://ffmpeg.org/download.html) mpe lokola na PATH |
 | Raspberry Pi | `sudo apt install ffmpeg` |
 
-Sakola: `ffmpeg -version`
+Toto yaka: `ffmpeg -version`
 
-### 3. Kosala kopanga na instal
+### 3. Klona mpe konyeka
 
 ```bash
 git clone https://github.com/lifemate-ai/familiar-ai
@@ -71,55 +78,62 @@ cd familiar-ai
 uv sync
 ```
 
-### 4. Kosala configuration
+### 4. Seta
 
 ```bash
 cp .env.example .env
-# Pona .env na ba systèmes na yo
+# Phinga .env na ba settings na yo
 ```
 
-**Mokono ya malamu:**
+**Mokili moko:**
 
-| Variable | Nkombo |
+| Variable | Maloba |
 |----------|-------------|
-| `PLATFORM` | `anthropic` (default) \| `gemini` \| `openai` \| `kimi` \| `glm` |
-| `API_KEY` | API key na yo mpo na plateforme oyo okoti |
+| `PLATFORM` | `anthropic` (bato) \| `gemini` \| `openai` \| `kimi` \| `glm` |
+| `API_KEY` | API ko na platform oyo okendaki |
 
-**Soki olingi:**
+**Oyo ekoki:**
 
-| Variable | Nkombo |
+| Variable | Maloba |
 |----------|-------------|
-| `MODEL` | Nkombo ya motango (malamu ya nko na ba plateforme) |
-| `AGENT_NAME` | Koma oyo ekomonaka na TUI (mbala moke `Yukine`) |
-| `CAMERA_HOST` | IP ayina ya kamera ya ONVIF/RTSP na yo |
-| `CAMERA_USER` / `CAMERA_PASS` | Mbongo ya kamera |
+| `MODEL` | Liyangani kisima (ybassé) |
+| `AGENT_NAME` | Kombo ya likambo elandelaka na TUI (e.g. `Yukine`) |
+| `CAMERA_HOST` | IP ya kamera na yo ya ONVIF/RTSP |
+| `CAMERA_USER` / `CAMERA_PASS` | Ba credential ya kamera |
 | `ELEVENLABS_API_KEY` | Mpo na koloba — [elevenlabs.io](https://elevenlabs.io/) |
-| `REALTIME_STT` | `true` mpo na komilaka ya koloba na makambo (kolimuka `ELEVENLABS_API_KEY`) |
-| `TTS_OUTPUT` | Nzela ya kotalela sango: `local` (PC speaker, default) \| `remote` (kamera speaker) \| `both` |
-| `THINKING_MODE` | Anthropic kaka — `auto` (default) \| `adaptive` \| `extended` \| `disabled` |
-| `THINKING_EFFORT` | Koyeba ya kosala: `high` (default) \| `medium` \| `low` \| `max` (Opus 4.6 kaka) |
+| `REALTIME_STT` | `true` mpo na kolinga ya koyoka na nzela ya bozingi (bato ya `ELEVENLABS_API_KEY`) |
+| `TTS_OUTPUT` | Esika ya kompeka: `local` (PC speaker, bongo) \| `remote` (kamera speaker) \| `both` |
+| `THINKING_MODE` | Anthropic soki — `auto` (batel) \| `adaptive` \| `extended` \| `disabled` |
+| `THINKING_EFFORT` | Ndenge ya koyeba: `high` (batel) \| `medium` \| `low` \| `max` (Opus 4.6 soki) |
 
-### 5. Kosala familiar na yo
+### 5. Pesa mo familiar
 
 ```bash
 cp persona-template/en.md ME.md
-# Pona ME.md — tanga yango mpe ba nkombo
+# Bunda ME.md — pesa yango kombo mpe maloba
 ```
 
-### 6. Run
+### 6. Salaka
 
+**macOS / Linux / WSL2:**
 ```bash
-./run.sh             # Textual TUI (koseka)
-./run.sh --no-tui    # REPL ya solo
+./run.sh             # TUI ya ndenge
+./run.sh --no-tui    # REPL ya botom
+```
+
+**Windows:**
+```bat
+run.bat              # TUI ya ndenge
+run.bat --no-tui     # REPL ya botom
 ```
 
 ---
 
-## Koboya na LLM
+## Koyangela LLM
 
-> **Malamu: Kimi K2.5** — mosala ya agentic esengeli oyo ekomi. Eza eloko motema, elobi bokeseni, mpe esalaka mosala na ndenge ebele ya mosala. Eza na bango na Claude Haiku.
+> **Oyo ebotami: Kimi K2.5** — ya moke ya kitoki koleka oyo esalaka. Eteya esika, epesaka mibeko misi, mpe esalaka na ndenge ya bokonzi oyo baye mosusu batemaki. Bazali na mbongo moko na Claude Haiku.
 
-| Platform | `PLATFORM=` | Model ya malamu | Mpo na kokoma clé |
+| Platform | `PLATFORM=` | Mongo ya lisanga | Esika ya kokufa |
 |----------|------------|---------------|-----------------|
 | **Moonshot Kimi K2.5** | `kimi` | `kimi-k2.5` | [platform.moonshot.ai](https://platform.moonshot.ai) |
 | Z.AI GLM | `glm` | `glm-4.6v` | [api.z.ai](https://api.z.ai) |
@@ -128,16 +142,16 @@ cp persona-template/en.md ME.md
 | OpenAI | `openai` | `gpt-4o-mini` | [platform.openai.com](https://platform.openai.com) |
 | OpenAI-compatible (Ollama, vllm…) | `openai` + `BASE_URL=` | — | — |
 | OpenRouter.ai (multi-provider) | `openai` + `BASE_URL=https://openrouter.ai/api/v1` | — | [openrouter.ai](https://openrouter.ai) |
-| **CLI tool** (claude -p, ollama…) | `cli` | (mosala) | — |
+| **CLI tool** (claude -p, ollama…) | `cli` | (mokanda) | — |
 
-**Kimi K2.5 `.env` example:**
+**Kimi K2.5 `.env` exemple:**
 ```env
 PLATFORM=kimi
 API_KEY=sk-...   # na platform.moonshot.ai
 AGENT_NAME=Yukine
 ```
 
-**Z.AI GLM `.env` example:**
+**Z.AI GLM `.env` exemple:**
 ```env
 PLATFORM=glm
 API_KEY=...   # na api.z.ai
@@ -145,39 +159,39 @@ MODEL=glm-4.6v   # vision-enabled; glm-4.7 / glm-5 = text-only
 AGENT_NAME=Yukine
 ```
 
-**Google Gemini `.env` example:**
+**Google Gemini `.env` exemple:**
 ```env
 PLATFORM=gemini
 API_KEY=AIza...   # na aistudio.google.com
-MODEL=gemini-2.5-flash  # to gemini-2.5-pro mpo na bokeseni
+MODEL=gemini-2.5-flash  # to gemini-2.5-pro mpo na bokonzi 
 AGENT_NAME=Yukine
 ```
 
-**OpenRouter.ai `.env` example:**
+**OpenRouter.ai `.env` exemple:**
 ```env
 PLATFORM=openai
 BASE_URL=https://openrouter.ai/api/v1
 API_KEY=sk-or-...   # na openrouter.ai
-MODEL=mistralai/mistral-7b-instruct  # soki: kotelema model
+MODEL=mistralai/mistral-7b-instruct  # optional: komela model
 AGENT_NAME=Yukine
 ```
 
-> **Ndakisa:** Soki olingi koponaka ba modèle ya local/NVIDIA, songela te `BASE_URL` na etuka ya local lokola `http://localhost:11434/v1`. Salamaki na makambo ya mpasi.
+> **Kosenga:** Mpo na kombozola ba moa ya kotomboka/NVIDIA, just te tokozala na `BASE_URL` na lokasa ya local ndenge `http://localhost:11434/v1`. Senga bongo ba mokonzi.
 
-**CLI tool `.env` example:**
+**CLI tool `.env` exemple:**
 ```env
 PLATFORM=cli
-MODEL=llm -m gemma3 {}        # llm CLI (https://llm.datasette.io) — {} = promt arg
-# MODEL=ollama run gemma3:27b  # Ollama — to {} akobanda, promt ekotaka na stdin
+MODEL=llm -m gemma3 {}        # llm CLI (https://llm.datasette.io) — {} = prompt arg
+# MODEL=ollama run gemma3:27b  # Ollama — te {}, prompt ebenda na stdin
 ```
 
 ---
 
 ## MCP Servers
 
-familiar-ai ekokaka komitungisa na MCP (Model Context Protocol) server nyonso. Nke ezali kopesa yo nzela ya koboya bamemeli, asangisi ya ba fichiers, koluka na internet, to nyonso na motuka.
+familiar-ai akoki kokamata na [MCP (Model Context Protocol)](https://modelcontextprotocol.io) server. Oyo eteya yo kosangisa na motindo ya sikana, acces na filesystem, web search, to eloko mosusu.
 
-Configure ba servers na `~/.familiar-ai.json` (mokuse malamu na Claude Code):
+Seta na servers na `~/.familiar-ai.json` (makambo o kolanda na Claude Code):
 
 ```json
 {
@@ -195,129 +209,129 @@ Configure ba servers na `~/.familiar-ai.json` (mokuse malamu na Claude Code):
 }
 ```
 
-Mokuse mibale ezali komakanisa:
-- **`stdio`**: salaka mokonzi ya local subprocess (`command` + `args`)
-- **`sse`**: kotalela HTTP+SSE server (`url`)
+Bato mibale ya transport ezali na esika:
+- **`stdio`**: 开启 na tsukeman  (komanda + args)
+- **`sse`**: kotinda na HTTP+SSE server (`url`)
 
-Tika mposa ya fayile ya configuration na `MCP_CONFIG=/path/to/config.json`.
+Override lokasa ya config na `MCP_CONFIG=/path/to/config.json`.
 
 ---
 
 ## Hardware
 
-familiar-ai eza na ebonga na hardware nyonso oyo ozangi — to kosa.
+familiar-ai akoki kozala na hardware nyonso okoki — to okosengaka.
 
-| Eprop | Soki azali | Elembi | Eteka? |
+| Part | Oyo ezali | Exemple | Osengaka? |
 |------|-------------|---------|-----------|
-| Wi-Fi PTZ camera | Miso + likolo | Tapo C220 (~$30) | **Malamu** |
-| USB webcam | Miso (mbala moke) | Tanda UVC | **Malamu** |
-| Robot vacuum | Maboko | Model nyonso ya Tuya | Te |
-| PC / Raspberry Pi | Motema | Ndenge nyonso yaka Python | **Eteka** |
+| Wi-Fi PTZ camera | Miso + risanga | Tapo C220 (~$30) | **Obenga** |
+| USB webcam | Miso (simaki) | Nyonso UVC kamera | **Obenga** |
+| Robot vacuum | Makabo | Nyonso milayi ya Tuya | Te |
+| PC / Raspberry Pi | Motema | Eloko nionso eza na Python | **Ee** |
 
-> **Kamera ezali na milulu malamu.** Kaka soki ozangi, familiar-ai ekoki koloba — kasi ekozala na seko ya mokili, oyo ezali makambo ya motindi.
+> **Kamera ezali na bokebisa.** Na yo, familiar-ai akoki koloba — kasi akoki te kokanisa mabele, oyo ezali na se ya koko.
 
-### Setup ya malamu (nzala hardware)
+### Install minimal (te hardware)
 
-Olingi kaka ko tester? Olingaka soki ozangi API key:
+Olingi kokalama? Olingi te na API key:
 
 ```env
 PLATFORM=kimi
 API_KEY=sk-...
 ```
 
-Run `./run.sh` mpe biloko babebisi. Kanga hardware soki olingi.
+Salaka `./run.sh` (macOS/Linux/WSL2) to `run.bat` (Windows) mpe tanga akongisa. Lika na hardware na yo.
 
-### Wi-Fi PTZ camera (Tapo C220)
+### Wi-Fi PTZ kamera (Tapo C220)
 
-1. Na Tapo app: **Settings → Advanced → Camera Account** — sali lokasa ya local (te TP-Link account)
-2. Kanga IP ya kamera na likambo ya router na yo
-3. Set na `.env`:
+1. Na lolenge ya Tapo: **Settings → Advanced → Kamera Account** — pesa eloko ya mabele (te konto TP-Link)
+2. Tanga IP ya kamera na l'état na yo
+3. Sete na `.env`:
    ```env
    CAMERA_HOST=192.168.1.xxx
-   CAMERA_USER=libaka-lokasa-na-yo
-   CAMERA_PASS=libaka-lokasa-na-yo
+   CAMERA_USER=naam-na-yo
+   CAMERA_PASS=lozoi-na-yo
    ```
 
-### Koloba (ElevenLabs)
+### Sawa (ElevenLabs)
 
-1. Benga API clé na [elevenlabs.io](https://elevenlabs.io/)
-2. Set na `.env`:
+1. Benga API key na [elevenlabs.io](https://elevenlabs.io/)
+2. Sete na `.env`:
    ```env
    ELEVENLABS_API_KEY=sk_...
-   ELEVENLABS_VOICE_ID=...   # soki, elakisi moto ya libanda soki ekoki
+   ELEVENLABS_VOICE_ID=...   # optional, elala na nzela lakanisi
    ```
 
-Eza na milulu mibale, elakisi na `TTS_OUTPUT`:
+Eza na bisika ya zala ya koloba, oyo ezali konyangwa na `TTS_OUTPUT`:
 
 ```env
-TTS_OUTPUT=local    # PC speaker (default)
+TTS_OUTPUT=local    # PC speaker (bato)
 TTS_OUTPUT=remote   # kamera speaker te
-TTS_OUTPUT=both     # kamera speaker + PC speaker na libanda
+TTS_OUTPUT=both     # kamera speaker + PC speaker siko
 ```
 
-#### A) Kamera speaker (soki go2rtc)
+#### A) Kamera speaker (na go2rtc)
 
-Set `TTS_OUTPUT=remote` (to `both`). Eza na [go2rtc](https://github.com/AlexxIT/go2rtc/releases):
+Sete `TTS_OUTPUT=remote` (to `both`). Eza na [go2rtc](https://github.com/AlexxIT/go2rtc/releases):
 
-1. Tika binari na [releases page](https://github.com/AlexxIT/go2rtc/releases):
+1. Tika bokasi ya bili na \[releases page\](https://github.com/AlexxIT/go2rtc/releases):
    - Linux/macOS: `go2rtc_linux_amd64` / `go2rtc_darwin_amd64`
    - **Windows: `go2rtc_win64.exe`**
 
-2. Tika mpe asukisa yango:
+2. Zala mpe komela yango:
    ```
    # Linux / macOS
-   ~/.cache/embodied-claude/go2rtc/go2rtc          # hakisa +=x 
-   
+   ~/.cache/embodied-claude/go2rtc/go2rtc          # chmod +x ya kulanda
+
    # Windows
    %USERPROFILE%\.cache\embodied-claude\go2rtc\go2rtc.exe
    ```
 
-3. Salisa `go2rtc.yaml` na esika moko:
+3. Funda `go2rtc.yaml` na esika moko:
    ```yaml
    streams:
      tapo_cam:
        - rtsp://YOUR_CAM_USER:YOUR_CAM_PASS@YOUR_CAM_IP/stream1
    ```
-   Salisa nzela ya local kamera (te TP-Link cloud account).
+   Mikanda esalaka na ba credential ya kamera ya local (te TP-Link cloud account).
 
-4. familiar-ai ebanda go2rtc na malamu ya libanda. Soki kamera na yo ekokaki bifola, molongo ezo play na kamera speaker.
+4. familiar-ai etombaka go2rtc site esala. Soki kamera na yo ezalaka na audio nyonso (backchannel), loba ezozanga na kamera speaker.
 
-#### B) Local PC speaker
+#### B) PC speaker ya local
 
-Mokolo ya mbala (default) `TTS_OUTPUT=local`. Ebandaka na bilanga ya banza: **paplay** → **mpv** → **ffplay**. Eza mpe ezalaka lokola bonzeli soki `TTS_OUTPUT=remote` mpe go2rtc ezali na esika.
+Ezalaka ya solosolo (`TTS_OUTPUT=local`). Elandaka ba players na lestate: **paplay** → **mpv** → **ffplay**. Ekozala mpe na ebandeli soki `TTS_OUTPUT=remote` mpe go2rtc ezali te.
 
-| OS | Koma |
+| OS | Kolia |
 |----|---------|
 | macOS | `brew install mpv` |
 | Ubuntu / Debian | `sudo apt install mpv` (to `paplay` na `pulseaudio-utils`) |
 | WSL2 / WSLg | `sudo apt install pulseaudio-utils` — set `PULSE_SERVER=unix:/mnt/wslg/PulseServer` na `.env` |
-| Windows | [mpv.io/installation](https://mpv.io/installation/) — benga mpe set na PATH, **to** `winget install ffmpeg` |
+| Windows | [mpv.io/installation](https://mpv.io/installation/) — kolia mpe kozalaka na PATH, **to** `winget install ffmpeg` |
 
-> Soki na esika ya koloba, eloko ekokaki; kasi ekosala te.
+> Soki te na audio player, esalaka kombo — alingi te oleka na kombo.
 
-### Ekoko ya nzela (Realtime STT)
+### Input ya lobá (Realtime STT)
 
-Set `REALTIME_STT=true` na `.env` mpo na motema mobimba, ekokaka na masanga:
+Seta `REALTIME_STT=true` na `.env` mpo na koyinga ya yo na yebisa na nzela ya lokasa:
 
 ```env
 REALTIME_STT=true
-ELEVENLABS_API_KEY=sk_...   # benga clé lokola TTS
+ELEVENLABS_API_KEY=sk_...   # komengo key ya TTS
 ```
 
-familiar-ai ekoki kokota microphone audio na ElevenLabs Scribe v2 mpe eko salaka transcripts tango okimi koloba. Ntango eyaka ezali na pesi. Ekonka na pamba na tinda-loyu (Ctrl+T).
+familiar-ai ekokaka ba musique na microphone na ElevenLabs Scribe v2 mpe auto-commits motsi nsima ya kozala. Te bongo na lobá. Ezozanga na mädälo ya tindi (Ctrl+T).
 
 ---
 
 ## TUI
 
-familiar-ai ezalaka na UI ya terminal oyo ekomi na [Textual](https://textual.textualize.io/):
+familiar-ai ebendaka na terminal UI oyo ebengaka [Textual](https://textual.textualize.io/):
 
-- Bino na ko simba na nkombo na tango oyo esali
-- Tab-completion mpo na `/quit`, `/clear`
-- Botola agent na tango nyonso ya lokola elobi tango ayoki
-- **Koti ya sekela** ekosala na file `~/.cache/familiar-ai/chat.log`
+- Kalisela mosala ya mboka na biso
+- Tab-bongani ya `/quit`, `/clear`
+- Koyeka agent eza na nsima ya kokutana
+- **Log ya makama** ekokaka na `~/.cache/familiar-ai/chat.log`
 
-Kotalela log na lalanda esika mosusu (malamu mpo na ko copy-paste):
+Mpo na iká log na ntango mosusu (ekeseni):
 ```bash
 tail -f ~/.cache/familiar-ai/chat.log
 ```
@@ -326,53 +340,53 @@ tail -f ~/.cache/familiar-ai/chat.log
 
 ## Persona (ME.md)
 
-Molongo ya familiar na yo eza na `ME.md`. Mobongisi oyo eko gitignored — ewola insiko.
+Maloba ya familiar na yo ezalaka na `ME.md`. File oyo ezali gitignored — eza maloa ya yo.
 
-Talá [`persona-template/en.md`](./persona-template/en.md) mpo na motif, to [`persona-template/ja.md`](./persona-template/ja.md) mpo na version ya Japon.
+Tanga [`persona-template/en.md`](./persona-template/en.md) mpo na exemple, to [`persona-template/ja.md`](./persona-template/ja.md) mpo na version Japonese.
 
 ---
 
 ## FAQ
 
-**Q: Eza na mabe soki ezanga GPU?**
-Eza. Model ya embedding (multilingual-e5-small) esali malamu na CPU. GPU ezali kopesa makasi kasi eza na ntoma.
+**Q: Ekoki osala na GPU?**
+Ee. Model embedding (multilingual-e5-small) ebenda ko malela nzela ya CPU. GPU ekosi makasi kasi ezali te.
 
-**Q: Ndingaki koloba soki eza na kamera ya moke?**
-Ndenge nyonso ya kamera oyo etali ONVIF + RTSP ekozala malamu. Tapo C220 elingi ezanga.
+**Q: Nakoki koya na kamera mosusu?**
+Eloko nionso ekoki konyuka ONVIF + RTSP esalaka. Tapo C220 ezalaka na ewuti na model.
 
-**Q: Lelo nakoyeba kilo?**
-Miso na texte ekozali na API ya LLM oyo okoti mpo na kokoma. Yo ekokaka na `~/.familiar_ai/`.
+**Q: Datos na ngai ekotaka esika moko?**
+Mabakisa na likambo na yebisi ya LLM API oyo osalaka na processing. Mbango ebandi na local na `~/.familiar_ai/`.
 
-**Q: Ndenge nini agent akosala `（...）` to na tango ya yolo?**
-Kama `ELEVENLABS_API_KEY` ezala. Soki ezangi, koloba ekomaka nayo, mpi agent ekozamaka na texte.
+**Q: Pourquoi agent alinga `（...）` na nzela ya koloba?**
+Senga `ELEVENLABS_API_KEY` ekoti. Soki te, lobá esengaka mpe agent еzali na mongala na texte.
 
-## Nzela ya motindo
+## Technical background
 
-Olingi koyeba ndenge ekosala? Talá [docs/technical.md](./docs/technical.md) mpo na misala mpe ba bosala bi komi familiar-ai — ReAct, SayCan, Reflexion, Voyager, bokengi ya motema, mpe banzela.
+Olingi koyeba ndenge esalaka? Tanga [docs/technical.md](./docs/technical.md) mpo na masolo na nzela ya familiar-ai — ReAct, SayCan, Reflexion, Voyager, bisaleli ya koluka, mpe makambo mosusu.
 
 ---
 
-## Kobota
+## Contributing
 
-familiar-ai ezali na experiment ebelaka ya malamu. Soki na likanisi na yo — tekniki to filozofiko — ebimi ezali malamu.
+familiar-ai ezalaka na lipanda. Soki nionso oyo ezozanga na yo — tekniki to philosophically — ba pusa esalaka.
 
-**Bato oyo bazali na basango:**
+**Ba esika ya malamu ya coyinga:**
 
-| Eprop | Nini ekokama |
+| Espace | Oyo ezali na ye |
 |------|---------------|
-| Hardware mpya | Liziko ya ba kamera ebele (RTSP, IP Webcam), microphones, bakesi |
-| Ba nzela etali | Koluka na internet, sokisi, bibokeli, nyonso na MCP |
-| Ba nkanda ya mbala mpe | Nyonso LLM to lokasa oyo ekoki `stream_turn` |
-| Templates ya persona | ME.md templates mpo na mbala ya malamu |
-| Nyonso ya ndenge | Bato bazwaki ezanga ya motema, mbalo ya motema, ba question ya motako |
-| Ezyo | Tutoriaux, bilanga, translations |
+| Hardware siko | Support ya ba kamera mosusu (RTSP, IP Webcam), ba microphone, dobo |
+| Ba ngateli | Internet research, home automation, calendrier, eloko nyonso na MCP |
+| Ba backends | Eloko nyonso LLM to local model oyo esalaka na `stream_turn` interface |
+| Ba template ya persona | Templates ME.md mpo na lingala ndenge mosusu mpe maloba |
+| Masambo | Makambo malamu ya koyeba, boluka mboka, theory-of-mind prompting |
+| Liyangani | Ba tutorial, boluka, ba traductions |
 
-Talá [CONTRIBUTING.md](./CONTRIBUTING.md) mpo na konpekosi, lingala, mpe ba PR guidelines.
+Tanga [CONTRIBUTING.md](./CONTRIBUTING.md) mpo na dev setup, style ya code, mpe PR malanda.
 
-Soki ozangi kobanga wapi, [salela makambo](https://github.com/lifemate-ai/familiar-ai/issues) — malamu nakanisi yo na ezanga.
+Soki oza na ntango te, [okota pondu](https://github.com/lifemate-ai/familiar-ai/issues) — eza malamu koleka na esika esalaka na yo.
 
 ---
 
-## Lilota
+## License
 
 [MIT](./LICENSE)

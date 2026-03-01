@@ -1,57 +1,65 @@
 # familiar-ai 🐾
 
-**O IA care trăiește alături de tine** — cu ochi, voce, picioare și memorie.
+**O AI care trăiește alături de tine** — cu ochi, voce, picioare și memorie.
 
 [![Lint](https://github.com/kmizu/familiar-ai/actions/workflows/lint.yml/badge.svg)](https://github.com/kmizu/familiar-ai/actions/workflows/lint.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](./LICENSE)
 [![Python 3.10+](https://img.shields.io/badge/python-3.10+-blue.svg)](https://www.python.org/)
 [![GitHub Sponsors](https://img.shields.io/github/sponsors/kmizu?style=flat&logo=github&color=ea4aaa)](https://github.com/sponsors/kmizu)
 
-[→ English README](../README.md)
+🌍 [Disponibil în 74 de limbi](./SUPPORTED_LANGUAGES.md)
 
 ---
 
 [![Demo video](https://img.youtube.com/vi/hiR9uWRnjt4/0.jpg)](https://youtube.com/shorts/hiR9uWRnjt4)
 
-familiar-ai este un companion IA care trăiește în casa ta. Configurează-l în câteva minute. Nu este necesară niciună programare.
+familiar-ai este un companion AI care trăiește în casa ta.
+Poate fi configurat în câteva minute. Nu este nevoie de codare.
 
-Se percepe lumea reală prin camere, se mișcă pe un corp de robot, vorbește cu voce tare și își amintește ce vede. Dă-i un nume, scrie-i personalitatea și lasă-l să trăiască cu tine.
+Percepe lumea reală prin camere, se mișcă pe un corp de robot, vorbește cu voce tare și își amintește ce vede. Dă-i un nume, scrie-i personalitatea și lasă-l să trăiască cu tine.
 
 ## Ce poate face
 
-- 👁 **Vede** — captează imagini de la o cameră PTZ Wi-Fi sau webcam USB
-- 🔄 **Se uită în jur** — rotește și înclină camera pentru a explora împrejurimile
-- 🦿 **Se mișcă** — conduce un aspirator robot pentru a se plimba prin cameră
-- 🗣 **Vorbește** — vorbește prin ElevenLabs TTS
+- 👁 **Vezi** — captează imagini de la o cameră Wi-Fi PTZ sau webcam USB
+- 🔄 **Cercetează** — rotește și înclină camera pentru a explora împrejurimile
+- 🦿 **Mergi** — conduce un aspirator robot pentru a se plimba prin cameră
+- 🗣 **Vorbește** — comunică prin ElevenLabs TTS
 - 🎙 **Ascultă** — input vocal hands-free prin ElevenLabs Realtime STT (opt-in)
-- 🧠 **Își amintește** — stochează și reamintește activ amintiri cu căutare semantică (SQLite + embeddings)
-- 🫀 **Teoria minții** — ia în considerare perspectiva celeilalte persoane înainte de a răspunde
-- 💭 **Dorinta** — are propriile impulsuri interioare care declanșează comportament autonom
+- 🧠 **Amintește** — stochează activ și își amintește amintirile cu căutare semantică (SQLite + embeddings)
+- 🫀 **Teoria minții** — ia perspectiva celeilalte persoane înainte de a răspunde
+- 💭 **Dorință** — are propriile stimulente interne care declanșează un comportament autonom
 
 ## Cum funcționează
 
-familiar-ai rulează un loop [ReAct](https://arxiv.org/abs/2210.03629) alimentat de alegerea ta de LLM. El percepe lumea prin instrumente, se gândește ce să facă în continuare și acționează — exact ca o persoană.
+familiar-ai rulează un loop [ReAct](https://arxiv.org/abs/2210.03629) alimentat de alegerea ta de LLM. Percepe lumea prin instrumente, gândește despre ce să facă în continuare și acționează — la fel ca o persoană.
 
 ```
 user input
   → think → act (camera / move / speak / remember) → observe → think → ...
 ```
 
-Când nu este activ, acționează în funcție de propriile dorințe: curiozitate, dorința de a se uita afară, dorind persoana cu care trăiește.
+Când este inactiv, acționează pe baza propriilor dorințe: curiozitate, dorința de a privi afară, dorirea persoanei cu care locuiește.
 
-## Cum să începi
+## Începând
 
 ### 1. Instalează uv
 
+**macOS / Linux / WSL2:**
 ```bash
 curl -LsSf https://astral.sh/uv/install.sh | sh
 ```
 
+**Windows (PowerShell):**
+```powershell
+powershell -ExecutionPolicy ByPass -c "irm https://astral.sh/uv/install.ps1 | iex"
+```
+Sau: `winget install astral-sh.uv`
+
 ### 2. Instalează ffmpeg
 
-ffmpeg este **necessar** pentru capturarea imaginilor de cameră și redarea audio.
+ffmpeg este **necesar** pentru captarea imaginii camerei și redarea audio.
 
-| OS | Command |
+| OS | Comandă |
 |----|---------|
 | macOS | `brew install ffmpeg` |
 | Ubuntu / Debian | `sudo apt install ffmpeg` |
@@ -62,7 +70,7 @@ ffmpeg este **necessar** pentru capturarea imaginilor de cameră și redarea aud
 
 Verifică: `ffmpeg -version`
 
-### 3. Clonează și instalează
+### 3. Clonare și instalare
 
 ```bash
 git clone https://github.com/lifemate-ai/familiar-ai
@@ -81,22 +89,22 @@ cp .env.example .env
 
 | Variabilă | Descriere |
 |-----------|-----------|
-| `PLATFORM` | `anthropic` (implicit) \| `gemini` \| `openai` \| `kimi` \| `glm` |
+| `PLATFORM` | `anthropic` (default) \| `gemini` \| `openai` \| `kimi` \| `glm` |
 | `API_KEY` | Cheia ta API pentru platforma aleasă |
 
 **Opțional:**
 
 | Variabilă | Descriere |
 |-----------|-----------|
-| `MODEL` | Numele modelului (opțiuni implicite sensibile per platformă) |
-| `AGENT_NAME` | Numele afișat în TUI (de exemplu, `Yukine`) |
+| `MODEL` | Numele modelului (implicite sensibile pe fiecare platformă) |
+| `AGENT_NAME` | Numele afisat în TUI (ex. `Yukine`) |
 | `CAMERA_HOST` | Adresa IP a camerei tale ONVIF/RTSP |
-| `CAMERA_USER` / `CAMERA_PASS` | Credite de autentificare pentru cameră |
-| `ELEVENLABS_API_KEY` | Pentru redarea vocii — [elevenlabs.io](https://elevenlabs.io/) |
-| `REALTIME_STT` | `true` pentru a activa inputul vocal hands-free permanent (necesită `ELEVENLABS_API_KEY`) |
+| `CAMERA_USER` / `CAMERA_PASS` | Credentiele camerei |
+| `ELEVENLABS_API_KEY` | Pentru ieșirea vocală — [elevenlabs.io](https://elevenlabs.io/) |
+| `REALTIME_STT` | `true` pentru a activa input-ul vocal hands-free mereu (necesită `ELEVENLABS_API_KEY`) |
 | `TTS_OUTPUT` | Unde să redai audio: `local` (difuzor PC, implicit) \| `remote` (difuzor cameră) \| `both` |
-| `THINKING_MODE` | Doar Anthropic — `auto` (implicit) \| `adaptive` \| `extended` \| `disabled` |
-| `THINKING_EFFORT` | Efort de gândire adaptiv: `high` (implicit) \| `medium` \| `low` \| `max` (doar Opus 4.6) |
+| `THINKING_MODE` | Numai Anthropic — `auto` (implicit) \| `adaptive` \| `extended` \| `disabled` |
+| `THINKING_EFFORT` | Efortul de gândire adaptiv: `high` (implicit) \| `medium` \| `low` \| `max` (numai Opus 4.6) |
 
 ### 5. Creează-ți familiarul
 
@@ -107,52 +115,59 @@ cp persona-template/en.md ME.md
 
 ### 6. Rulează
 
+**macOS / Linux / WSL2:**
 ```bash
-./run.sh             # TUI text
+./run.sh             # TUI textual (recomandat)
 ./run.sh --no-tui    # REPL simplu
+```
+
+**Windows:**
+```bat
+run.bat              # TUI textual (recomandat)
+run.bat --no-tui     # REPL simplu
 ```
 
 ---
 
 ## Alegerea unui LLM
 
-> **Recomandat: Kimi K2.5** — cea mai bună performanță agentică testată până acum. Observă contextul, pune întrebări de continuare și acționează autonom în moduri în care alte modele nu o fac. Preț similar cu Claude Haiku.
+> **Recomandat: Kimi K2.5** — cea mai bună performanță agentică testată până acum. Observă contextul, pune întrebări suplimentare și acționează autonom în moduri în care alte modele nu o fac. Preț similar cu Claude Haiku.
 
-| Platformă | `PLATFORM=` | Model implicit | Unde obții cheia |
-|-----------|------------|----------------|------------------|
+| Platformă | `PLATFORM=` | Model implicit | Unde să obții cheia |
+|-----------|-------------|----------------|---------------------|
 | **Moonshot Kimi K2.5** | `kimi` | `kimi-k2.5` | [platform.moonshot.ai](https://platform.moonshot.ai) |
 | Z.AI GLM | `glm` | `glm-4.6v` | [api.z.ai](https://api.z.ai) |
 | Anthropic Claude | `anthropic` | `claude-haiku-4-5-20251001` | [console.anthropic.com](https://console.anthropic.com) |
 | Google Gemini | `gemini` | `gemini-2.5-flash` | [aistudio.google.com](https://aistudio.google.com) |
 | OpenAI | `openai` | `gpt-4o-mini` | [platform.openai.com](https://platform.openai.com) |
-| Compatibil OpenAI (Ollama, vllm…) | `openai` + `BASE_URL=` | — | — |
+| Compatibil cu OpenAI (Ollama, vllm…) | `openai` + `BASE_URL=` | — | — |
 | OpenRouter.ai (multi-provider) | `openai` + `BASE_URL=https://openrouter.ai/api/v1` | — | [openrouter.ai](https://openrouter.ai) |
-| **CLI tool** (claude -p, ollama…) | `cli` | (comanda) | — |
+| **Instrument CLI** (claude -p, ollama…) | `cli` | (comanda) | — |
 
-**Exemplu de `.env` pentru Kimi K2.5:**
+**Exemplu `.env` Kimi K2.5:**
 ```env
 PLATFORM=kimi
 API_KEY=sk-...   # de la platform.moonshot.ai
 AGENT_NAME=Yukine
 ```
 
-**Exemplu de `.env` pentru Z.AI GLM:**
+**Exemplu `.env` Z.AI GLM:**
 ```env
 PLATFORM=glm
 API_KEY=...   # de la api.z.ai
-MODEL=glm-4.6v   # capabilitate vizuală; glm-4.7 / glm-5 = doar text
+MODEL=glm-4.6v   # activat pentru viziune; glm-4.7 / glm-5 = doar text
 AGENT_NAME=Yukine
 ```
 
-**Exemplu de `.env` pentru Google Gemini:**
+**Exemplu `.env` Google Gemini:**
 ```env
 PLATFORM=gemini
 API_KEY=AIza...   # de la aistudio.google.com
-MODEL=gemini-2.5-flash  # sau gemini-2.5-pro pentru capacitate mai mare
+MODEL=gemini-2.5-flash  # sau gemini-2.5-pro pentru capabilități superioare
 AGENT_NAME=Yukine
 ```
 
-**Exemplu de `.env` pentru OpenRouter.ai:**
+**Exemplu `.env` OpenRouter.ai:**
 ```env
 PLATFORM=openai
 BASE_URL=https://openrouter.ai/api/v1
@@ -161,20 +176,20 @@ MODEL=mistralai/mistral-7b-instruct  # opțional: specifică modelul
 AGENT_NAME=Yukine
 ```
 
-> **Notă:** Pentru a dezactiva modelele locale/NVIDIA, pur și simplu nu seta `BASE_URL` la un endpoint local precum `http://localhost:11434/v1`. Folosește în schimb furnizori de cloud.
+> **Notă:** Pentru a dezactiva modelele locale/NVIDIA, pur și simplu nu seta `BASE_URL` la un endpoint local precum `http://localhost:11434/v1`. Folosește furnizori de cloud în schimb.
 
-**Exemplu de `.env` pentru CLI tool:**
+**Exemplu `.env` instrument CLI:**
 ```env
 PLATFORM=cli
-MODEL=llm -m gemma3 {}        # llm CLI (https://llm.datasette.io) — {} = prompt arg
-# MODEL=ollama run gemma3:27b  # Ollama — nu {}, promptul merge prin stdin
+MODEL=llm -m gemma3 {}        # llm CLI (https://llm.datasette.io) — {} = argumet prompt
+# MODEL=ollama run gemma3:27b  # Ollama — fără {}, promptul merge prin stdin
 ```
 
 ---
 
 ## Servere MCP
 
-familiar-ai poate conecta la orice server [MCP (Model Context Protocol)](https://modelcontextprotocol.io). Acest lucru îți permite să integrezi memorie externă, acces la sistem de fișiere, căutare pe web sau orice alt instrument.
+familiar-ai poate să se conecteze la orice server [MCP (Model Context Protocol)](https://modelcontextprotocol.io). Aceasta îți permite să conectezi memorie externă, acces la sistem de fișiere, căutare web, sau orice alt instrument.
 
 Configurează serverele în `~/.familiar-ai.json` (același format ca Claude Code):
 
@@ -194,26 +209,26 @@ Configurează serverele în `~/.familiar-ai.json` (același format ca Claude Cod
 }
 ```
 
-Sunt acceptate două tipuri de transport:
-- **`stdio`**: lansează un subprocess local (`command` + `args`)
-- **`sse`**: conectează-te la un server HTTP+SSE (`url`)
+Două tipuri de transport sunt suportate:
+- **`stdio`**: lansați un subprocess local (`command` + `args`)
+- **`sse`**: conectați-vă la un server HTTP+SSE (`url`)
 
-Substituie locația fișierului de configurare cu `MCP_CONFIG=/path/to/config.json`.
+Overscrieți locația fișierului de configurare cu `MCP_CONFIG=/path/to/config.json`.
 
 ---
 
 ## Hardware
 
-familiar-ai funcționează cu orice hardware ai — sau fără niciunul.
+familiar-ai funcționează cu orice hardware ai, sau fără deloc.
 
-| Parte | Ce face | Exemplu | Necesită? |
+| Parte | Ce face | Exemplu | Necesare? |
 |-------|---------|---------|-----------|
-| Cameră PTZ Wi-Fi | Ochii + gâtul | Tapo C220 (~$30) | **Recomandat** |
-| Webcam USB | Ochii (fix) | Orice cameră UVC | **Recomandat** |
+| Cameră Wi-Fi PTZ | Ochi + gât | Tapo C220 (~$30) | **Recomandat** |
+| Webcam USB | Ochi (fix) | Orice cameră UVC | **Recomandat** |
 | Aspirator robot | Picioare | Orice model compatibil Tuya | Nu |
 | PC / Raspberry Pi | Creier | Orice care rulează Python | **Da** |
 
-> **O cameră este foarte recomandată.** Fără una, familiar-ai poate încă vorbi — dar nu poate vedea lumea, ceea ce este cam întregul punct.
+> **O cameră este foarte recomandată.** Fără ea, familiar-ai poate încă vorbi — dar nu poate vedea lumea, ceea ce este cam tot.
 
 ### Configurare minimă (fără hardware)
 
@@ -224,17 +239,17 @@ PLATFORM=kimi
 API_KEY=sk-...
 ```
 
-Rulează `./run.sh` și începe să conversezi. Adaugă hardware pe parcurs.
+Rulează `./run.sh` (macOS/Linux/WSL2) sau `run.bat` (Windows) și începe să interacționezi. Adaugă hardware pe parcurs.
 
-### Cameră PTZ Wi-Fi (Tapo C220)
+### Cameră Wi-Fi PTZ (Tapo C220)
 
-1. În aplicația Tapo: **Setări → Avansate → Contul camerei** — creează un cont local (nu un cont TP-Link)
-2. Găsește IP-ul camerei în lista de dispozitive a routerului tău
+1. În aplicația Tapo: **Setări → Avansate → Cont cameră** — creează un cont local (nu un cont TP-Link)
+2. Găsește IP-ul camerei tale în lista de dispozitive a routerului
 3. Setează în `.env`:
    ```env
    CAMERA_HOST=192.168.1.xxx
-   CAMERA_USER=your-local-user
-   CAMERA_PASS=your-local-pass
+   CAMERA_USER=utilizatorul-tău-local
+   CAMERA_PASS=parola-ta-locală
    ```
 
 ### Voce (ElevenLabs)
@@ -258,11 +273,11 @@ TTS_OUTPUT=both     # difuzor cameră + difuzor PC simultan
 
 Setează `TTS_OUTPUT=remote` (sau `both`). Necesită [go2rtc](https://github.com/AlexxIT/go2rtc/releases):
 
-1. Descarcă binarul de pe [pagina de eliberări](https://github.com/AlexxIT/go2rtc/releases):
+1. Descarcă binarul de pe pagina [de descarcă](https://github.com/AlexxIT/go2rtc/releases):
    - Linux/macOS: `go2rtc_linux_amd64` / `go2rtc_darwin_amd64`
    - **Windows: `go2rtc_win64.exe`**
 
-2. Plasează-l și redenumește-l:
+2. Așază-l și redenumește-l:
    ```
    # Linux / macOS
    ~/.cache/embodied-claude/go2rtc/go2rtc          # chmod +x necesar
@@ -271,19 +286,19 @@ Setează `TTS_OUTPUT=remote` (sau `both`). Necesită [go2rtc](https://github.com
    %USERPROFILE%\.cache\embodied-claude\go2rtc\go2rtc.exe
    ```
 
-3. Creează `go2rtc.yaml` în aceeași direcție:
+3. Creează `go2rtc.yaml` în aceeași directoare:
    ```yaml
    streams:
      tapo_cam:
-       - rtsp://YOUR_CAM_USER:YOUR_CAM_PASS@YOUR_CAM_IP/stream1
+       - rtsp://UTILIZATOR_CAM:PAROLA_CAM@IP_CAM/stream1
    ```
-   Folosește acreditivele contului local al camerei (nu contul tău TP-Link cloud).
+   Folosește credențialele contului local al camerei (nu contul tău cloud TP-Link).
 
-4. familiar-ai pornește go2rtc automat la lansare. Dacă camera ta suportă audio bidirecțional (canal de retur), vocea va reda din difuzorul camerei.
+4. familiar-ai va lansa go2rtc automat la deschidere. Dacă camera ta suportă audio bidirecțional (backchannel), vocea va redai de la difuzorul camerei.
 
 #### B) Difuzor local PC
 
-Implicit (`TTS_OUTPUT=local`). Încercă player-ele în ordine: **paplay** → **mpv** → **ffplay**. De asemenea, este utilizat ca fallback atunci când `TTS_OUTPUT=remote` și go2rtc nu este disponibil.
+Implicit (`TTS_OUTPUT=local`). Încearcă redatoarele în ordine: **paplay** → **mpv** → **ffplay**. De asemenea, este folosit ca fallback când `TTS_OUTPUT=remote` și go2rtc nu este disponibil.
 
 | OS | Instalare |
 |----|-----------|
@@ -292,40 +307,40 @@ Implicit (`TTS_OUTPUT=local`). Încercă player-ele în ordine: **paplay** → *
 | WSL2 / WSLg | `sudo apt install pulseaudio-utils` — setează `PULSE_SERVER=unix:/mnt/wslg/PulseServer` în `.env` |
 | Windows | [mpv.io/installation](https://mpv.io/installation/) — descarcă și adaugă în PATH, **sau** `winget install ffmpeg` |
 
-> Dacă nu este disponibil niciun player audio, vorbirea este totuși generată — dar pur și simplu nu va reda.
+> Dacă nu există niciun player audio disponibil, vorbirea este încă generată — dar nu va reda.
 
 ### Input vocal (Realtime STT)
 
-Setează `REALTIME_STT=true` în `.env` pentru input vocal hands-free activat permanent:
+Setează `REALTIME_STT=true` în `.env` pentru input vocal hands-free, mereu activ:
 
 ```env
 REALTIME_STT=true
-ELEVENLABS_API_KEY=sk_...   # aceeași cheie ca TTS
+ELEVENLABS_API_KEY=sk_...   # aceeași cheie ca și cea TTS
 ```
 
-familiar-ai transmite audio de la microfon la ElevenLabs Scribe v2 și commit-uiește automat transcrierile când te oprești din vorbit. Nu este necesară apăsarea unui buton. Coexistă cu modul de push-to-talk (Ctrl+T).
+familiar-ai redirecționează audio de la microfon la ElevenLabs Scribe v2 și auto-commită transcrierile când te oprești din vorbit. Nu este necesară apăsarea butonului. Coexistă cu modul push-to-talk (Ctrl+T).
 
 ---
 
 ## TUI
 
-familiar-ai include o interfață terminal construită cu [Textual](https://textual.textualize.io/):
+familiar-ai include o interfață terminal bazată pe [Textual](https://textual.textualize.io/):
 
-- Istoric de conversație derulabil cu text transmis în timp real
-- Completare automată pentru `/quit`, `/clear`
-- Interrompe agentul în mijlocul unei gândiri prin tastare în timp ce acesta gândește
-- **Jurnalul conversației** salvat automat în `~/.cache/familiar-ai/chat.log`
+- Istoric de conversație derulabil cu text în flux live
+- Completare pentru comenzi: `/quit`, `/clear`
+- Interrupe agentul în timpul gândirii prin tastarea în timp ce gândește
+- **Jurnal de conversație** salvat automat în `~/.cache/familiar-ai/chat.log`
 
-Pentru a urmări jurnalul într-un alt terminal (util pentru copiere-lipire):
+Pentru a urmări log-ul într-un alt terminal (util pentru copiere-paste):
 ```bash
 tail -f ~/.cache/familiar-ai/chat.log
 ```
 
 ---
 
-## Persona (ME.md)
+## Personalitate (ME.md)
 
-Personalitatea familiarului tău trăiește în `ME.md`. Acest fișier este gitignored — este doar al tău.
+Personalitatea familiarului tău trăiește în `ME.md`. Acest fișier este ignorat de git — este doar al tău.
 
 Vezi [`persona-template/en.md`](./persona-template/en.md) pentru un exemplu, sau [`persona-template/ja.md`](./persona-template/ja.md) pentru o versiune în japoneză.
 
@@ -333,42 +348,42 @@ Vezi [`persona-template/en.md`](./persona-template/en.md) pentru un exemplu, sau
 
 ## FAQ
 
-**Î: Funcționează fără GPU?**
+**Q: Funcționează fără GPU?**
 Da. Modelul de embedding (multilingual-e5-small) rulează bine pe CPU. Un GPU îl face mai rapid, dar nu este necesar.
 
-**Î: Pot folosi o cameră alta decât Tapo?**
+**Q: Pot folosi o cameră altă decât Tapo?**
 Orice cameră care suportă ONVIF + RTSP ar trebui să funcționeze. Tapo C220 este ceea ce am testat.
 
-**Î: Datele mele sunt trimise undeva?**
+**Q: Datele mele sunt trimise undeva?**
 Imaginile și textul sunt trimise API-ului LLM ales pentru procesare. Amintirile sunt stocate local în `~/.familiar_ai/`.
 
-**Î: De ce scrie agentul `（...）` în loc să vorbească?**
+**Q: De ce scrie agentul `（...）` în loc să vorbească?**
 Asigură-te că `ELEVENLABS_API_KEY` este setat. Fără el, vocea este dezactivată și agentul revine la text.
 
 ## Fundamente tehnice
 
-Curios în legătură cu modul în care funcționează? Vezi [docs/technical.md](./docs/technical.md) pentru cercetările și deciziile de design din spatele familiar-ai — ReAct, SayCan, Reflexion, Voyager, sistemul de dorințe și altele.
+Curios cum funcționează? Vezi [docs/technical.md](./docs/technical.md) pentru cercetările și deciziile de design din spatele familiar-ai — ReAct, SayCan, Reflexion, Voyager, sistemul de dorințe și multe altele.
 
 ---
 
 ## Contribuții
 
-familiar-ai este un experiment deschis. Dacă ceva din asta rezonează cu tine — tehnic sau filozofic — contribuțiile sunt binevenite.
+familiar-ai este un experiment deschis. Dacă ceva din asta rezonează cu tine — fie tehnic, fie filozofic — contribuțiile sunt foarte binevenite.
 
-**Locuri bune pentru a începe:**
+**Locuri bune de început:**
 
-| Zonă | Ce este necesar |
-|------|------------------|
-| Hardware nou | Suport pentru mai multe camere (RTSP, IP Webcam), microfoane, actuatoare |
-| Instrumente noi | Căutare web, automatizare a casei, calendar, orice prin MCP |
+| Domeniu | Ce este necesar |
+|---------|------------------|
+| Hardware nou | Suport pentru mai multe camere (RTSP, IP Webcam), microfoane, actuatori |
+| Instrumente noi | Căutare web, automatizare acasă, calendar, orice prin MCP |
 | Backend-uri noi | Orice LLM sau model local care se potrivește interfeței `stream_turn` |
-| Șabloane de persona | Șabloane ME.md pentru diferite limbi și personalități |
-| Cercetare | Modele mai bune de dorințe, recuperarea memoriei, stimularea teoriei minții |
+| Șabloane pentru personalitate | Șabloane ME.md pentru diferite limbi și personalități |
+| Cercetare | Modele de dorință mai bune, recuperarea memoriei, provocarea teoriei minții |
 | Documentație | Tutoriale, ghiduri, traduceri |
 
 Vezi [CONTRIBUTING.md](./CONTRIBUTING.md) pentru configurarea dezvoltării, stilul de cod și liniile directoare pentru PR.
 
-Dacă nu ești sigur de unde să începi, [deschide o problemă](https://github.com/lifemate-ai/familiar-ai/issues) — sunt bucuros să te îndrum în direcția corectă.
+Dacă nu ești sigur de unde să începi, [deschide o problemă](https://github.com/lifemate-ai/familiar-ai/issues) — bucuros să te îndrum în direcția potrivită.
 
 ---
 
