@@ -17,6 +17,10 @@ import time
 from pathlib import Path
 from typing import TYPE_CHECKING
 
+import contextlib
+import ctypes
+import os
+
 import aiohttp
 
 if TYPE_CHECKING:
@@ -26,6 +30,51 @@ logger = logging.getLogger(__name__)
 
 _CHANNELS = 1  # mono
 _ELEVENLABS_STT_URL = "https://api.elevenlabs.io/v1/speech-to-text"
+
+
+@contextlib.contextmanager
+def _suppress_alsa_errors():
+    """Suppress ALSA/PortAudio error messages that pollute the terminal.
+
+    On WSL2 and some Linux setups, ALSA writes error messages directly to
+    /dev/tty (not stderr). When Textual holds the TTY in raw mode, these
+    non-UTF-8 bytes cause a UnicodeDecodeError crash. This context manager
+    silences them via the ALSA error handler API and by briefly redirecting
+    file descriptors 1 and 2.
+    """
+    # --- ctypes: replace ALSA's error handler with a no-op ---
+    try:
+        _ErrorHandlerFunc = ctypes.CFUNCTYPE(
+            None,
+            ctypes.c_char_p,
+            ctypes.c_int,
+            ctypes.c_char_p,
+            ctypes.c_int,
+            ctypes.c_char_p,
+        )
+        _noop_handler = _ErrorHandlerFunc(lambda *_: None)
+        _asound = ctypes.cdll.LoadLibrary("libasound.so.2")
+        _asound.snd_lib_error_set_handler(_noop_handler)
+        _alsa_silenced = True
+    except Exception:
+        _alsa_silenced = False
+
+    # --- fd-level redirect: send fd2 (stderr) to /dev/null ---
+    devnull_fd = os.open(os.devnull, os.O_WRONLY)
+    old_stderr_fd = os.dup(2)
+    os.dup2(devnull_fd, 2)
+    try:
+        yield
+    finally:
+        os.dup2(old_stderr_fd, 2)
+        os.close(old_stderr_fd)
+        os.close(devnull_fd)
+        # Restore default ALSA error handler
+        if _alsa_silenced:
+            try:
+                _asound.snd_lib_error_set_handler(None)
+            except Exception:
+                pass
 
 
 class STTTool:
@@ -71,21 +120,22 @@ class STTTool:
         chunks: list = []
 
         try:
-            # Use the device's native sample rate to avoid paInvalidSampleRate errors
-            device_info = sd.query_devices(kind="input")
-            sample_rate = int(device_info["default_samplerate"])
+            with _suppress_alsa_errors():
+                # Use the device's native sample rate to avoid paInvalidSampleRate errors
+                device_info = sd.query_devices(kind="input")
+                sample_rate = int(device_info["default_samplerate"])
 
-            with sd.InputStream(
-                samplerate=sample_rate,
-                channels=_CHANNELS,
-                dtype="float32",
-            ) as stream:
-                logger.info("STT: recording from local mic at %dHz...", sample_rate)
-                start = time.time()
-                while not stop_event.is_set() and time.time() - start < 60:
-                    chunk, _ = stream.read(1024)
-                    chunks.append(chunk)
-                    time.sleep(0.01)  # yield slightly; this is already in a thread
+                with sd.InputStream(
+                    samplerate=sample_rate,
+                    channels=_CHANNELS,
+                    dtype="float32",
+                ) as stream:
+                    logger.info("STT: recording from local mic at %dHz...", sample_rate)
+                    start = time.time()
+                    while not stop_event.is_set() and time.time() - start < 60:
+                        chunk, _ = stream.read(1024)
+                        chunks.append(chunk)
+                        time.sleep(0.01)  # yield slightly; this is already in a thread
         except sd.PortAudioError as e:
             logger.warning("STT: PortAudio error (no mic?): %s", e)
             return None
