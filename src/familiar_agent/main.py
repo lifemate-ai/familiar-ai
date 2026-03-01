@@ -11,6 +11,7 @@ from pathlib import Path
 from .agent import EmbodiedAgent
 from .config import AgentConfig
 from .desires import DesireSystem
+from .realtime_stt_session import create_realtime_stt_session
 from ._i18n import BANNER, _t
 
 IDLE_CHECK_INTERVAL = 10.0  # seconds between desire checks when idle
@@ -87,6 +88,21 @@ async def repl(agent: EmbodiedAgent, desires: DesireSystem, debug: bool = False)
             await input_queue.put(line.strip())
 
     stdin_task = asyncio.create_task(_stdin_reader())
+
+    # ── Realtime STT (hands-free voice input) ────────────────────────
+    stt_session = create_realtime_stt_session()
+    if stt_session:
+        try:
+            stt_session.on_partial = lambda t: print(
+                f"\r  \U0001f3a4 (\u805e\u304d\u53d6\u308a\u4e2d) {t}    ", end="", flush=True
+            )
+            stt_session.on_committed = lambda t: print(f"\n  \U0001f3a4 {t}")
+            await stt_session.start(loop, input_queue)
+            print("  \U0001f3a4 Realtime STT ON (ElevenLabs)")
+        except Exception as e:
+            logging.getLogger(__name__).warning("Realtime STT init failed: %s", e)
+            print(f"  \u26a0 Realtime STT init failed: {e}")
+            stt_session = None
 
     def on_action(name: str, tool_input: dict) -> None:
         print(f"  {_format_action(name, tool_input)}", flush=True)
@@ -193,6 +209,8 @@ async def repl(agent: EmbodiedAgent, desires: DesireSystem, debug: bool = False)
         pass
     finally:
         stdin_task.cancel()
+        if stt_session:
+            await stt_session.stop()
         await agent.close()
         print(f"\n{_t('repl_goodbye')}")
 
