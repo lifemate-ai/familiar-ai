@@ -324,7 +324,7 @@ def main() -> None:
         from .tui import FamiliarApp
 
         app = FamiliarApp(agent, desires)
-        app.run()
+        app.run(mouse=False)
     else:
         asyncio.run(repl(agent, desires, debug=debug))
 
