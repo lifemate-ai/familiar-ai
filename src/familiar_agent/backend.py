@@ -522,7 +522,7 @@ class OpenAICompatibleBackend:
         clean_text = _TOOL_CALL_RE.sub("", text).strip()
 
         stop = "tool_use" if tool_calls else "end_turn"
-        raw_assistant = {"role": "assistant", "content": text or None}
+        raw_assistant = {"role": "assistant", "content": text or ""}
         return TurnResult(stop_reason=stop, text=clean_text, tool_calls=tool_calls), raw_assistant
 
     async def _stream_turn_native(
