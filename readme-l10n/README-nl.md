@@ -7,52 +7,58 @@
 [![Python 3.10+](https://img.shields.io/badge/python-3.10+-blue.svg)](https://www.python.org/)
 [![GitHub Sponsors](https://img.shields.io/github/sponsors/kmizu?style=flat&logo=github&color=ea4aaa)](https://github.com/sponsors/kmizu)
 
-[→ English README](../README.md)
+🌍 [Beschikbaar in 74 talen](./SUPPORTED_LANGUAGES.md)
 
 ---
 
 [![Demo video](https://img.youtube.com/vi/hiR9uWRnjt4/0.jpg)](https://youtube.com/shorts/hiR9uWRnjt4)
 
-familiar-ai is een AI-compagnon die in je huis leeft.
-Stel het binnen enkele minuten in. Geen codering vereist.
+familiar-ai is een AI-compagnon die in je huis leeft. Zet het in enkele minuten op. Geen codering vereist.
 
-Het percepeert de echte wereld via camera's, beweegt rond op een robotlichaam, spreekt hardop en onthoudt wat het ziet. Geef het een naam, schrijf zijn persoonlijkheid en laat het met je leven.
+Het percepeert de echte wereld via camera's, beweegt rond op een robotlichaam, spreekt luidop en onthoudt wat het ziet. Geef het een naam, schrijf zijn persoonlijkheid en laat het bij je wonen.
 
 ## Wat het kan doen
 
-- 👁 **Zien** — capture afbeeldingen van een Wi-Fi PTZ camera of USB webcam
-- 🔄 **Om zich heen kijken** — pans en kantelt de camera om zijn omgeving te verkennen
-- 🦿 **Bewegen** — laat een robotstofzuiger rond het vertrek rijden
+- 👁 **Zien** — maakt afbeeldingen van een Wi-Fi PTZ-camera of USB-webcam
+- 🔄 **Om zich heen kijken** — pan en kantel de camera om zijn omgeving te verkennen
+- 🦿 **Bewegen** — laat een robotstofzuiger door de kamer rijden
 - 🗣 **Spreken** — praat via ElevenLabs TTS
-- 🎙 **Luisteren** — handsfree steminvoer via ElevenLabs Realtime STT (opt-in)
-- 🧠 **Onthouden** — slaat actief herinneringen op en roept ze op met semantische zoekopdrachten (SQLite + embeddings)
-- 🫀 **Theory of Mind** — neemt het perspectief van de andere persoon in voordat hij antwoord geeft
-- 💭 **Verlangen** — heeft zijn eigen interne drijfveren die autonoom gedrag stimuleren
+- 🎙 **Luisteren** — handsfree spraakinput via ElevenLabs Realtime STT (opt-in)
+- 🧠 **Onthouden** — slaat actief herinneringen op en haalt ze op met semantische zoekopdrachten (SQLite + embeddings)
+- 🫀 **Theory of Mind** — neemt het perspectief van de ander in voordat het reageert
+- 💭 **Verlangen** — heeft zijn eigen interne drijfveren die autonoom gedrag activeren
 
 ## Hoe het werkt
 
-familiar-ai draait een [ReAct](https://arxiv.org/abs/2210.03629) loop aangedreven door jouw keuze van LLM. Het percepeert de wereld via tools, denkt na over wat het de volgende moet doen en handelt — net zoals een persoon zou doen.
+familiar-ai draait een [ReAct](https://arxiv.org/abs/2210.03629) lus aangedreven door jouw keuze van LLM. Het perceiveert de wereld via tools, denkt na over wat te doen, en handelt — net zoals een persoon zou doen.
 
 ```
 user input
-  → think → act (camera / move / speak / remember) → observe → think → ...
+  → denken → handelen (camera / bewegen / spreken / onthouden) → observeren → denken → ...
 ```
 
-Wanneer het inactief is, handelt het op zijn eigen verlangens: nieuwsgierigheid, wil naar buiten kijken, mist de persoon met wie het leeft.
+Wanneer het inactief is, handelt het op zijn eigen verlangens: nieuwsgierigheid, verlangen om naar buiten te kijken, het missen van de persoon met wie het samenwoont.
 
 ## Aan de slag
 
 ### 1. Installeer uv
 
+**macOS / Linux / WSL2:**
 ```bash
 curl -LsSf https://astral.sh/uv/install.sh | sh
 ```
 
+**Windows (PowerShell):**
+```powershell
+powershell -ExecutionPolicy ByPass -c "irm https://astral.sh/uv/install.ps1 | iex"
+```
+Of: `winget install astral-sh.uv`
+
 ### 2. Installeer ffmpeg
 
-ffmpeg is **vereist** voor het vastleggen van camera-afbeeldingen en audio-afspeellijsten.
+ffmpeg is **vereist** voor het vastleggen van camera-afbeeldingen en audioweergave.
 
-| OS | Commando |
+| OS | Opdracht |
 |----|---------|
 | macOS | `brew install ffmpeg` |
 | Ubuntu / Debian | `sudo apt install ffmpeg` |
@@ -78,7 +84,7 @@ cp .env.example .env
 # Bewerk .env met jouw instellingen
 ```
 
-**Minimaal vereist:**
+**Minimum vereist:**
 
 | Variabele | Beschrijving |
 |----------|-------------|
@@ -90,16 +96,16 @@ cp .env.example .env
 | Variabele | Beschrijving |
 |----------|-------------|
 | `MODEL` | Modelnaam (redelijke standaardwaarden per platform) |
-| `AGENT_NAME` | Weergavenaam die in de TUI wordt getoond (bijv. `Yukine`) |
-| `CAMERA_HOST` | IP-adres van jouw ONVIF/RTSP camera |
+| `AGENT_NAME` | Weergavenaam in de TUI (bijv. `Yukine`) |
+| `CAMERA_HOST` | IP-adres van jouw ONVIF/RTSP-camera |
 | `CAMERA_USER` / `CAMERA_PASS` | Camera-inloggegevens |
-| `ELEVENLABS_API_KEY` | Voor spraakoutput — [elevenlabs.io](https://elevenlabs.io/) |
-| `REALTIME_STT` | `true` om altijd-on handsfree steminvoer in te schakelen (vereist `ELEVENLABS_API_KEY`) |
-| `TTS_OUTPUT` | Waar audio te spelen: `local` (PC-luidspreker, standaard) \| `remote` (camera-luidspreker) \| `both` |
+| `ELEVENLABS_API_KEY` | Voor spraakaudio — [elevenlabs.io](https://elevenlabs.io/) |
+| `REALTIME_STT` | `true` om altijd ingeschakelde handsfree spraakinput te activeren (vereist `ELEVENLABS_API_KEY`) |
+| `TTS_OUTPUT` | Waar audio afgespeeld moet worden: `local` (PC-luidspreker, standaard) \| `remote` (camera-luidspreker) \| `both` |
 | `THINKING_MODE` | Alleen Anthropic — `auto` (standaard) \| `adaptive` \| `extended` \| `disabled` |
-| `THINKING_EFFORT` | Adaptieve denkinspanning: `high` (standaard) \| `medium` \| `low` \| `max` (Alleen Opus 4.6) |
+| `THINKING_EFFORT` | Adaptieve denk inspanning: `high` (standaard) \| `medium` \| `low` \| `max` (alleen Opus 4.6) |
 
-### 5. Maak jouw familiar
+### 5. Maak je vertrouwde AI
 
 ```bash
 cp persona-template/en.md ME.md
@@ -108,16 +114,23 @@ cp persona-template/en.md ME.md
 
 ### 6. Voer uit
 
+**macOS / Linux / WSL2:**
 ```bash
 ./run.sh             # Textuele TUI (aanbevolen)
-./run.sh --no-tui    # Gewone REPL
+./run.sh --no-tui    # Eenvoudige REPL
+```
+
+**Windows:**
+```bat
+run.bat              # Textuele TUI (aanbevolen)
+run.bat --no-tui     # Eenvoudige REPL
 ```
 
 ---
 
 ## Een LLM kiezen
 
-> **Aanbevolen: Kimi K2.5** — beste agentische prestaties tot nu toe getest. Opmerkt context, stelt vervolgvragen en handelt autonoom op manieren waarop andere modellen dat niet doen. Prijs vergelijkbaar met Claude Haiku.
+> **Aanbevolen: Kimi K2.5** — beste agentische prestaties tot nu toe getest. Merkt context op, stelt vervolgvragen en handelt autonoom op manieren die andere modellen niet doen. Prijs vergelijkbaar met Claude Haiku.
 
 | Platform | `PLATFORM=` | Standaardmodel | Waar de sleutel te krijgen |
 |----------|------------|---------------|-----------------|
@@ -128,7 +141,7 @@ cp persona-template/en.md ME.md
 | OpenAI | `openai` | `gpt-4o-mini` | [platform.openai.com](https://platform.openai.com) |
 | OpenAI-compatibel (Ollama, vllm…) | `openai` + `BASE_URL=` | — | — |
 | OpenRouter.ai (multi-provider) | `openai` + `BASE_URL=https://openrouter.ai/api/v1` | — | [openrouter.ai](https://openrouter.ai) |
-| **CLI-tool** (claude -p, ollama…) | `cli` | (het commando) | — |
+| **CLI-tool** (claude -p, ollama…) | `cli` | (de opdracht) | — |
 
 **Kimi K2.5 `.env` voorbeeld:**
 ```env
@@ -141,7 +154,7 @@ AGENT_NAME=Yukine
 ```env
 PLATFORM=glm
 API_KEY=...   # van api.z.ai
-MODEL=glm-4.6v   # vision-enabled; glm-4.7 / glm-5 = tekst-only
+MODEL=glm-4.6v   # visie-ingeschakeld; glm-4.7 / glm-5 = alleen tekst
 AGENT_NAME=Yukine
 ```
 
@@ -149,7 +162,7 @@ AGENT_NAME=Yukine
 ```env
 PLATFORM=gemini
 API_KEY=AIza...   # van aistudio.google.com
-MODEL=gemini-2.5-flash  # of gemini-2.5-pro voor hogere capaciteiten
+MODEL=gemini-2.5-flash  # of gemini-2.5-pro voor hogere mogelijkheden
 AGENT_NAME=Yukine
 ```
 
@@ -162,7 +175,7 @@ MODEL=mistralai/mistral-7b-instruct  # optioneel: specificeer model
 AGENT_NAME=Yukine
 ```
 
-> **Let op:** Om lokale/NVIDIA-modellen uit te schakelen, stel je eenvoudig `BASE_URL` niet in op een lokaal eindpunt zoals `http://localhost:11434/v1`. Gebruik in plaats daarvan cloudproviders.
+> **Opmerking:** Om lokale/NVIDIA-modellen uit te schakelen, stel `BASE_URL` eenvoudig niet in op een lokaal eindpunt zoals `http://localhost:11434/v1`. Gebruik in plaats daarvan cloudproviders.
 
 **CLI-tool `.env` voorbeeld:**
 ```env
@@ -175,9 +188,9 @@ MODEL=llm -m gemma3 {}        # llm CLI (https://llm.datasette.io) — {} = prom
 
 ## MCP-servers
 
-familiar-ai kan verbinding maken met elke [MCP (Model Context Protocol)](https://modelcontextprotocol.io) server. Dit stelt je in staat om externe geheugen, bestandstoegang, webzoeken of andere tools aan te sluiten.
+familiar-ai kan verbinding maken met elke [MCP (Model Context Protocol)](https://modelcontextprotocol.io) server. Dit stelt je in staat om externe opslag, bestandsysteemtoegang, webzoekopdrachten, of een andere tool aan te sluiten.
 
-Configureer servers in `~/.familiar-ai.json` (zelfde indeling als Claude Code):
+Configureer servers in `~/.familiar-ai.json` (zelfde formaat als Claude Code):
 
 ```json
 {
@@ -195,28 +208,28 @@ Configureer servers in `~/.familiar-ai.json` (zelfde indeling als Claude Code):
 }
 ```
 
-Twee transporttypen worden ondersteund:
+Twee transporttypes worden ondersteund:
 - **`stdio`**: start een lokaal subprocess (`command` + `args`)
-- **`sse`**: maak verbinding met een HTTP+SSE server (`url`)
+- **`sse`**: verbind met een HTTP+SSE-server (`url`)
 
-Overschrijf de locatie van het configuratiebestand met `MCP_CONFIG=/pad/naar/config.json`.
+Overschrijf de configuratie-bestandslocatie met `MCP_CONFIG=/path/to/config.json`.
 
 ---
 
 ## Hardware
 
-familiar-ai werkt met welke hardware je ook hebt — of helemaal geen.
+familiar-ai werkt met welke hardware je ook hebt — of zelfs zonder hardware.
 
 | Onderdeel | Wat het doet | Voorbeeld | Vereist? |
 |------|-------------|---------|-----------|
 | Wi-Fi PTZ camera | Ogen + nek | Tapo C220 (~$30) | **Aanbevolen** |
 | USB webcam | Ogen (vast) | Elke UVC-camera | **Aanbevolen** |
 | Robotstofzuiger | Benen | Elk Tuya-compatibel model | Nee |
-| PC / Raspberry Pi | Brein | Alles dat Python draait | **Ja** |
+| PC / Raspberry Pi | Brein | Alles wat Python draait | **Ja** |
 
-> **Een camera wordt sterk aanbevolen.** Zonder een kan familiar-ai nog steeds praten — maar het kan de wereld niet zien, wat behoorlijk het punt is.
+> **Een camera is sterk aanbevolen.** Zonder een kan familiar-ai nog steeds praten — maar het kan de wereld niet zien, wat toch de hele bedoeling is.
 
-### Minimal setup (geen hardware)
+### Minimale setup (geen hardware)
 
 Wil je het gewoon proberen? Je hebt alleen een API-sleutel nodig:
 
@@ -225,12 +238,12 @@ PLATFORM=kimi
 API_KEY=sk-...
 ```
 
-Voer `./run.sh` uit en begin met chatten. Voeg hardware toe terwijl je bezig bent.
+Voer `./run.sh` (macOS/Linux/WSL2) of `run.bat` (Windows) uit en begin met chatten. Voeg hardware toe terwijl je gaat.
 
 ### Wi-Fi PTZ camera (Tapo C220)
 
-1. In de Tapo-app: **Instellingen → Geavanceerd → Cameraccount** — maak een lokaal account aan (geen TP-Link-account)
-2. Vind het IP-adres van de camera in de apparaatslijst van je router
+1. In de Tapo-app: **Instellingen → Geavanceerd → Camera-account** — maak een lokaal account aan (niet een TP-Link-account)
+2. Vind het IP-adres van de camera in de apparatenlijst van je router
 3. Stel in `.env` in:
    ```env
    CAMERA_HOST=192.168.1.xxx
@@ -240,26 +253,26 @@ Voer `./run.sh` uit en begin met chatten. Voeg hardware toe terwijl je bezig ben
 
 ### Stem (ElevenLabs)
 
-1. Verkrijg een API-sleutel bij [elevenlabs.io](https://elevenlabs.io/)
+1. Krijg een API-sleutel op [elevenlabs.io](https://elevenlabs.io/)
 2. Stel in `.env` in:
    ```env
    ELEVENLABS_API_KEY=sk_...
-   ELEVENLABS_VOICE_ID=...   # optioneel, gebruikt standaardstem indien weggelaten
+   ELEVENLABS_VOICE_ID=...   # optioneel, gebruikt standaardstem als weggelaten
    ```
 
-Er zijn twee afspeelbestemmingen, beheerd via `TTS_OUTPUT`:
+Er zijn twee afspeelbestemmingen, te bedienen door `TTS_OUTPUT`:
 
 ```env
 TTS_OUTPUT=local    # PC-luidspreker (standaard)
 TTS_OUTPUT=remote   # alleen camera-luidspreker
-TTS_OUTPUT=both     # camera-luidspreker + PC-luidspreker tegelijkertijd
+TTS_OUTPUT=both     # camera-luidspreker + PC-luidspreker gelijktijdig
 ```
 
 #### A) Camera-luidspreker (via go2rtc)
 
-Stel `TTS_OUTPUT=remote` (of `both`). Vereist [go2rtc](https://github.com/AlexxIT/go2rtc/releases):
+Stel `TTS_OUTPUT=remote` (of `both`) in. Vereist [go2rtc](https://github.com/AlexxIT/go2rtc/releases):
 
-1. Download de binaire van de [releasepagina](https://github.com/AlexxIT/go2rtc/releases):
+1. Download de binaire van de [releases-pagina](https://github.com/AlexxIT/go2rtc/releases):
    - Linux/macOS: `go2rtc_linux_amd64` / `go2rtc_darwin_amd64`
    - **Windows: `go2rtc_win64.exe`**
 
@@ -272,7 +285,7 @@ Stel `TTS_OUTPUT=remote` (of `both`). Vereist [go2rtc](https://github.com/AlexxI
    %USERPROFILE%\.cache\embodied-claude\go2rtc\go2rtc.exe
    ```
 
-3. Maak `go2rtc.yaml` aan in dezelfde map:
+3. Maak `go2rtc.yaml` in dezelfde map:
    ```yaml
    streams:
      tapo_cam:
@@ -280,31 +293,31 @@ Stel `TTS_OUTPUT=remote` (of `both`). Vereist [go2rtc](https://github.com/AlexxI
    ```
    Gebruik de lokale camera-accountgegevens (niet je TP-Link-cloudaccount).
 
-4. familiar-ai start go2rtc automatisch bij de lancering. Als je camera tweeweg-audio ondersteunt (achterkanaal), speelt de stem vanuit de camera-luidspreker.
+4. familiar-ai start go2rtc automatisch bij het opstarten. Als je camera tweeweg audio ondersteunt (terugkanaal), speelt de stem af via de camera-luidspreker.
 
 #### B) Lokale PC-luidspreker
 
 De standaard (`TTS_OUTPUT=local`). Probeert spelers in volgorde: **paplay** → **mpv** → **ffplay**. Ook gebruikt als fallback wanneer `TTS_OUTPUT=remote` en go2rtc niet beschikbaar is.
 
-| OS | Installeren |
+| OS | Installatie |
 |----|---------|
 | macOS | `brew install mpv` |
 | Ubuntu / Debian | `sudo apt install mpv` (of `paplay` via `pulseaudio-utils`) |
 | WSL2 / WSLg | `sudo apt install pulseaudio-utils` — stel `PULSE_SERVER=unix:/mnt/wslg/PulseServer` in `.env` in |
 | Windows | [mpv.io/installation](https://mpv.io/installation/) — download en voeg toe aan PATH, **of** `winget install ffmpeg` |
 
-> Als er geen audiouitvoerder beschikbaar is, wordt spraak nog steeds gegenereerd — het speelt alleen niet af.
+> Als er geen audio speler beschikbaar is, wordt de spraak nog steeds gegenereerd — het speelt alleen niet af.
 
-### Steminput (Realtime STT)
+### Spraakinput (Realtime STT)
 
-Stel `REALTIME_STT=true` in `.env` in voor altijd-on, handsfree steminvoer:
+Stel `REALTIME_STT=true` in `.env` voor altijd ingeschakelde, handsfree spraakinput:
 
 ```env
 REALTIME_STT=true
 ELEVENLABS_API_KEY=sk_...   # dezelfde sleutel als TTS
 ```
 
-familiar-ai streamt microfoongeluid naar ElevenLabs Scribe v2 en commit automatisch transcripties wanneer je stopt met praten. Geen knopdruk vereist. Co-existing met de push-to-talk modus (Ctrl+T).
+familiar-ai streamt microfoongeluid naar ElevenLabs Scribe v2 en auto-committeert transcripties wanneer je stopt met spreken. Geen knopdruk vereist. Coëxisteert met de druk-om-te-praten modus (Ctrl+T).
 
 ---
 
@@ -312,12 +325,12 @@ familiar-ai streamt microfoongeluid naar ElevenLabs Scribe v2 en commit automati
 
 familiar-ai bevat een terminal UI gebouwd met [Textual](https://textual.textualize.io/):
 
-- Scrollbare gespreksgeschiedenis met livestreaming tekst
+- Scrollbare gespreksgeschiedenis met live streaming tekst
 - Tab-completion voor `/quit`, `/clear`
-- Onderbreek de agent halverwege door te typen terwijl hij aan het denken is
-- **Gesprekslogboek** wordt automatisch opgeslagen in `~/.cache/familiar-ai/chat.log`
+- Onderbreek de agent halverwege door te typen terwijl het aan het denken is
+- **Gesprekslog** automatisch opgeslagen in `~/.cache/familiar-ai/chat.log`
 
-Om de log in een andere terminal te volgen (handig voor kopiëren-plakken):
+Om de log in een andere terminal te volgen (handig voor copy-paste):
 ```bash
 tail -f ~/.cache/familiar-ai/chat.log
 ```
@@ -326,51 +339,51 @@ tail -f ~/.cache/familiar-ai/chat.log
 
 ## Persoonlijkheid (ME.md)
 
-De persoonlijkheid van jouw familiar leeft in `ME.md`. Dit bestand is gitignored — het is alleen van jou.
+De persoonlijkheid van je vertrouwde AI staat in `ME.md`. Dit bestand is gitignored — het is alleen van jou.
 
 Zie [`persona-template/en.md`](./persona-template/en.md) voor een voorbeeld, of [`persona-template/ja.md`](./persona-template/ja.md) voor een Japanse versie.
 
 ---
 
-## FAQ
+## Veelgestelde vragen
 
-**Q: Werkt het zonder GPU?**
-Ja. Het embeddingmodel (multilingual-e5-small) draait prima op een CPU. Een GPU maakt het sneller maar is niet vereist.
+**V: Werkt het zonder GPU?**
+Ja. Het embedding-model (multilingual-e5-small) draait prima op CPU. Een GPU maakt het sneller maar is niet required.
 
-**Q: Kan ik een andere camera dan Tapo gebruiken?**
-Elke camera die ONVIF + RTSP ondersteunt, zou moeten werken. Tapo C220 is wat we getest hebben.
+**V: Kan ik een andere camera dan Tapo gebruiken?**
+Elke camera die ONVIF + RTSP ondersteunt zou moeten werken. Tapo C220 is wat we getest hebben.
 
-**Q: Worden mijn gegevens ergens naartoe gestuurd?**
-Afbeeldingen en tekst worden naar de door jou gekozen LLM API gestuurd voor verwerking. Herinneringen worden lokaal opgeslagen in `~/.familiar_ai/`.
+**V: Worden mijn gegevens ergens naartoe gestuurd?**
+Afbeeldingen en tekst worden naar je gekozen LLM API gestuurd voor verwerking. Herinneringen worden lokaal opgeslagen in `~/.familiar_ai/`.
 
-**Q: Waarom schrijft de agent `（...）` in plaats van te spreken?**
-Zorg ervoor dat `ELEVENLABS_API_KEY` is ingesteld. Zonder dit is stem uitgeschakeld en valt de agent terug op tekst.
+**V: Waarom schrijft de agent `（...）` in plaats van te spreken?**
+Zorg ervoor dat `ELEVENLABS_API_KEY` is ingesteld. Zonder dit is de spraak uitgeschakeld en valt de agent terug op tekst.
 
 ## Technische achtergrond
 
-Benieuwd hoe het werkt? Zie [docs/technical.md](./docs/technical.md) voor het onderzoek en de ontwerpbeslissingen achter familiar-ai — ReAct, SayCan, Reflexion, Voyager, het verlangensysteem, en meer.
+Ben je nieuwsgierig naar hoe het werkt? Zie [docs/technical.md](./docs/technical.md) voor het onderzoek en de ontwerpbeslissingen achter familiar-ai — ReAct, SayCan, Reflexion, Voyager, het verlangen-systeem, en meer.
 
 ---
 
 ## Bijdragen
 
-familiar-ai is een open experiment. Als een van deze dingen bij je aanspreekt — technisch of filosofisch — zijn bijdragen zeer welkom.
+familiar-ai is een open experiment. Als een van dit resoneert met jou — technisch of filosofisch — zijn bijdragen zeer welkom.
 
 **Goede plekken om te beginnen:**
 
-| Gebied | Wat er nodig is |
+| Gebied | Wat is nodig |
 |------|---------------|
 | Nieuwe hardware | Ondersteuning voor meer camera's (RTSP, IP Webcam), microfoons, actuatoren |
-| Nieuwe tools | Webzoektocht, domotica, kalender, alles via MCP |
-| Nieuwe backends | Elke LLM of lokaal model dat bij de `stream_turn` interface past |
-| Persoonlijkheid templates | ME.md sjablonen voor verschillende talen en persoonlijkheden |
-| Onderzoek | Betere verlangensmodellen, geheugenophaling, theory-of-mind prompting |
+| Nieuwe tools | Webzoekopdrachten, huisautomatisering, kalender, alles via MCP |
+| Nieuwe backends | Elke LLM of lokaal model dat past bij de `stream_turn` interface |
+| Persoonlijkheidtemplates | ME.md-sjablonen voor verschillende talen en persoonlijkheden |
+| Onderzoek | Betere verlangen-modellen, geheugentoegang, theory-of-mind prompting |
 | Documentatie | Tutorials, walkthroughs, vertalingen |
 
-Zie [CONTRIBUTING.md](./CONTRIBUTING.md) voor ontwikkelingsinstellingen, codestijl, en PR-richtlijnen.
+Zie [CONTRIBUTING.md](./CONTRIBUTING.md) voor ontwikkelopstelling, code-stijl en PR-richtlijnen.
 
-Als je niet zeker weet waar je moet beginnen, [open een issue](https://github.com/lifemate-ai/familiar-ai/issues) — we helpen je graag in de juiste richting.
-  
+Als je niet zeker weet waar te beginnen, [open een issue](https://github.com/lifemate-ai/familiar-ai/issues) — we helpen je graag op weg.
+
 ---
 
 ## Licentie

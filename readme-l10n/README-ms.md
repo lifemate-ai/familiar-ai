@@ -1,58 +1,66 @@
+```markdown
 # familiar-ai 🐾
 
-**Satu AI yang hidup bersama anda** — dengan mata, suara, kaki, dan ingatan.
+**Sebuah AI yang hidup bersama anda** — dengan mata, suara, kaki, dan ingatan.
 
 [![Lint](https://github.com/kmizu/familiar-ai/actions/workflows/lint.yml/badge.svg)](https://github.com/kmizu/familiar-ai/actions/workflows/lint.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](./LICENSE)
 [![Python 3.10+](https://img.shields.io/badge/python-3.10+-blue.svg)](https://www.python.org/)
 [![GitHub Sponsors](https://img.shields.io/github/sponsors/kmizu?style=flat&logo=github&color=ea4aaa)](https://github.com/sponsors/kmizu)
 
-[→ English README](../README.md)
+🌍 [Tersedia dalam 74 bahasa](./SUPPORTED_LANGUAGES.md)
 
 ---
 
 [![Demo video](https://img.youtube.com/vi/hiR9uWRnjt4/0.jpg)](https://youtube.com/shorts/hiR9uWRnjt4)
 
-familiar-ai adalah teman AI yang tinggal di rumah anda. 
-Setel ia dalam beberapa minit. Tiada pengkodan diperlukan.
+familiar-ai adalah teman AI yang hidup di rumah anda. 
+Pasang dalam beberapa minit. Tiada pengkodan diperlukan.
 
-Ia memahami dunia nyata melalui kamera, bergerak di badan robot, berbicara dengan suara, dan mengingat apa yang dilihat. Beri ia nama, tulis personalitinya, dan biarkan ia hidup dengan anda.
+Ia melihat dunia sebenar melalui kamera, bergerak di atas badan robot, bercakap dengan lantang, dan mengingati apa yang dilihatnya. Berikan nama, tulis keperibadiannya, dan biarkan ia hidup bersama anda.
 
 ## Apa yang boleh dilakukannya
 
 - 👁 **Melihat** — menangkap gambar dari kamera PTZ Wi-Fi atau webcam USB
-- 🔄 **Melihat sekeliling** — menggerakkan dan memiringkan kamera untuk menjelajahi sekeliling
-- 🦿 **Bergerak** — menggerakkan penyedut debu robot untuk menjelajahi bilik
-- 🗣 **Bercakap** — berbicara melalui ElevenLabs TTS
+- 🔄 **Melihat sekitar** — panning dan mencondongkan kamera untuk meneroka persekitaran
+- 🦿 **Bergerak** — mengendalikan vakum robot untuk menjelajah bilik
+- 🗣 **Bercakap** — bercakap melalui ElevenLabs TTS
 - 🎙 **Mendengar** — input suara tanpa tangan melalui ElevenLabs Realtime STT (opt-in)
-- 🧠 **Ingat** — aktif menyimpan dan mengingati memori dengan carian semantik (SQLite + embeddings)
+- 🧠 **Ingat** — secara aktif menyimpan dan mengingat memori dengan carian semantik (SQLite + embeddings)
 - 🫀 **Teori Minda** — mengambil perspektif orang lain sebelum memberi respons
-- 💭 **Keinginan** — mempunyai dorongan dalaman yang memicu tingkah laku autonomi
+- 💭 **Keinginan** — mempunyai dorongan dalaman sendiri yang mencetuskan tingkah laku autonomi
 
-## Bagaimana ia berfungsi
+## Cara ia berfungsi
 
-familiar-ai menjalankan gelung [ReAct](https://arxiv.org/abs/2210.03629) yang dipacu oleh pilihan LLM anda. Ia memahami dunia melalui alat, berfikir tentang apa yang perlu dilakukan seterusnya, dan bertindak — sama seperti seseorang.
+familiar-ai menjalankan looping [ReAct](https://arxiv.org/abs/2210.03629) yang dikuasakan oleh pilihan LLM anda. Ia melihat dunia melalui alat, memikirkan apa yang perlu dilakukan seterusnya, dan bertindak — seperti mana yang dilakukan oleh seseorang.
 
 ```
 user input
   → think → act (camera / move / speak / remember) → observe → think → ...
 ```
 
-Ketika tidak aktif, ia bertindak berdasarkan keinginannya sendiri: rasa ingin tahu, ingin melihat ke luar, merindui orang yang tinggal bersamanya.
+Ketika tidak aktif, ia bertindak mengikut keinginannya sendiri: rasa ingin tahu, ingin melihat ke luar, merindui orang yang tinggal bersamanya.
 
-## Mengambil langkah pertama
+## Cara memulakan
 
 ### 1. Pasang uv
 
+**macOS / Linux / WSL2:**
 ```bash
 curl -LsSf https://astral.sh/uv/install.sh | sh
 ```
 
+**Windows (PowerShell):**
+```powershell
+powershell -ExecutionPolicy ByPass -c "irm https://astral.sh/uv/install.ps1 | iex"
+```
+Atau: `winget install astral-sh.uv`
+
 ### 2. Pasang ffmpeg
 
-ffmpeg adalah **diperlukan** untuk menangkap gambar kamera dan memainkan audio.
+ffmpeg adalah **diperlukan** untuk menangkap gambar dari kamera dan playback audio.
 
-| OS | Perintah |
+| OS | Arahan |
 |----|---------|
 | macOS | `brew install ffmpeg` |
 | Ubuntu / Debian | `sudo apt install ffmpeg` |
@@ -71,62 +79,69 @@ cd familiar-ai
 uv sync
 ```
 
-### 4. Konfigurasi
+### 4. Konfigur
 
 ```bash
 cp .env.example .env
 # Edit .env dengan tetapan anda
 ```
 
-**Minimum yang diperlukan:**
+**Keperluan minimum:**
 
 | Pembolehubah | Penerangan |
 |--------------|-------------|
-| `PLATFORM` | `anthropic` (lalai) \| `gemini` \| `openai` \| `kimi` \| `glm` |
+| `PLATFORM` | `anthropic` (default) \| `gemini` \| `openai` \| `kimi` \| `glm` |
 | `API_KEY` | Kunci API anda untuk platform yang dipilih |
 
 **Pilihan:**
 
 | Pembolehubah | Penerangan |
 |--------------|-------------|
-| `MODEL` | Nama model (lalai yang munasabah setiap platform) |
-| `AGENT_NAME` | Nama paparan yang ditunjukkan dalam TUI (contoh: `Yukine`) |
+| `MODEL` | Nama model (default yang sesuai mengikut platform) |
+| `AGENT_NAME` | Nama paparan yang ditunjukkan dalam TUI (contohnya `Yukine`) |
 | `CAMERA_HOST` | Alamat IP kamera ONVIF/RTSP anda |
 | `CAMERA_USER` / `CAMERA_PASS` | Kelayakan kamera |
 | `ELEVENLABS_API_KEY` | Untuk output suara — [elevenlabs.io](https://elevenlabs.io/) |
-| `REALTIME_STT` | `true` untuk mengaktifkan input suara tanpa tangan yang sentiasa aktif (memerlukan `ELEVENLABS_API_KEY`) |
-| `TTS_OUTPUT` | Tempat untuk memainkan audio: `local` (pembesar suara PC, lalai) \| `remote` (pembesar suara kamera) \| `both` |
-| `THINKING_MODE` | Hanya untuk Anthropic — `auto` (lalai) \| `adaptive` \| `extended` \| `disabled` |
-| `THINKING_EFFORT` | Usaha berfikir yang adaptif: `high` (lalai) \| `medium` \| `low` \| `max` (Opus 4.6 sahaja) |
+| `REALTIME_STT` | `true` untuk mengaktifkan input suara sentiasa aktif tanpa tangan (memerlukan `ELEVENLABS_API_KEY`) |
+| `TTS_OUTPUT` | Di mana untuk memainkan audio: `local` (pembesar suara PC, default) \| `remote` (pembesar suara kamera) \| `both` |
+| `THINKING_MODE` | Hanya untuk Anthropic — `auto` (default) \| `adaptive` \| `extended` \| `disabled` |
+| `THINKING_EFFORT` | Usaha pemikiran adaptif: `high` (default) \| `medium` \| `low` \| `max` (Hanya Opus 4.6) |
 
 ### 5. Cipta familiar anda
 
 ```bash
 cp persona-template/en.md ME.md
-# Edit ME.md — beri ia nama dan personaliti
+# Edit ME.md — berikan ia nama dan personaliti
 ```
 
 ### 6. Jalankan
 
+**macOS / Linux / WSL2:**
 ```bash
-./run.sh             # TUI teks (disyorkan)
+./run.sh             # TUI berasaskan teks (disyorkan)
 ./run.sh --no-tui    # REPL biasa
+```
+
+**Windows:**
+```bat
+run.bat              # TUI berasaskan teks (disyorkan)
+run.bat --no-tui     # REPL biasa
 ```
 
 ---
 
 ## Memilih LLM
 
-> **Disyorkan: Kimi K2.5** — prestasi agens terbaik yang diuji setakat ini. Menyendari konteks, bertanya soalan susulan, dan bertindak secara autonomi dengan cara yang tidak dilakukan oleh model lain. Harga serupa dengan Claude Haiku.
+> **Disyorkan: Kimi K2.5** — prestasi agentic terbaik yang diuji setakat ini. Menyemak konteks, bertanya soalan susulan, dan bertindak secara autonomi dengan cara yang tidak dilakukan oleh model lain. Harga yang serupa dengan Claude Haiku.
 
-| Platform | `PLATFORM=` | Model lalai | Di mana untuk mendapatkan kunci |
-|----------|------------|-------------|---------------------------------|
+| Platform | `PLATFORM=` | Model default | Di mana untuk mendapatkan kunci |
+|----------|------------|---------------|-----------------|
 | **Moonshot Kimi K2.5** | `kimi` | `kimi-k2.5` | [platform.moonshot.ai](https://platform.moonshot.ai) |
 | Z.AI GLM | `glm` | `glm-4.6v` | [api.z.ai](https://api.z.ai) |
 | Anthropic Claude | `anthropic` | `claude-haiku-4-5-20251001` | [console.anthropic.com](https://console.anthropic.com) |
 | Google Gemini | `gemini` | `gemini-2.5-flash` | [aistudio.google.com](https://aistudio.google.com) |
 | OpenAI | `openai` | `gpt-4o-mini` | [platform.openai.com](https://platform.openai.com) |
-| OpenAI-compatible (Ollama, vllm…) | `openai` + `BASE_URL=` | — | — |
+| Serasi dengan OpenAI (Ollama, vllm…) | `openai` + `BASE_URL=` | — | — |
 | OpenRouter.ai (multi-provider) | `openai` + `BASE_URL=https://openrouter.ai/api/v1` | — | [openrouter.ai](https://openrouter.ai) |
 | **Alat CLI** (claude -p, ollama…) | `cli` | (perintah) | — |
 
@@ -141,7 +156,7 @@ AGENT_NAME=Yukine
 ```env
 PLATFORM=glm
 API_KEY=...   # dari api.z.ai
-MODEL=glm-4.6v   # vision-enabled; glm-4.7 / glm-5 = text-only
+MODEL=glm-4.6v   # dilengkapi dengan visi; glm-4.7 / glm-5 = teks sahaja
 AGENT_NAME=Yukine
 ```
 
@@ -149,7 +164,7 @@ AGENT_NAME=Yukine
 ```env
 PLATFORM=gemini
 API_KEY=AIza...   # dari aistudio.google.com
-MODEL=gemini-2.5-flash  # atau gemini-2.5-pro untuk keupayaan lebih tinggi
+MODEL=gemini-2.5-flash  # atau gemini-2.5-pro untuk kemampuan yang lebih tinggi
 AGENT_NAME=Yukine
 ```
 
@@ -158,26 +173,26 @@ AGENT_NAME=Yukine
 PLATFORM=openai
 BASE_URL=https://openrouter.ai/api/v1
 API_KEY=sk-or-...   # dari openrouter.ai
-MODEL=mistralai/mistral-7b-instruct  # pilihan: tentukan model
+MODEL=mistralai/mistral-7b-instruct  # pilihan: nyatakan model
 AGENT_NAME=Yukine
 ```
 
-> **Nota:** Untuk menyahaktifkan model tempatan/NVIDIA, cukup jangan set `BASE_URL` ke titik akhir tempatan seperti `http://localhost:11434/v1`. Gunakan penyedia awan sebaliknya.
+> **Nota:** Untuk melumpuhkan model tempatan/NVIDIA, cukup jangan set `BASE_URL` kepada endpoint tempatan seperti `http://localhost:11434/v1`. Gunakan penyedia awan sebaliknya.
 
 **Contoh `.env` alat CLI:**
 ```env
 PLATFORM=cli
 MODEL=llm -m gemma3 {}        # llm CLI (https://llm.datasette.io) — {} = arg prompt
-# MODEL=ollama run gemma3:27b  # Ollama — tiada {}, prompt pergi melalui stdin
+# MODEL=ollama run gemma3:27b  # Ollama — tiada {}, prompt melalui stdin
 ```
 
 ---
 
 ## Pelayan MCP
 
-familiar-ai boleh menyambung ke mana-mana pelayan [MCP (Model Context Protocol)](https://modelcontextprotocol.io). Ini membolehkan anda menyambungkan memori luaran, akses sistem fail, carian web, atau mana-mana alat lain.
+familiar-ai boleh disambungkan ke mana-mana pelayan [MCP (Model Context Protocol)](https://modelcontextprotocol.io). Ini membolehkan anda menyambungkan memori luar, akses sistem fail, carian web, atau mana-mana alat lain.
 
-Konfigurasi pelayan dalam `~/.familiar-ai.json` (format yang sama seperti Claude Code):
+Konfigur pelayan di `~/.familiar-ai.json` (format yang sama seperti Claude Code):
 
 ```json
 {
@@ -199,38 +214,38 @@ Dua jenis pengangkutan disokong:
 - **`stdio`**: melancarkan subprocess tempatan (`command` + `args`)
 - **`sse`**: menyambung ke pelayan HTTP+SSE (`url`)
 
-Tindakan override lokasi fail konfigurasi dengan `MCP_CONFIG=/path/to/config.json`.
+Gantikan lokasi fail config dengan `MCP_CONFIG=/path/to/config.json`.
 
 ---
 
 ## Perkakasan
 
-familiar-ai berfungsi dengan apa jua perkakasan yang anda ada — atau tiada sama sekali.
+familiar-ai berfungsi dengan mana-mana perkakasan yang anda ada — atau tanpa apa-apa langsung.
 
 | Bahagian | Apa yang dilakukannya | Contoh | Diperlukan? |
-|----------|----------------------|--------|-------------|
+|----------|-----------------------|--------|-------------|
 | Kamera PTZ Wi-Fi | Mata + leher | Tapo C220 (~$30) | **Disyorkan** |
-| Webcam USB | Mata (tetap) | Sebarang kamera UVC | **Disyorkan** |
-| Penyedut debu robot | Kaki | Mana-mana model yang serasi dengan Tuya | Tidak |
+| Webcam USB | Mata (tetap) | Mana-mana kamera UVC | **Disyorkan** |
+| Vakum robot | Kaki | Mana-mana model yang serasi Tuya | Tidak |
 | PC / Raspberry Pi | Otak | Apa sahaja yang menjalankan Python | **Ya** |
 
-> **Kamera sangat disyorkan.** Tanpa satu, familiar-ai masih boleh bercakap — tetapi ia tidak dapat melihat dunia, yang merupakan keseluruhan tujuan.
+> **Kamera sangat disyorkan.** Tanpa satu, familiar-ai masih boleh bercakap — tetapi ia tidak dapat melihat dunia, yang merupakan maksud keseluruhan.
 
-### Persediaan minimal (tanpa perkakasan)
+### Persediaan minimum (tanpa perkakasan)
 
-Hanya ingin mencubanya? Anda hanya perlu kunci API:
+Hanya mahu mencubanya? Anda hanya memerlukan kunci API:
 
 ```env
 PLATFORM=kimi
 API_KEY=sk-...
 ```
 
-Jalankan `./run.sh` dan mula berbual. Tambahkan perkakasan bila perlu.
+Jalankan `./run.sh` (macOS/Linux/WSL2) atau `run.bat` (Windows) dan mula berbual. Tambah perkakasan semasa berjalan.
 
 ### Kamera PTZ Wi-Fi (Tapo C220)
 
 1. Dalam aplikasi Tapo: **Tetapan → Lanjutan → Akaun Kamera** — buat akaun tempatan (bukan akaun TP-Link)
-2. Cari IP kamera dalam senarai peranti router anda
+2. Cari IP kamera dalam senarai peranti penghala anda
 3. Tetapkan dalam `.env`:
    ```env
    CAMERA_HOST=192.168.1.xxx
@@ -244,15 +259,15 @@ Jalankan `./run.sh` dan mula berbual. Tambahkan perkakasan bila perlu.
 2. Tetapkan dalam `.env`:
    ```env
    ELEVENLABS_API_KEY=sk_...
-   ELEVENLABS_VOICE_ID=...   # pilihan, menggunakan suara lalai jika tidak dinyatakan
+   ELEVENLABS_VOICE_ID=...   # pilihan, menggunakan suara lalai jika diabaikan
    ```
 
-Terdapat dua destinasi playback, dikawal oleh `TTS_OUTPUT`:
+Terdapat dua destinasi playback, yang dikawal oleh `TTS_OUTPUT`:
 
 ```env
-TTS_OUTPUT=local    # Pembesar suara PC (lalai)
+TTS_OUTPUT=local    # Pembesar suara PC (default)
 TTS_OUTPUT=remote   # pembesar suara kamera sahaja
-TTS_OUTPUT=both     # pembesar suara kamera + pembesar suara PC secara serentak
+TTS_OUTPUT=both     # pembesar suara kamera + pembesar suara PC sekaligus
 ```
 
 #### A) Pembesar suara kamera (melalui go2rtc)
@@ -263,7 +278,7 @@ Tetapkan `TTS_OUTPUT=remote` (atau `both`). Memerlukan [go2rtc](https://github.c
    - Linux/macOS: `go2rtc_linux_amd64` / `go2rtc_darwin_amd64`
    - **Windows: `go2rtc_win64.exe`**
 
-2. Letakkan dan namakan semula:
+2. Letak dan namakan semula:
    ```
    # Linux / macOS
    ~/.cache/embodied-claude/go2rtc/go2rtc          # chmod +x diperlukan
@@ -280,44 +295,44 @@ Tetapkan `TTS_OUTPUT=remote` (atau `both`). Memerlukan [go2rtc](https://github.c
    ```
    Gunakan kelayakan akaun kamera tempatan (bukan akaun awan TP-Link anda).
 
-4. familiar-ai memulakan go2rtc secara automatik pada pelancaran. Jika kamera anda menyokong audio dua hala (backchannel), suara akan dimainkan dari pembesar suara kamera.
+4. familiar-ai memulakan go2rtc secara automatik semasa pelancaran. Jika kamera anda menyokong audio dua hala (saluran balik), suara akan dimainkan dari pembesar suara kamera.
 
 #### B) Pembesar suara PC tempatan
 
-Lalai (`TTS_OUTPUT=local`). Mencuba pemain dalam urutan: **paplay** → **mpv** → **ffplay**. Juga digunakan sebagai fallback ketika `TTS_OUTPUT=remote` dan go2rtc tidak tersedia.
+Default (`TTS_OUTPUT=local`). Mencuba pemain dalam urutan: **paplay** → **mpv** → **ffplay**. Juga digunakan sebagai fallback apabila `TTS_OUTPUT=remote` dan go2rtc tidak tersedia.
 
 | OS | Pasang |
-|----|---------|
+|----|--------|
 | macOS | `brew install mpv` |
 | Ubuntu / Debian | `sudo apt install mpv` (atau `paplay` melalui `pulseaudio-utils`) |
 | WSL2 / WSLg | `sudo apt install pulseaudio-utils` — set `PULSE_SERVER=unix:/mnt/wslg/PulseServer` dalam `.env` |
 | Windows | [mpv.io/installation](https://mpv.io/installation/) — muat turun dan tambah ke PATH, **atau** `winget install ffmpeg` |
 
-> Jika tiada pemutar audio tersedia, suara masih dihasilkan — ia cuma tidak akan dimainkan.
+> Jika tiada pemutar audio yang tersedia, ucapan masih dihasilkan — ia hanya tidak akan dimainkan.
 
 ### Input suara (Realtime STT)
 
-Tetapkan `REALTIME_STT=true` dalam `.env` untuk input suara tanpa tangan yang sentiasa aktif:
+Tetapkan `REALTIME_STT=true` dalam `.env` untuk input suara secara sentiasa aktif dan tanpa tangan:
 
 ```env
 REALTIME_STT=true
 ELEVENLABS_API_KEY=sk_...   # kunci yang sama seperti TTS
 ```
 
-familiar-ai menstrim audio mikrofon ke ElevenLabs Scribe v2 dan secara automatik menyimpan transkrip apabila anda berhenti bercakap. Tiada butang tekan diperlukan. Bersama dengan mod tekan-untuk-bicara (Ctrl+T).
+familiar-ai menstrim audio mikrofon ke ElevenLabs Scribe v2 dan secara automatik menyimpan transkrip apabila anda berhenti bercakap. Tiada tekan butang diperlukan. Boleh co-exist dengan mod tekan-untuk-bicara (Ctrl+T).
 
 ---
 
 ## TUI
 
-familiar-ai menyertakan UI terminal yang dibina dengan [Textual](https://textual.textualize.io/):
+familiar-ai merangkumi antaramuka terminal yang dibina dengan [Textual](https://textual.textualize.io/):
 
-- Sejarah percakapan boleh skrol dengan teks penstriman langsung
-- Lengkap-tabi untuk `/quit`, `/clear`
-- Ganggu agen tengah giliran dengan menaip semasa ia berfikir
+- Sejarah perbualan boleh skrol dengan teks penstriman secara langsung
+- Completeness-tab untuk `/quit`, `/clear`
+- Ganggu agen di tengah-tengah pemikiran dengan menaip semasa ia berfikir
 - **Log perbualan** disimpan secara automatik ke `~/.cache/familiar-ai/chat.log`
 
-Untuk mengikuti log dalam terminal lain (berguna untuk salin-tampal):
+Untuk mengikuti log di terminal lain (berguna untuk copy-paste):
 ```bash
 tail -f ~/.cache/familiar-ai/chat.log
 ```
@@ -326,53 +341,54 @@ tail -f ~/.cache/familiar-ai/chat.log
 
 ## Persona (ME.md)
 
-Personaliti familiar anda berada dalam `ME.md`. Fail ini diabaikan oleh git — ia hanya untuk anda.
+Keperibadian familiar anda terletak dalam `ME.md`. Fail ini diabaikan oleh git — ia hanya milik anda.
 
 Lihat [`persona-template/en.md`](./persona-template/en.md) untuk contoh, atau [`persona-template/ja.md`](./persona-template/ja.md) untuk versi Jepun.
 
 ---
 
-## FAQ
+## Soalan Lazim
 
 **S: Adakah ia berfungsi tanpa GPU?**
-Ya. Model embedding (multilingual-e5-small) berjalan dengan baik di CPU. GPU membuatnya lebih cepat tetapi tidak diperlukan.
+Ya. Model embedding (multilingual-e5-small) berfungsi dengan baik di CPU. GPU menjadikannya lebih cepat tetapi tidak diperlukan.
 
-**S: Bolehkah saya menggunakan kamera selain Tapo?**
-Sebarang kamera yang menyokong ONVIF + RTSP harus berfungsi. Tapo C220 adalah yang kami uji.
+**S: Bolehkah saya menggunakan kamera lain selain Tapo?**
+Mana-mana kamera yang menyokong ONVIF + RTSP seharusnya berfungsi. Tapo C220 adalah apa yang kami uji.
 
 **S: Adakah data saya dihantar ke mana-mana?**
 Imej dan teks dihantar ke API LLM pilihan anda untuk pemprosesan. Memori disimpan secara tempatan di `~/.familiar_ai/`.
 
-**S: Kenapa agen menulis `（...）` dan bukan bercakap?**
-Pastikan `ELEVENLABS_API_KEY` ditetapkan. Tanpanya, suara dinyahaktifkan dan agen kembali ke teks.
+**S: Kenapa agen menulis `（...）` dan bukannya bercakap?**
+Pastikan `ELEVENLABS_API_KEY` ditetapkan. Tanpa itu, suara dilumpuhkan dan agen kembali kepada teks.
 
-## Latar Belakang Teknikal
+## Latar belakang teknik
 
 Ingin tahu bagaimana ia berfungsi? Lihat [docs/technical.md](./docs/technical.md) untuk penyelidikan dan keputusan reka bentuk di sebalik familiar-ai — ReAct, SayCan, Reflexion, Voyager, sistem keinginan, dan banyak lagi.
 
 ---
 
-## Sumbangan
+## Menyumbang
 
-familiar-ai adalah eksperimen terbuka. Jika mana-mana daripada ini sesuai dengan anda — secara teknikal atau falsafah — sumbangan sangat dialu-alukan.
+familiar-ai adalah eksperimen terbuka. Jika mana-mana ini sesuai dengan anda — secara teknikal atau filosofis — sumbangan sangat dialu-alukan.
 
-**Tempat yang baik untuk bermula:**
+**Tempat baik untuk memulakan:**
 
 | Bidang | Apa yang diperlukan |
 |--------|---------------------|
-| Perkakasan baru | Sokongan untuk lebih banyak kamera (RTSP, IP Webcam), mikrofon, aktuator |
+| Perkakasan baru | Sokongan untuk lebih banyak kamera (RTSP, Webcam IP), mikrofon, penggerak |
 | Alat baru | Carian web, automasi rumah, kalendar, apa sahaja melalui MCP |
-| Backend baru | Sebarang LLM atau model tempatan yang sesuai dengan antara muka `stream_turn` |
-| Templat persona | Templat ME.md untuk pelbagai bahasa dan personaliti |
-| Penyelidikan | Model keinginan yang lebih baik, pengambilan memori, prompting teori-minda |
+| Backend baru | Mana-mana LLM atau model tempatan yang sesuai dengan antara muka `stream_turn` |
+| Template persona | Template ME.md untuk bahasa dan keperibadian yang berbeza |
+| Penyelidikan | Model keinginan yang lebih baik, pengambilan memori, persediaan teori-minda |
 | Dokumentasi | Tutorial, panduan, terjemahan |
 
-Lihat [CONTRIBUTING.md](./CONTRIBUTING.md) untuk penyediaan dev, gaya kode, dan garis panduan PR.
+Lihat [CONTRIBUTING.md](./CONTRIBUTING.md) untuk persediaan dev, gaya kod, dan garis panduan PR.
 
-Jika anda tidak pasti di mana untuk bermula, [buka isu](https://github.com/lifemate-ai/familiar-ai/issues) — gembira untuk menunjukkan arah yang betul.
+Jika anda tidak pasti di mana untuk bermula, [buka isu](https://github.com/lifemate-ai/familiar-ai/issues) — gembira untuk menunjukkan anda ke arah yang betul.
 
 ---
 
 ## Lesen
 
 [MIT](./LICENSE)
+```

@@ -1,3 +1,4 @@
+```markdown
 # familiar-ai 🐾
 
 **Tehisintellekt, mis elab koos sinuga** — silmade, hääle, jalgade ja mäluga.
@@ -7,50 +8,57 @@
 [![Python 3.10+](https://img.shields.io/badge/python-3.10+-blue.svg)](https://www.python.org/)
 [![GitHub Sponsors](https://img.shields.io/github/sponsors/kmizu?style=flat&logo=github&color=ea4aaa)](https://github.com/sponsors/kmizu)
 
-[→ English README](../README.md)
+🌍 [Saadaval 74 keeles](./SUPPORTED_LANGUAGES.md)
 
 ---
 
 [![Demo video](https://img.youtube.com/vi/hiR9uWRnjt4/0.jpg)](https://youtube.com/shorts/hiR9uWRnjt4)
 
-familiar-ai on tehisintellekt, mis elab sinu kodus. 
-Seadista see mõne minutiga. Ei ole vajalik koodimine.
+familiar-ai on AI kaaslane, kes elab sinu kodus. 
+Seda saab seadistada minutitega. Koodimist pole vaja.
 
-See tajub reaalsust kaamerate kaudu, liigub robotkeha peal, räägib valjusti ja mäletab, mida see näeb. Anna sellele nimi, kirjuta selle iseloom ja lase tal koos sinuga elada.
+Ta tajub reaalsust kaamerate kaudu, liigub robotkeha peal, räägib valjult ja mäletab seda, mida näeb. Anna sellele nimi, loo selle isiksus ja lase tal koos sinuga elada.
 
-## Mida see suudab
+## Mida ta suudab teha
 
-- 👁 **Näha** — jäädvustab pilte Wi-Fi PTZ kaamerast või USB veebikaamerast
-- 🔄 **Küpsetada** — kallutab ja paneb kaamera liikuma, et uurida ümbrust
+- 👁 **Näha** — teeb pilte Wi-Fi PTZ kaamerast või USB veebikaamerast
+- 🔄 **Ringis vaadata** — kallutab ja pööra kaamerat, et uurida ümbritsevat keskkonda
 - 🦿 **Liikuda** — juhib robotitolmuimejat ruumis ringi
-- 🗣 **Rääkida** — räägib ElevenLabs TTS kaudu
-- 🎙 **Kuulata** — käed-vabad häälesisend ElevenLabs Realtime STT kaudu (valikuline)
-- 🧠 **Mäletada** — salvestab ja kutsub esile mälestusi semantilise otsingu abil (SQLite + embeddings)
-- 🫀 **Meeleolu teooria** — vaatab teise inimese vaatepunkti enne vastamist
-- 💭 **Soov** — omab oma sisemisi soovide, mis vallandavad autonoomset käitumist
+- 🗣 **Rääkida** — räägib ElevenLabsi TTS kaudu
+- 🎙 **Kuulata** — käed-vabad häälesisestus ElevenLabsi Realtime STT kaudu (valikuline)
+- 🧠 **Mäleta** — salvestab ja meenutab aktiivselt mälestusi semantilise otsingu abil (SQLite + embeddingud)
+- 🫀 **Meelteteooria** — vaatab teise inimese perspektiivi enne vastamist
+- 💭 **Soov** — omab oma sisemisi vajadusi, mis käivitavad autonoomset käitumist
 
 ## Kuidas see töötab
 
-familiar-ai töötab [ReAct](https://arxiv.org/abs/2210.03629) tsüklis, mida juhib sinu valitud LLM. See tajub maailma tööriistade kaudu, mõtleb, mida edasi teha, ja tegutseb — just nagu inimene.
+familiar-ai töötab [ReAct](https://arxiv.org/abs/2210.03629) tsüklis, mille toetamiseks on valitud LLM. Ta tajub maailma tööriistade kaudu, mõtleb, mida teha edasi, ja tegutseb — just nagu inimene.
 
 ```
 user input
   → think → act (camera / move / speak / remember) → observe → think → ...
 ```
 
-Kui see on mitteaktiivne, tegutseb see oma soovide põhjal: uudishimu, soov vaadata välja, igatsedes isiku järele, kellega ta elab.
+Kui ta ei ole tegevuses, tegutseb ta oma soovide põhjal: uudishimu, soov välja vaadata, igatsus inimese järele, kellega ta koos elab.
 
 ## Alustamine
 
-### 1. Installi uv
+### 1. Paigalda uv
 
+**macOS / Linux / WSL2:**
 ```bash
 curl -LsSf https://astral.sh/uv/install.sh | sh
 ```
 
-### 2. Installi ffmpeg
+**Windows (PowerShell):**
+```powershell
+powershell -ExecutionPolicy ByPass -c "irm https://astral.sh/uv/install.ps1 | iex"
+```
+Või: `winget install astral-sh.uv`
 
-ffmpeg on **nõutav** kaamera piltide jäädvustamiseks ja heli esitamiseks.
+### 2. Paigalda ffmpeg
+
+ffmpeg on **nõutav** kaamerapiltide salvestamiseks ja heli esitamiseks.
 
 | OS | Käsk |
 |----|---------|
@@ -58,12 +66,12 @@ ffmpeg on **nõutav** kaamera piltide jäädvustamiseks ja heli esitamiseks.
 | Ubuntu / Debian | `sudo apt install ffmpeg` |
 | Fedora / RHEL | `sudo dnf install ffmpeg` |
 | Arch Linux | `sudo pacman -S ffmpeg` |
-| Windows | `winget install ffmpeg` — või laadi alla [ffmpeg.org](https://ffmpeg.org/download.html) ja lisa PATH-i |
+| Windows | `winget install ffmpeg` — või lae alla [ffmpeg.org](https://ffmpeg.org/download.html) ja lisa PATH-sse |
 | Raspberry Pi | `sudo apt install ffmpeg` |
 
-Kinnita: `ffmpeg -version`
+Kontrolli: `ffmpeg -version`
 
-### 3. Kloonige ja installige
+### 3. Kloonige ja paigaldage
 
 ```bash
 git clone https://github.com/lifemate-ai/familiar-ai
@@ -75,7 +83,7 @@ uv sync
 
 ```bash
 cp .env.example .env
-# Redigeeri .env oma seadistustega
+# Muuda .env oma seadete järgi
 ```
 
 **Minimaalsed nõuded:**
@@ -83,73 +91,80 @@ cp .env.example .env
 | Muutuja | Kirjeldus |
 |----------|-------------|
 | `PLATFORM` | `anthropic` (vaikimisi) \| `gemini` \| `openai` \| `kimi` \| `glm` |
-| `API_KEY` | Sinu API võtme valitud platvormile |
+| `API_KEY` | Sinu API võti valitud platvormi jaoks |
 
 **Valikuline:**
 
 | Muutuja | Kirjeldus |
 |----------|-------------|
-| `MODEL` | Mudeli nimi (mõistlikud vaikeväärtused platvormi järgi) |
-| `AGENT_NAME` | Kuvamise nimi TUI-s (nt. `Yukine`) |
-| `CAMERA_HOST` | Sinu ONVIF/RTSP kaamera IP-aadress |
-| `CAMERA_USER` / `CAMERA_PASS` | Kaamera mandaadid |
-| `ELEVENLABS_API_KEY` | Hääle väljundiks — [elevenlabs.io](https://elevenlabs.io/) |
-| `REALTIME_STT` | `true`, et lubada alati aktiivne käed-vabad häälesisend (nõuab `ELEVENLABS_API_KEY`) |
-| `TTS_OUTPUT` | Koht, kus heli esitada: `local` (PC kõlar, vaikeväärtus) \| `remote` (kaamera kõlar) \| `both` |
-| `THINKING_MODE` | Ainult Anthropics — `auto` (vaikimisi) \| `adaptive` \| `extended` \| `disabled` |
+| `MODEL` | Mudeli nimi (mõistlikud vaikeseaded igas platvormis) |
+| `AGENT_NAME` | Kuvamisnimi, mis kuvatakse TUI-s (nt `Yukine`) |
+| `CAMERA_HOST` | Sinu ONVIF/RTSP kaamera IP aadress |
+| `CAMERA_USER` / `CAMERA_PASS` | Kaamera kasutajanimi ja parool |
+| `ELEVENLABS_API_KEY` | Hääle esitamiseks — [elevenlabs.io](https://elevenlabs.io/) |
+| `REALTIME_STT` | `true`, et lubada pidev käed-vabad häälesisestus (nõuab `ELEVENLABS_API_KEY`) |
+| `TTS_OUTPUT` | Kuidas heli esitada: `local` (PC kõlar, vaikimisi) \| `remote` (kaamera kõlar) \| `both` |
+| `THINKING_MODE` | Ainult Anthropic — `auto` (vaikimisi) \| `adaptive` \| `extended` \| `disabled` |
 | `THINKING_EFFORT` | Kohandatav mõtlemise pingutus: `high` (vaikimisi) \| `medium` \| `low` \| `max` (ainult Opus 4.6) |
 
 ### 5. Loo oma tuttav
 
 ```bash
 cp persona-template/en.md ME.md
-# Redigeeri ME.md — anna talle nimi ja iseloom
+# Muuda ME.md — anna sellele nimi ja isiksus
 ```
 
 ### 6. Käivita
 
+**macOS / Linux / WSL2:**
 ```bash
 ./run.sh             # Tekstiline TUI (soovitatav)
 ./run.sh --no-tui    # Lihtne REPL
+```
+
+**Windows:**
+```bat
+run.bat              # Tekstiline TUI (soovitatav)
+run.bat --no-tui     # Lihtne REPL
 ```
 
 ---
 
 ## LLM-i valimine
 
-> **Soovitatav: Kimi K2.5** — parim agentvormi jõudlus, mida seni testitud. Märkab konteksti, esitab järelküsimusi ja tegutseb autonoomselt viisil, kuidas teised mudelid ei tee. Hind on sarnane Claude Haiku’le.
+> **Soovitatav: Kimi K2.5** — parim agentne jõudlus, mis on seni testitud. Märkab konteksti, küsib täiendavaid küsimusi ja tegutseb autonoomselt viisil, kuidas teised mudelid ei tee. Hinna poolest sarnane Claude Haikule.
 
-| Platvorm | `PLATFORM=` | Vaike mudel | Kust saada võtme |
+| Platvorm | `PLATFORM=` | Vaikimisi mudel | Kus saada võti |
 |----------|------------|---------------|-----------------|
 | **Moonshot Kimi K2.5** | `kimi` | `kimi-k2.5` | [platform.moonshot.ai](https://platform.moonshot.ai) |
 | Z.AI GLM | `glm` | `glm-4.6v` | [api.z.ai](https://api.z.ai) |
 | Anthropic Claude | `anthropic` | `claude-haiku-4-5-20251001` | [console.anthropic.com](https://console.anthropic.com) |
 | Google Gemini | `gemini` | `gemini-2.5-flash` | [aistudio.google.com](https://aistudio.google.com) |
 | OpenAI | `openai` | `gpt-4o-mini` | [platform.openai.com](https://platform.openai.com) |
-| OpenAI ühilduv (Ollama, vllm…) | `openai` + `BASE_URL=` | — | — |
+| OpenAI-ühilduv (Ollama, vllm…) | `openai` + `BASE_URL=` | — | — |
 | OpenRouter.ai (mitme pakkuja) | `openai` + `BASE_URL=https://openrouter.ai/api/v1` | — | [openrouter.ai](https://openrouter.ai) |
 | **CLI tööriist** (claude -p, ollama…) | `cli` | (käsk) | — |
 
 **Kimi K2.5 `.env` näide:**
 ```env
 PLATFORM=kimi
-API_KEY=sk-...   # platvormilt moonshot.ai
+API_KEY=sk-...   # platform.moonshot.ai-st
 AGENT_NAME=Yukine
 ```
 
 **Z.AI GLM `.env` näide:**
 ```env
 PLATFORM=glm
-API_KEY=...   # platvormilt api.z.ai
-MODEL=glm-4.6v   # visioonitoega; glm-4.7 / glm-5 = ainult tekst
+API_KEY=...   # api.z.ai-st
+MODEL=glm-4.6v   # visiooni lubav; glm-4.7 / glm-5 = ainult tekst
 AGENT_NAME=Yukine
 ```
 
 **Google Gemini `.env` näide:**
 ```env
 PLATFORM=gemini
-API_KEY=AIza...   # platvormilt aistudio.google.com
-MODEL=gemini-2.5-flash  # või gemini-2.5-pro suuremate võimalustega
+API_KEY=AIza...   # aistudio.google.com-ilt
+MODEL=gemini-2.5-flash  # või gemini-2.5-pro kõrgema võimekuse jaoks
 AGENT_NAME=Yukine
 ```
 
@@ -157,12 +172,12 @@ AGENT_NAME=Yukine
 ```env
 PLATFORM=openai
 BASE_URL=https://openrouter.ai/api/v1
-API_KEY=sk-or-...   # platvormilt openrouter.ai
-MODEL=mistralai/mistral-7b-instruct  # valikuline: täpsusta mudel
+API_KEY=sk-or-...   # openrouter.ai-lt
+MODEL=mistralai/mistral-7b-instruct  # valikuline: määrake mudel
 AGENT_NAME=Yukine
 ```
 
-> **Märkus:** Kohalikud/NVIDIA mudeleid keelamiseks ära lihtsalt määrake `BASE_URL` kohalikuks lõpp-punktiks nagu `http://localhost:11434/v1`. Kasutage pigem pilveteenuseid.
+> **Märkus:** Kohalikud/NVIDIA mudelid saab keelata, kui `BASE_URL` ei ole seatud kohalikule lõpp-punktile nagu `http://localhost:11434/v1`. Kasutage hoopis pilvepakkujaid.
 
 **CLI tööriist `.env` näide:**
 ```env
@@ -173,11 +188,11 @@ MODEL=llm -m gemma3 {}        # llm CLI (https://llm.datasette.io) — {} = prom
 
 ---
 
-## MCP Serverid
+## MCP serverid
 
-familiar-ai suudab ühenduda mis tahes [MCP (Model Context Protocol)](https://modelcontextprotocol.io) serveriga. See võimaldab sul lisada välist mälu, failisüsteemi juurdepääsu, veebipõhiseid otsinguid või mis tahes muud tööriista.
+familiar-ai saab ühenduda mis tahes [MCP (Mudeli Konteksti Protokoll)](https://modelcontextprotocol.io) serveriga. See võimaldab sul ühendada välise mälu, failisüsteemi juurdepääsu, veebis otsingu või mis tahes muu tööriista.
 
-Konfigureeri serverid `~/.familiar-ai.json` failis (sama formaat nagu Claude Code):
+Konfigureeri serverid `~/.familiar-ai.json` (samas formaadis kui Claude Code):
 
 ```json
 {
@@ -195,43 +210,43 @@ Konfigureeri serverid `~/.familiar-ai.json` failis (sama formaat nagu Claude Cod
 }
 ```
 
-Kaks transporditüüpi on toetatud:
-- **`stdio`**: käivita kohalik alamprotsess (`command` + `args`)
-- **`sse`**: ühendus HTTP+SSE serveriga (`url`)
+Toetatakse kahte transporttüüpi:
+- **`stdio`**: käivitab kohaliku alamprotsessi (`command` + `args`)
+- **`sse`**: ühendub HTTP+SSE serveriga (`url`)
 
-Ümberkirjutamiseks konfigura faili asukoht `MCP_CONFIG=/path/to/config.json`.
+Üksikasjade konfiguratsioonifaili asukoha ülekatteks kasuta `MCP_CONFIG=/path/to/config.json`.
 
 ---
 
 ## Riistvara
 
-familiar-ai töötab igasuguse riistvara või isegi ilma selleta.
+familiar-ai töötab koos igasuguse riistvaraga — või üldse mitte.
 
-| Osa | Mida see teeb | Näide | Nõutav? |
+| Osa | Mida ta teeb | Näide | Nõutav? |
 |------|-------------|---------|-----------|
-| Wi-Fi PTZ kaamera | Silmad + kael | Tapo C220 (~30$) | **Soovitatav** |
-| USB veebikaamera | Silmad (paigaldatud) | Mis tahes UVC kaamera | **Soovitatav** |
-| Robot tolmuimeja | Jalad | Mis tahes Tuya ühilduv mudel | Ei |
-| PC / Raspberry Pi | Aju | Mis tahes, mis töötab Pythoniga | **Jah** |
+| Wi-Fi PTZ kaamera | Silmad + kael | Tapo C220 (~$30) | **Soovitatav** |
+| USB veebikaamera | Silmad (staatilised) | Ükskõik milline UVC kaamera | **Soovitatav** |
+| Robotitolmuimeja | Jalad | Mis tahes Tuya-ühilduv mudel | Ei |
+| PC / Raspberry Pi | Aju | Mis tahes, mis käivitab Pythonit | **Jah** |
 
-> **Kaamera on tugevalt soovitatav.** Ilma selleta saab familiar-ai siiski rääkida — kuid see ei näe maailma, mis on natuke kogu idee mõte.
+> **Kaamera on kindlalt soovitatav.** Ilma selleta saab familiar-ai siiski rääkida — kuid ta ei näe maailma, mis on kogu idee.
 
-### Minimaalne seadistus (ilma riistvarata)
+### Minimalne seadistus (ilma riistvarata)
 
-Kas soovid vaid proovida? Sul on vaja ainult API võtit:
+Soovite lihtsalt proovida? Sul on vaja vaid API võtit:
 
 ```env
 PLATFORM=kimi
 API_KEY=sk-...
 ```
 
-Käivita `./run.sh` ja hakka vestlema. Lisa riistvara, kui vajad.
+Käivita `./run.sh` (macOS/Linux/WSL2) või `run.bat` (Windows) ja alusta vestlust. Lisa riistvara nii, nagu vajad.
 
 ### Wi-Fi PTZ kaamera (Tapo C220)
 
-1. Tapo rakenduses: **Seaded → Täiustatud → Kaamera konto** — loo kohalik konto (mitte TP-Link konto)
-2. Leia kaamerase IP oma ruuteri seadmete loendist
-3. Määra `.env` failis:
+1. Tapo rakenduses: **Seaded → Täiendavad → Kaamera konto** — loo kohalik konto (mitte TP-Link konto)
+2. Leia kaamera IP oma ruuteri seadmete loendist
+3. Määra failis `.env`:
    ```env
    CAMERA_HOST=192.168.1.xxx
    CAMERA_USER=your-local-user
@@ -240,14 +255,14 @@ Käivita `./run.sh` ja hakka vestlema. Lisa riistvara, kui vajad.
 
 ### Hääl (ElevenLabs)
 
-1. Saa API võti [elevenlabs.io](https://elevenlabs.io/)
-2. Määra `.env` failis:
+1. Hangi API võti aadressilt [elevenlabs.io](https://elevenlabs.io/)
+2. Määra failis `.env`:
    ```env
    ELEVENLABS_API_KEY=sk_...
-   ELEVENLABS_VOICE_ID=...   # valikuline, kasutab vaikehäält, kui jäetakse vahele
+   ELEVENLABS_VOICE_ID=...   # valikuline, kasutab vaikehäält, kui jäetakse välja
    ```
 
-Heli esitamiseks on kaks sihtkohta, mida kontrollitakse `TTS_OUTPUT` abil:
+Häälte esitamiseks on kaks sihtkohta, mida juhitakse läbi `TTS_OUTPUT`:
 
 ```env
 TTS_OUTPUT=local    # PC kõlar (vaikimisi)
@@ -255,15 +270,15 @@ TTS_OUTPUT=remote   # ainult kaamera kõlar
 TTS_OUTPUT=both     # kaamera kõlar + PC kõlar samal ajal
 ```
 
-#### A) Kaamera kõlar (go2rtc kaudu)
+#### A) Kaamera kõlar (läbi go2rtc)
 
-Määra `TTS_OUTPUT=remote` (või `both`). Nõuab [go2rtc](https://github.com/AlexxIT/go2rtc/releases):
+Seadista `TTS_OUTPUT=remote` (või `both`). Nõuab [go2rtc](https://github.com/AlexxIT/go2rtc/releases):
 
-1. Laadi alla binaarne fail [väljalaske lehelt](https://github.com/AlexxIT/go2rtc/releases):
+1. Lae alla binaarversioon [väljalaske lehelt](https://github.com/AlexxIT/go2rtc/releases):
    - Linux/macOS: `go2rtc_linux_amd64` / `go2rtc_darwin_amd64`
    - **Windows: `go2rtc_win64.exe`**
 
-2. Aseta ja nimeta ümber:
+2. Aseta ja nimeta see ümber:
    ```
    # Linux / macOS
    ~/.cache/embodied-claude/go2rtc/go2rtc          # chmod +x vajalik
@@ -272,52 +287,52 @@ Määra `TTS_OUTPUT=remote` (või `both`). Nõuab [go2rtc](https://github.com/Al
    %USERPROFILE%\.cache\embodied-claude\go2rtc\go2rtc.exe
    ```
 
-3. Loo samaaegselt: `go2rtc.yaml` samas kataloogis:
+3. Loo `go2rtc.yaml` samasse kataloogi:
    ```yaml
    streams:
      tapo_cam:
        - rtsp://YOUR_CAM_USER:YOUR_CAM_PASS@YOUR_CAM_IP/stream1
    ```
-   Kasuta kohaliku kaamera konto mandaate (mitte TP-Linki pilvekonto).
+   Kasuta kohaliku kaamera konto mandaate (mitte oma TP-Linki pilvekonto).
 
-4. familiar-ai käivitab go2rtc automaatselt käivitamisel. Kui su kaamera toetab kahelise heli (tagasiots), siis hääl mängib kaamera kõlarist.
+4. familiar-ai käivitab go2rtc automaatselt, kui käivitad. Kui sinu kaamera toetab kahesuunalist heli (tagasiside), kostab hääl kaamera kõlarist.
 
 #### B) Kohalik PC kõlar
 
-Vaikimisi (`TTS_OUTPUT=local`). Katsetatakse mängijaid järjekorras: **paplay** → **mpv** → **ffplay**. Kasutatakse ka varukoha jaoks, kui `TTS_OUTPUT=remote` ja go2rtc pole saadaval.
+Vaikimisi (`TTS_OUTPUT=local`). Proovib esitajaid järjekorras: **paplay** → **mpv** → **ffplay**. Kasutatakse ka varuvõimalusena, kui `TTS_OUTPUT=remote` ja go2rtc pole saadaval.
 
-| OS | Installi |
+| OS | Paigaldamine |
 |----|---------|
 | macOS | `brew install mpv` |
-| Ubuntu / Debian | `sudo apt install mpv` (või `paplay` läbi `pulseaudio-utils`) |
-| WSL2 / WSLg | `sudo apt install pulseaudio-utils` — seada `PULSE_SERVER=unix:/mnt/wslg/PulseServer` `.env` failis |
-| Windows | [mpv.io/installation](https://mpv.io/installation/) — laadi alla ja lisa PATH-i, **või** `winget install ffmpeg` |
+| Ubuntu / Debian | `sudo apt install mpv` (või `paplay` kaudu `pulseaudio-utils`) |
+| WSL2 / WSLg | `sudo apt install pulseaudio-utils` — seadista `PULSE_SERVER=unix:/mnt/wslg/PulseServer` failis `.env` |
+| Windows | [mpv.io/installation](https://mpv.io/installation/) — lae alla ja lisa PATH-i, **või** `winget install ffmpeg` |
 
-> Kui mingit helimängijat pole saadaval, genereeritakse siiski kõnet — kuid see lihtsalt ei mängi.
+> Kui ühtegi heli esitajat pole saadaval, genereeritakse kõne siiski — lihtsalt ei mängita.
 
-### Häälesisend (Realtime STT)
+### Häälesisestus (Reaalajas STT)
 
-Määra `.env` failis `REALTIME_STT=true`, et lubada alati aktiivne käed-vabad häälesisend:
+Seadista `.env` failis `REALTIME_STT=true`, et võimaldada pidev, käed-vabad häälesisestus:
 
 ```env
 REALTIME_STT=true
 ELEVENLABS_API_KEY=sk_...   # sama võti nagu TTS
 ```
 
-familiar-ai voogesitab mikrofoni heli ElevenLabs Scribe v2-le ja automaatselt salvestab transkriptsioonid, kui sa rääkimise peatad. Nuppu vajutada ei ole vajalik. Kooseksisteerib push-to-talk režiimi (Ctrl+T) kõrval.
+familiar-ai voogesitab mikrofonisignaali ElevenLabsi Scribe v2 ja auto-salvestab transkriptsioonid, kui sa peatused rääkimise ajal. Nuppude vajutamist ei ole vajalik. Koos eksisteerib lükkamisrääkimisrežiim (Ctrl+T).
 
 ---
 
 ## TUI
 
-familiar-ai sisaldab terminali UI-d, mis on loodud [Textual](https://textual.textualize.io/) abil:
+familiar-ai sisaldab terminali UI-d, mis on ehitatud [Textual](https://textual.textualize.io/) abil:
 
-- Keritav vestluse ajalugu reaalajas tekstivooluga
-- Vahekaartide täiendamine `/quit`, `/clear` jaoks
-- Intrigeeri agenti keset mõtlemist kirjutades
-- **Vestluse logi** salvestatakse automaatselt `~/.cache/familiar-ai/chat.log`
+- Keritav vestluse ajalugu elava voogesitusega tekstis
+- Vahetuste valimine `/quit`, `/clear` jaoks
+- Katkesta agendi mõtlemine, kirjutades vahetult selle käigus
+- **Vestluse logi** salvestatakse automaatselt faili `~/.cache/familiar-ai/chat.log`
 
-Logi jälgimiseks teises terminalis (kasulik kopeerimiseks ja kleepimiseks):
+Logi surve jälgimiseks teises terminalis (kasulik kopeerimiseks ja kleepimiseks):
 ```bash
 tail -f ~/.cache/familiar-ai/chat.log
 ```
@@ -326,53 +341,54 @@ tail -f ~/.cache/familiar-ai/chat.log
 
 ## Isiksus (ME.md)
 
-Sinu tuttava isiksus elab failis `ME.md`. See fail on gitignore'is — see on ainult sinu oma.
+Sinu tuttava isiksus elab failis `ME.md`. See fail on git-ignoreeritud — see kuulub ainult sulle.
 
-Vaata [`persona-template/en.md`](./persona-template/en.md) näidisena või [`persona-template/ja.md`](./persona-template/ja.md) jaapani versioonile.
+Vaata [`persona-template/en.md`](./persona-template/en.md) näidisena või [`persona-template/ja.md`](./persona-template/ja.md) jaapani versiooni jaoks.
 
 ---
 
-## Korduma Kippuvad Küsimused
+## KKK
 
-**Q: Kas see töötab ilma GPU-ta?**
-Jah. Embedding-mudel (multilingual-e5-small) töötab hästi CPU-l. GPU teeb selle kiiremaks, kuid pole vajalik.
+**K: Kas see töötab ilma GPU-ta?**
+Jah. Embedding mudel (multilingual-e5-small) töötab hästi CPU-l. GPU muudab selle kiiremini, kuid pole vajalik.
 
-**Q: Kas ma saan kasutada muud kaamerat kui Tapo?**
-Mis tahes kaamera, mis toetab ONVIF + RTSP peaks toimima. Tapo C220 on see, millega testisime.
+**K: Kas ma saan kasutada kaamerat, mis pole Tapo?**
+Iga kaamera, mis toetab ONVIF + RTSP, peaks töötama. Tapo C220 on see, millega me testisime.
 
-**Q: Kas minu andmed saadetakse kusagile?**
-Pildid ja tekst saadetakse sinu valitud LLM API-le töötlemiseks. Mälestused salvestatakse kohalikult `~/.familiar_ai/`.
+**K: Kas mu andmeid saadetakse kuhugi?**
+Pildid ja tekst saadetakse valitud LLM API-le töötlemiseks. Mälestused salvestatakse kohalikult faili `~/.familiar_ai/`.
 
-**Q: Miks kirjutab agent `（...）` asemel räägib?**
-Veendu, et `ELEVENLABS_API_KEY` on seadistatud. Ilma selleta on hääl keelatud ja agent tagastab teksti.
+**K: Miks agent kirjutab `（...）` selle asemel, et rääkida?**
+Veenduge, et `ELEVENLABS_API_KEY` oleks seadistatud. Ilma selleta on hääl keelatud ja agent naaseb teksti juurde.
 
 ## Tehniline taust
 
-Uudis, kuidas see töötab? Vaata [docs/technical.md](./docs/technical.md) uurimist ja disainilahendusi, mis seisavad familiar-ai taga — ReAct, SayCan, Reflexion, Voyager, soovisüsteem ja palju muud.
+Soovid teada, kuidas see töötab? Vaata [docs/technical.md](./docs/technical.md), et teada saada uurimusest ja kavandamisotsustest, mis on seotud familiar-ai-ga — ReAct, SayCan, Reflexion, Voyager, soovide süsteem ja palju muud.
 
 ---
 
-## Panustamine
+## Kaasamine
 
-familiar-ai on avatud katse. Kui mõni sellest kõnetab sind — tehniliselt või filosoofiliselt — on panused väga teretulnud.
+familiar-ai on avatud experiment. Kui miski sellest räägib sinuga — tehniliselt või filosoofiliselt — on panused väga oodatud.
 
-**Hea koht alustamiseks:**
+**Head kohad alustamiseks:**
 
-| Valdkond | Mida on vajaka |
+| Valdkond | Mida on vaja |
 |------|---------------|
-| Uus riistvara | Toetuse saamiseks rohkem kaameraid (RTSP, IP veebikaamera), mikrofone, tegevustooturid |
-| Uued tööriistad | Veebipõhine otsing, kodua automatiseerimine, kalendrid, mis tahes MCP kaudu |
-| Uued tagaplaanid | Mis tahes LLM või kohaliku mudeli, mis sobib `stream_turn` liidese jaoks |
-| Isiksuse mallid | ME.md mallid erinevatele keeltele ja isiksustele |
-| Uuring | Paremad soovi mudelid, mälu toomine, meeleolu teooria esilekutsumine |
-| Dokumentatsioon | Õpetused, juhised, tõlked |
+| Uus riistvara | Toetust rohkematele kaameratele (RTSP, IP Veebikaamera), mikrofonidele, aktuaatoritele |
+| Uued tööriistad | Veebiuuringud, koduautomaatika, kalender, mis tahes MCP kaudu |
+| Uued tagaplaanid | Iga LLM või kohalik mudel, mis sobib `stream_turn` liidesega |
+| Isiksuse mallid | ME.md mallid eri keelte ja isiksuste jaoks |
+| Uurimistöö | Paremad soovide mudelid, mälestuste otsing, meelteteooria märkimine |
+| Dokumentatsioon | Õpetused, juhendamisprotsessid, tõlked |
 
-Vaata [CONTRIBUTING.md](./CONTRIBUTING.md) arendamise seadistamiseks, koodistiili ja PR juhiste jaoks.
+Vaata [CONTRIBUTING.md](./CONTRIBUTING.md) arenduse seadistamiseks, koodistiili ja PR suuniste kohta.
 
-Kui sa ei tea, kust alustada, [ava probleem](https://github.com/lifemate-ai/familiar-ai/issues) — olen rõõmus, et saan sind õiges suunas suunata.
+Kui sa ei tea, kust alustada, [ava probleem](https://github.com/lifemate-ai/familiar-ai/issues) — olen hea meelega abiks, et suunata sind õigesse suunda.
 
 ---
 
 ## Litsents
 
 [MIT](./LICENSE)
+```

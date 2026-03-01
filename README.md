@@ -44,9 +44,16 @@ When idle, it acts on its own desires: curiosity, wanting to look outside, missi
 
 ### 1. Install uv
 
+**macOS / Linux / WSL2:**
 ```bash
 curl -LsSf https://astral.sh/uv/install.sh | sh
 ```
+
+**Windows (PowerShell):**
+```powershell
+powershell -ExecutionPolicy ByPass -c "irm https://astral.sh/uv/install.ps1 | iex"
+```
+Or: `winget install astral-sh.uv`
 
 ### 2. Install ffmpeg
 
@@ -108,9 +115,16 @@ cp persona-template/en.md ME.md
 
 ### 6. Run
 
+**macOS / Linux / WSL2:**
 ```bash
 ./run.sh             # Textual TUI (recommended)
 ./run.sh --no-tui    # Plain REPL
+```
+
+**Windows:**
+```bat
+run.bat              # Textual TUI (recommended)
+run.bat --no-tui     # Plain REPL
 ```
 
 ---
@@ -225,7 +239,7 @@ PLATFORM=kimi
 API_KEY=sk-...
 ```
 
-Run `./run.sh` and start chatting. Add hardware as you go.
+Run `./run.sh` (macOS/Linux/WSL2) or `run.bat` (Windows) and start chatting. Add hardware as you go.
 
 ### Wi-Fi PTZ camera (Tapo C220)
 

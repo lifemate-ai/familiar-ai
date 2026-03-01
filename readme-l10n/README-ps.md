@@ -1,69 +1,77 @@
+```markdown
 # familiar-ai 🐾
 
-**An AI that lives alongside you** — with eyes, voice, legs, and memory.
+**یو AI چې ستاسو سره ژوند کوي** — د سترګو، غږ، پښو او یادونو سره.
 
 [![Lint](https://github.com/kmizu/familiar-ai/actions/workflows/lint.yml/badge.svg)](https://github.com/kmizu/familiar-ai/actions/workflows/lint.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](./LICENSE)
 [![Python 3.10+](https://img.shields.io/badge/python-3.10+-blue.svg)](https://www.python.org/)
 [![GitHub Sponsors](https://img.shields.io/github/sponsors/kmizu?style=flat&logo=github&color=ea4aaa)](https://github.com/sponsors/kmizu)
 
-[→ English README](../README.md)
+🌍 [په 74 ژبو کې شتون لري](./SUPPORTED_LANGUAGES.md)
 
 ---
 
 [![Demo video](https://img.youtube.com/vi/hiR9uWRnjt4/0.jpg)](https://youtube.com/shorts/hiR9uWRnjt4)
 
-familiar-ai is an AI companion that lives in your home.
-Set it up in minutes. No coding required.
+familiar-ai ستاسو د کور AI ملګری دی.
+دا په څو دقیقو کې وټاکئ. هیڅ کوډینګ ته اړتیا نشته.
 
-It perceives the real world through cameras, moves around on a robot body, speaks aloud, and remembers what it sees. Give it a name, write its personality, and let it live with you.
+دا د کامرو له لارې ریښتینې نړۍ احساسوي، په روباټ بدن کې حرکت کوي، آواز سره خبرې کوي، او هغه څه چې ګوري یادوي. ورته یو نوم ورکړئ، د دې شخصیت ولیکئ، او دې ته اجازه ورکړئ چې ستاسو سره ژوند وکړي.
 
-## What it can do
+## څه شی کولی شي
 
-- 👁 **See** — captures images from a Wi-Fi PTZ camera or USB webcam
-- 🔄 **Look around** — pans and tilts the camera to explore its surroundings
-- 🦿 **Move** — drives a robot vacuum to roam the room
-- 🗣 **Speak** — talks via ElevenLabs TTS
-- 🎙 **Listen** — hands-free voice input via ElevenLabs Realtime STT (opt-in)
-- 🧠 **Remember** — actively stores and recalls memories with semantic search (SQLite + embeddings)
-- 🫀 **Theory of Mind** — takes the other person's perspective before responding
-- 💭 **Desire** — has its own internal drives that trigger autonomous behavior
+- 👁 **ویني** — د Wi-Fi PTZ کامرې یا USB ویب کیمرې څخه انځورونه نیسي
+- 🔄 **چپ او راسته کوي** — کامره چپ / ښیږي ترڅو د دې شاوخوا څارنه وکړي
+- 🦿 **حرکت کوي** — د روباټ ویکیوم چلوي ترڅو په خونه کې وګرځي
+- 🗣 **غږیږي** — د ElevenLabs TTS له لارې خبرو کوي
+- 🎙 **غورڅوي** — د ElevenLabs Realtime STT له لارې د لاسونو آزاد غږ ورودی (اختیاري)
+- 🧠 **یادوي** — په فعال ډول یادونه او د معنايي لټون سره مېموري چمتو کوي (SQLite + embeddings)
+- 🫀 **ذهن تیوري** — د ځواب ورکولو دمخه د بل شخص لیدلوری اخلي
+- 💭 ** غواړي** — خپل داخلي تمایلات لري چې خود مختار چلند هڅوي
 
-## How it works
+## څنګه کار کوي
 
-familiar-ai runs a [ReAct](https://arxiv.org/abs/2210.03629) loop powered by your choice of LLM. It perceives the world through tools, thinks about what to do next, and acts — just like a person would.
+familiar-ai د [ReAct](https://arxiv.org/abs/2210.03629) هله له خپل لومړی LLM سره چلوو. دا د وسیلو له لارې نړۍ احساسوي، فکر کوي چې بل څه وکړي، او عمل کوي — لکه څنګه چې یو شخص به وکړي.
 
 ```
 user input
   → think → act (camera / move / speak / remember) → observe → think → ...
 ```
 
-When idle, it acts on its own desires: curiosity, wanting to look outside, missing the person it lives with.
+کله چې خالي وي، دا د خپلو تمایلاتو پراساس عمل کوي: حوصلې، بهر ته کتلو غوښتنه، د دې ملګري تېرېدو احساس کول.
 
-## Getting started
+## پیل کول
 
-### 1. Install uv
+### 1. uv نصب کړئ
 
+**macOS / Linux / WSL2:**
 ```bash
 curl -LsSf https://astral.sh/uv/install.sh | sh
 ```
 
-### 2. Install ffmpeg
+**Windows (PowerShell):**
+```powershell
+powershell -ExecutionPolicy ByPass -c "irm https://astral.sh/uv/install.ps1 | iex"
+```
+یا: `winget install astral-sh.uv`
 
-ffmpeg is **required** for camera image capture and audio playback.
+### 2. ffmpeg نصب کړئ
 
-| OS | Command |
+ffmpeg د کامرې انځور نیولو او آډیو بیا ښودلو لپاره **ضروري** دی.
+
+| OS | قومانده |
 |----|---------|
 | macOS | `brew install ffmpeg` |
 | Ubuntu / Debian | `sudo apt install ffmpeg` |
 | Fedora / RHEL | `sudo dnf install ffmpeg` |
 | Arch Linux | `sudo pacman -S ffmpeg` |
-| Windows | `winget install ffmpeg` — or download from [ffmpeg.org](https://ffmpeg.org/download.html) and add to PATH |
+| Windows | `winget install ffmpeg` — یا [ffmpeg.org](https://ffmpeg.org/download.html) څخه ډاونلوډ کړئ او PATH ته اضافه کړئ |
 | Raspberry Pi | `sudo apt install ffmpeg` |
 
-Verify: `ffmpeg -version`
+تصدیق: `ffmpeg -version`
 
-### 3. Clone and install
+### 3. کلون او نصب کړئ
 
 ```bash
 git clone https://github.com/lifemate-ai/familiar-ai
@@ -71,55 +79,62 @@ cd familiar-ai
 uv sync
 ```
 
-### 4. Configure
+### 4. تنظیم کړئ
 
 ```bash
 cp .env.example .env
-# Edit .env with your settings
+# .env ستاسو تنظیمات سره سم سمونه
 ```
 
-**Minimum required:**
+**ضروري لږ تر لږه:**
 
-| Variable | Description |
+| متغیر | توضیح |
 |----------|-------------|
-| `PLATFORM` | `anthropic` (default) \| `gemini` \| `openai` \| `kimi` \| `glm` |
-| `API_KEY` | Your API key for the chosen platform |
+| `PLATFORM` | `anthropic` (مخکې) \| `gemini` \| `openai` \| `kimi` \| `glm` |
+| `API_KEY` | ستاسو د ټاکل شوې پلاتفورم لپاره API کیلي |
 
-**Optional:**
+**اختیاري:**
 
-| Variable | Description |
+| متغیر | توضیحات |
 |----------|-------------|
-| `MODEL` | Model name (sensible defaults per platform) |
-| `AGENT_NAME` | Display name shown in the TUI (e.g. `Yukine`) |
-| `CAMERA_HOST` | IP address of your ONVIF/RTSP camera |
-| `CAMERA_USER` / `CAMERA_PASS` | Camera credentials |
-| `ELEVENLABS_API_KEY` | For voice output — [elevenlabs.io](https://elevenlabs.io/) |
-| `REALTIME_STT` | `true` to enable always-on hands-free voice input (requires `ELEVENLABS_API_KEY`) |
-| `TTS_OUTPUT` | Where to play audio: `local` (PC speaker, default) \| `remote` (camera speaker) \| `both` |
-| `THINKING_MODE` | Anthropic only — `auto` (default) \| `adaptive` \| `extended` \| `disabled` |
-| `THINKING_EFFORT` | Adaptive thinking effort: `high` (default) \| `medium` \| `low` \| `max` (Opus 4.6 only) |
+| `MODEL` | د ماډل نوم (پر پلاتفورم پورې اړه لري مناسب ځای پر ځای شوی) |
+| `AGENT_NAME` | د TUI کې ښکاره نوم (لکه `Yukine`) |
+| `CAMERA_HOST` | د ONVIF/RTSP کامرې IP پته |
+| `CAMERA_USER` / `CAMERA_PASS` | د کامرې اعتبارونه |
+| `ELEVENLABS_API_KEY` | د غږ لپاره — [elevenlabs.io](https://elevenlabs.io/) |
+| `REALTIME_STT` | `true` چې د تل لپاره د لاسونو آزاد غږ ورودی فعال کړي (د `ELEVENLABS_API_KEY` ته اړتیا لري) |
+| `TTS_OUTPUT` | چیرته چې آډیو پلي کي: `local` (PC خبرې کونکی، مخکېنی) \| `remote` (د کامرې خبرې کونکی) \| `both` |
+| `THINKING_MODE` | یوازې د انسانی لپاره — `auto` (مخکې) \| `adaptive` \| `extended` \| `disabled` |
+| `THINKING_EFFORT` | د تطبیقی فکر کولو هڅه: `high` (مخکې) \| `medium` \| `low` \| `max` (فقط Opus 4.6) |
 
-### 5. Create your familiar
+### 5. خپل familiar جوړ کړئ
 
 ```bash
 cp persona-template/en.md ME.md
-# Edit ME.md — give it a name and personality
+# ME.md سم کړئ — له دې ته نوم او شخصیت ورکړئ
 ```
 
-### 6. Run
+### 6. چل کړئ
 
+**macOS / Linux / WSL2:**
 ```bash
-./run.sh             # Textual TUI (recommended)
-./run.sh --no-tui    # Plain REPL
+./run.sh             # د متني TUI (پیشنهاد شوی)
+./run.sh --no-tui    # سادي REPL
+```
+
+**Windows:**
+```bat
+run.bat              # د متني TUI (پیشنهاد شوی)
+run.bat --no-tui     # سادي REPL
 ```
 
 ---
 
-## Choosing an LLM
+## LLM انتخابول
 
-> **Recommended: Kimi K2.5** — best agentic performance tested so far. Notices context, asks follow-up questions, and acts autonomously in ways other models don't. Priced similarly to Claude Haiku.
+> **پیشنهاد شوی: Kimi K2.5** — تر اوسه بهترین اجرایی ظرفیت. د زمینه احساسوي، وروسته پوښتنې کوي، او په انحصاري ډول عمل کوي. قیمت به د Claude Haiku سره ورته وي.
 
-| Platform | `PLATFORM=` | Default model | Where to get key |
+| پلاتفورم | `PLATFORM=` | ډیفالټ ماډل | چیرته مو کیلي ترلاسه کړئ |
 |----------|------------|---------------|-----------------|
 | **Moonshot Kimi K2.5** | `kimi` | `kimi-k2.5` | [platform.moonshot.ai](https://platform.moonshot.ai) |
 | Z.AI GLM | `glm` | `glm-4.6v` | [api.z.ai](https://api.z.ai) |
@@ -127,57 +142,57 @@ cp persona-template/en.md ME.md
 | Google Gemini | `gemini` | `gemini-2.5-flash` | [aistudio.google.com](https://aistudio.google.com) |
 | OpenAI | `openai` | `gpt-4o-mini` | [platform.openai.com](https://platform.openai.com) |
 | OpenAI-compatible (Ollama, vllm…) | `openai` + `BASE_URL=` | — | — |
-| OpenRouter.ai (multi-provider) | `openai` + `BASE_URL=https://openrouter.ai/api/v1` | — | [openrouter.ai](https://openrouter.ai) |
-| **CLI tool** (claude -p, ollama…) | `cli` | (the command) | — |
+| OpenRouter.ai (چند پرا Provider) | `openai` + `BASE_URL=https://openrouter.ai/api/v1` | — | [openrouter.ai](https://openrouter.ai) |
+| **CLI وسیله** (claude -p, ollama…) | `cli` | (قومانده) | — |
 
-**Kimi K2.5 `.env` example:**
+**Kimi K2.5 `.env` مثال:**
 ```env
 PLATFORM=kimi
-API_KEY=sk-...   # from platform.moonshot.ai
+API_KEY=sk-...   # له platform.moonshot.ai
 AGENT_NAME=Yukine
 ```
 
-**Z.AI GLM `.env` example:**
+**Z.AI GLM `.env` مثال:**
 ```env
 PLATFORM=glm
-API_KEY=...   # from api.z.ai
-MODEL=glm-4.6v   # vision-enabled; glm-4.7 / glm-5 = text-only
+API_KEY=...   # له api.z.ai
+MODEL=glm-4.6v   # د لید ولري؛ glm-4.7 / glm-5 = یوازې متن
 AGENT_NAME=Yukine
 ```
 
-**Google Gemini `.env` example:**
+**Google Gemini `.env` مثال:**
 ```env
 PLATFORM=gemini
-API_KEY=AIza...   # from aistudio.google.com
-MODEL=gemini-2.5-flash  # or gemini-2.5-pro for higher capability
+API_KEY=AIza...   # له aistudio.google.com
+MODEL=gemini-2.5-flash  # یا gemini-2.5-pro د لوړې قابلیت لپاره
 AGENT_NAME=Yukine
 ```
 
-**OpenRouter.ai `.env` example:**
+**OpenRouter.ai `.env` مثال:**
 ```env
 PLATFORM=openai
 BASE_URL=https://openrouter.ai/api/v1
-API_KEY=sk-or-...   # from openrouter.ai
-MODEL=mistralai/mistral-7b-instruct  # optional: specify model
+API_KEY=sk-or-...   # له openrouter.ai
+MODEL=mistralai/mistral-7b-instruct  # اختیاري: ماډل مشخص کړئ
 AGENT_NAME=Yukine
 ```
 
-> **Note:** To disable local/NVIDIA models, simply don't set `BASE_URL` to a local endpoint like `http://localhost:11434/v1`. Use cloud providers instead.
+> **نوټ:** د محلي/NVIDIA ماډلونو غیرفعال کولو لپاره، یوازې `BASE_URL` ته محلي پای ټکی ونکړئ لکه `http://localhost:11434/v1`. د کلاود تدارک کوونکي وکاروئ.
 
-**CLI tool `.env` example:**
+**CLI وسیله `.env` مثال:**
 ```env
 PLATFORM=cli
-MODEL=llm -m gemma3 {}        # llm CLI (https://llm.datasette.io) — {} = prompt arg
-# MODEL=ollama run gemma3:27b  # Ollama — no {}, prompt goes via stdin
+MODEL=llm -m gemma3 {}        # llm CLI (https://llm.datasette.io) — {} = پروپmt آرګ
+# MODEL=ollama run gemma3:27b  # Ollama — هیڅ {}, پروپmt د stdin له لارې ځي
 ```
 
 ---
 
-## MCP Servers
+## MCP سرورونه
 
-familiar-ai can connect to any [MCP (Model Context Protocol)](https://modelcontextprotocol.io) server. This lets you plug in external memory, filesystem access, web search, or any other tool.
+familiar-ai کولی شي هر [MCP (Model Context Protocol)](https://modelcontextprotocol.io) سرور سره وصل شي. دا تاسو ته اجازه ورکوي چې بهرني حافظه، فایل سیسټم ته د لاسرسي، ویب لټون، یا بل هر وسیله په لاس کې راولئ.
 
-Configure servers in `~/.familiar-ai.json` (same format as Claude Code):
+سرورونه د `~/.familiar-ai.json` کې تنظیم کړئ (د Claude Code په ورته بڼه):
 
 ```json
 {
@@ -195,184 +210,185 @@ Configure servers in `~/.familiar-ai.json` (same format as Claude Code):
 }
 ```
 
-Two transport types are supported:
-- **`stdio`**: launch a local subprocess (`command` + `args`)
-- **`sse`**: connect to an HTTP+SSE server (`url`)
+دوې ترانسپورت ډولونه ملاتړ کیږي:
+- **`stdio`**: د محلي فرعي پروسې پیل (قومانده + آرګس)
+- **`sse`**: د HTTP+SSE سرور سره وصل (URL)
 
-Override the config file location with `MCP_CONFIG=/path/to/config.json`.
+د config فایل موقعیت د `MCP_CONFIG=/path/to/config.json` سره ډیرول.
 
 ---
 
-## Hardware
+## هارډویر
 
-familiar-ai works with whatever hardware you have — or none at all.
+familiar-ai د هر هارډویر سره کار کوي — یا هیڅ نه.
 
-| Part | What it does | Example | Required? |
+| برخه | څه کوي | مثال | اړتیا؟ |
 |------|-------------|---------|-----------|
-| Wi-Fi PTZ camera | Eyes + neck | Tapo C220 (~$30) | **Recommended** |
-| USB webcam | Eyes (fixed) | Any UVC camera | **Recommended** |
-| Robot vacuum | Legs | Any Tuya-compatible model | No |
-| PC / Raspberry Pi | Brain | Anything that runs Python | **Yes** |
+| Wi-Fi PTZ کامره | سترګې + غاړه | Tapo C220 (~$30) | **پیشنهاد شوی** |
+| USB ویب کیمره | سترګې (ثابت) | کوم UVC کامره | **پیشنهاد شوی** |
+| روباټ ویکیوم | پښې | د Tuya-compatible هر ماډل | نه |
+| پی سی / Raspberry Pi | دماغ | هر څه چې پایتون چلوي | **هو** |
 
-> **A camera is strongly recommended.** Without one, familiar-ai can still talk — but it can't see the world, which is kind of the whole point.
+> **یوه کامره قوي وړاندیز شوې ده.** پرته له یوې، familiar-ai لا هم خبرې کولی شي — مګر دا نړۍ نه شي لیدلی، چې د دې موخه ده.
 
-### Minimal setup (no hardware)
+### د حد اقل ترتیب (هیڅ هارډویر)
 
-Just want to try it? You only need an API key:
+صرف دا غواړئ چې آزمایئ؟ تاسو ته یوازې د API کلید ته اړتیا ده:
 
 ```env
 PLATFORM=kimi
 API_KEY=sk-...
 ```
 
-Run `./run.sh` and start chatting. Add hardware as you go.
+`./run.sh` (macOS/Linux/WSL2) یا `run.bat` (Windows) چل کړئ او خبرې پیل کړئ. هارډویر د مخکې روانیدو سره اضافه کړئ.
 
-### Wi-Fi PTZ camera (Tapo C220)
+### Wi-Fi PTZ کامره (Tapo C220)
 
-1. In the Tapo app: **Settings → Advanced → Camera Account** — create a local account (not TP-Link account)
-2. Find the camera's IP in your router's device list
-3. Set in `.env`:
+1. په Tapo اپ کې: **Settings → Advanced → Camera Account** — یو محلي حساب جوړ کړئ (TP-Link حساب نه)
+2. د خپل راسټر په وسایلو لیست کې د کامرې IP پیدا کړئ
+3. په `.env` کې ترتیب کړئ:
    ```env
    CAMERA_HOST=192.168.1.xxx
    CAMERA_USER=your-local-user
    CAMERA_PASS=your-local-pass
    ```
 
-### Voice (ElevenLabs)
+### غږ (ElevenLabs)
 
-1. Get an API key at [elevenlabs.io](https://elevenlabs.io/)
-2. Set in `.env`:
+1. په [elevenlabs.io](https://elevenlabs.io/) کې یو API کیلي ترلاسه کړئ
+2. په `.env` کې ترتیب کړئ:
    ```env
    ELEVENLABS_API_KEY=sk_...
-   ELEVENLABS_VOICE_ID=...   # optional, uses default voice if omitted
+   ELEVENLABS_VOICE_ID=...   # اختیاري، که پاتې شي، اصلي غږ کاروي
    ```
 
-There are two playback destinations, controlled by `TTS_OUTPUT`:
+د آډیو د بیا ښودلو لپاره دوه هدفونه شته، د `TTS_OUTPUT` له لارې کنټرول کیږي:
 
 ```env
-TTS_OUTPUT=local    # PC speaker (default)
-TTS_OUTPUT=remote   # camera speaker only
-TTS_OUTPUT=both     # camera speaker + PC speaker simultaneously
+TTS_OUTPUT=local    # PC خبرې کونکی (مخکې)
+TTS_OUTPUT=remote   # یوازې د کامرې خبرې کونکی
+TTS_OUTPUT=both     # د کامرې خبرې کونکی + PC خبرې کونکی هممهاله
 ```
 
-#### A) Camera speaker (via go2rtc)
+#### A) د کامرې خبرې کونکی (د go2rtc له لارې)
 
-Set `TTS_OUTPUT=remote` (or `both`). Requires [go2rtc](https://github.com/AlexxIT/go2rtc/releases):
+`TTS_OUTPUT=remote` (یا `both`) ترتیب کړئ. د [go2rtc](https://github.com/AlexxIT/go2rtc/releases):
 
-1. Download the binary from the [releases page](https://github.com/AlexxIT/go2rtc/releases):
-   - Linux/macOS: `go2rtc_linux_amd64` / `go2rtc_darwin_amd64`
+1. د [ریلیز پاڼې](https://github.com/AlexxIT/go2rtc/releases) څخه باینری ډاونلوډ کړئ:
+   - لینکس/macOS: `go2rtc_linux_amd64` / `go2rtc_darwin_amd64`
    - **Windows: `go2rtc_win64.exe`**
 
-2. Place and rename it:
+2. ځای پرځای او نوم بدل کړئ:
    ```
-   # Linux / macOS
-   ~/.cache/embodied-claude/go2rtc/go2rtc          # chmod +x required
+   # لینکس / macOS
+   ~/.cache/embodied-claude/go2rtc/go2rtc          # chmod +x ته اړتیا ده
 
    # Windows
    %USERPROFILE%\.cache\embodied-claude\go2rtc\go2rtc.exe
    ```
 
-3. Create `go2rtc.yaml` in the same directory:
+3. په همدې فولډر کې `go2rtc.yaml` جوړ کړئ:
    ```yaml
    streams:
      tapo_cam:
        - rtsp://YOUR_CAM_USER:YOUR_CAM_PASS@YOUR_CAM_IP/stream1
    ```
-   Use the local camera account credentials (not your TP-Link cloud account).
+   د محلي کامرې حساب اعتبارونه کارول (ستاسو د TP-Link کلاود حساب نه).
 
-4. familiar-ai starts go2rtc automatically at launch. If your camera supports two-way audio (backchannel), voice plays from the camera speaker.
+4. familiar-ai په اوتومات ډول د پیل پرمهال go2rtc پیلوي. که ستاسو کامره دوه اړخیز آواز ملاتړ کوي (بکچینل)، غږ له کامرې څخه اوریدل کیږي.
 
-#### B) Local PC speaker
+#### B) محلي PC خبرې کونکی
 
-The default (`TTS_OUTPUT=local`). Tries players in order: **paplay** → **mpv** → **ffplay**. Also used as a fallback when `TTS_OUTPUT=remote` and go2rtc is unavailable.
+د دې (پخوانی `TTS_OUTPUT=local`). هڅه کوي پلیرونه په ترتیب سره: **paplay** → **mpv** → **ffplay**. همدارنګه د دې لپاره د بدیل په توګه کارول کیږي کله چې `TTS_OUTPUT=remote` او go2rtc شتون نلري.
 
-| OS | Install |
+| OS | نصب |
 |----|---------|
 | macOS | `brew install mpv` |
-| Ubuntu / Debian | `sudo apt install mpv` (or `paplay` via `pulseaudio-utils`) |
-| WSL2 / WSLg | `sudo apt install pulseaudio-utils` — set `PULSE_SERVER=unix:/mnt/wslg/PulseServer` in `.env` |
-| Windows | [mpv.io/installation](https://mpv.io/installation/) — download and add to PATH, **or** `winget install ffmpeg` |
+| Ubuntu / Debian | `sudo apt install mpv` (یا `paplay` د `pulseaudio-utils` له لارې) |
+| WSL2 / WSLg | `sudo apt install pulseaudio-utils` — `PULSE_SERVER=unix:/mnt/wslg/PulseServer` په `.env` کې ترتیب کړئ |
+| Windows | [mpv.io/installation](https://mpv.io/installation/) — ډاونلوډ کړئ او PATH ته اضافه کړئ، **یا** `winget install ffmpeg` |
 
-> If no audio player is available, speech is still generated — it just won't play.
+> که هیچا غږ پلیر شتون ونلري، لا هم وینا جوړیږي — دا یوازې نه پلی کیږي.
 
-### Voice input (Realtime STT)
+### غږ ورودی (Realtime STT)
 
-Set `REALTIME_STT=true` in `.env` for always-on, hands-free voice input:
+په `.env` کې `REALTIME_STT=true` ترتیب کړئ چې د تل لپاره، د لاسونو آزاد غږ ورودی:
 
 ```env
 REALTIME_STT=true
-ELEVENLABS_API_KEY=sk_...   # same key as TTS
+ELEVENLABS_API_KEY=sk_...   # د TTS سره ورته کیلي
 ```
 
-familiar-ai streams microphone audio to ElevenLabs Scribe v2 and auto-commits transcripts when you pause speaking. No button press required. Coexists with the push-to-talk mode (Ctrl+T).
+familiar-ai د مایکروفون آډیو ElevenLabs Scribe v2 ته سټریم کوي او خودکار سپارښتنې د خبرو اترو پرمهال گم corrosists کوي. د تڼۍ فشار ته اړتیا نشته. د فشار لپاره خبرې مشرو ته (Ctrl+T) سره هم ژوند کوي.
 
 ---
 
 ## TUI
 
-familiar-ai includes a terminal UI built with [Textual](https://textual.textualize.io/):
+familiar-ai د [Textual](https://textual.textualize.io/) سره یو ترمینل UI لري:
 
-- Scrollable conversation history with live streaming text
-- Tab-completion for `/quit`, `/clear`
-- Interrupt the agent mid-turn by typing while it's thinking
-- **Conversation log** auto-saved to `~/.cache/familiar-ai/chat.log`
+- د ژوندۍ سټریمینګ متن سره د سکرول وړ خبرې تاریخ
+- د `/quit`, `/clear` لپاره ټب بشپړونه
+- د دې اچولو میانه تمه په حیث کې د انجنر خالف ترسره کولو پرمهال وليکی
+- **د خبرو اترو لاګ** په اوتومات ډول `~/.cache/familiar-ai/chat.log` ته ذخیره کیږي
 
-To follow the log in another terminal (useful for copy-paste):
+د لاګ پی following (کوپي-پیست لپاره ګټور) تعقیبولو لپاره:
 ```bash
 tail -f ~/.cache/familiar-ai/chat.log
 ```
 
 ---
 
-## Persona (ME.md)
+## شخصیت (ME.md)
 
-Your familiar's personality lives in `ME.md`. This file is gitignored — it's yours alone.
+ستاسو familiar شخصیت د `ME.md` کې ژوند کوي. دا فایل د git لخوا له نظره لري — دا یوازې ستاسو دی.
 
-See [`persona-template/en.md`](./persona-template/en.md) for an example, or [`persona-template/ja.md`](./persona-template/ja.md) for a Japanese version.
+د [`persona-template/en.md`](./persona-template/en.md) لپاره یوه بیلګه وګورئ، یا د [`persona-template/ja.md`](./persona-template/ja.md) لپاره جاپاني نسخه.
 
 ---
 
 ## FAQ
 
-**Q: Does it work without a GPU?**
-Yes. The embedding model (multilingual-e5-small) runs fine on CPU. A GPU makes it faster but isn't required.
+**Q: آیا دا د GPU پرته کار کوي؟**
+هو. د انحصاري ماډل (multilingual-e5-small) د CPU په ریښتیا سره ښه کار کوي. GPU دا چټک کوي مګر اړین نه دی.
 
-**Q: Can I use a camera other than Tapo?**
-Any camera that supports ONVIF + RTSP should work. Tapo C220 is what we tested with.
+**Q: آیا زه د Tapo پرته یوه بله کامره وکاروم؟**
+هر کامره چې د ONVIF + RTSP ملاتړ وکړي کار کوي. Tapo C220 هغه څه دی چې موږ پرې آزموینه کړې.
 
-**Q: Is my data sent anywhere?**
-Images and text are sent to your chosen LLM API for processing. Memories are stored locally in `~/.familiar_ai/`.
+**Q: آیا زما معلوماته چیرته لیږدول کیږي؟**
+انځورونه او متن ستاسو ټاکل شوې LLM API ته د پروسس لپاره لیږل کیږي. یادونې محلي په `~/.familiar_ai/` کې ذخیره کیږي.
 
-**Q: Why does the agent write `（...）` instead of speaking?**
-Make sure `ELEVENLABS_API_KEY` is set. Without it, voice is disabled and the agent falls back to text.
+**Q: ولي اجنټ `（...）` لیکي پر ځای د خبرو کولو؟**
+تأكد کړئ چې `ELEVENLABS_API_KEY` ترتیب شوی. پرته له دې، غږ غیر فعال دی او اجنټ به متن ته لاړ شي.
 
-## Technical background
+## تخنیکي شالید
 
-Curious about how it works? See [docs/technical.md](./docs/technical.md) for the research and design decisions behind familiar-ai — ReAct, SayCan, Reflexion, Voyager, the desire system, and more.
+د دې څرنګه کار کولو په اړه غږیدل؟ د familiar-ai د شالید په اړه د څیړنې او ډیزاین پریکړو لپاره [docs/technical.md](./docs/technical.md) وګورئ — ReAct، SayCan، Reflexion، Voyager، د غوښتنو سیسټم، او نور.
 
 ---
 
-## Contributing
+## مرسته
 
-familiar-ai is an open experiment. If any of this resonates with you — technically or philosophically — contributions are very welcome.
+familiar-ai یو پرانیستی آزمایښت دی. که د دې څخه کوم یوه له تاسو سره اړیکه لري — تخنیکي یا فلسفي — مرستې ته ډیره خوښي وړاندیز کیږي.
 
-**Good places to start:**
+**د پیل کولو ښه ځایونه:**
 
-| Area | What's needed |
+| ساحه | څه ته اړتیا ده |
 |------|---------------|
-| New hardware | Support for more cameras (RTSP, IP Webcam), microphones, actuators |
-| New tools | Web search, home automation, calendar, anything via MCP |
-| New backends | Any LLM or local model that fits the `stream_turn` interface |
-| Persona templates | ME.md templates for different languages and personalities |
-| Research | Better desire models, memory retrieval, theory-of-mind prompting |
-| Documentation | Tutorials, walkthroughs, translations |
+| نوي هارډویر | د لا زیاتو کامرو (RTSP، IP Webcam)، مایکروفونونو، او معمول عملونو ملاتړ |
+| نوي وسایل | ویب لټون، د کور اتومات، تقویم، هر څه د MCP له لارې |
+| نوي بیکنډونه | هر LLM یا محلي ماډل چې د `stream_turn` انټر فیس سره سمون لري |
+| د شخصیت ټمپلټونه | د مختلفو ژبو او شخصیتونو لپاره ME.md ټمپلټونه |
+| څیړنه | د غوره غوښتنو ماډلونه، د یادونې بیرته ټیټول، د ذهن تیوري هڅونه |
+| مستندات | ښوونې، لارې، ژباړې |
 
-See [CONTRIBUTING.md](./CONTRIBUTING.md) for dev setup, code style, and PR guidelines.
+د توسعه ترتیب، د کوډ سټایل، او PR لارښوونو لپاره [CONTRIBUTING.md](./CONTRIBUTING.md) وګورئ.
 
-If you're unsure where to start, [open an issue](https://github.com/lifemate-ai/familiar-ai/issues) — happy to point you in the right direction.
+که تاسو نلرئ چې چیرې پیل کړئ، [یو مسله پرانیزئ](https://github.com/lifemate-ai/familiar-ai/issues) — د حقه لارښوونه کولو لپاره خوشحاله یم.
 
 ---
 
-## License
+## جواز
 
 [MIT](./LICENSE)
+```

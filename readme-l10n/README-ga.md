@@ -1,67 +1,74 @@
 # familiar-ai 🐾
 
-**A AI a chónaíonn le do taobh** — le súile, guth, cosa, agus cuimhne.
+**AI a chónaíonn leat** — le súile, guth, cos, agus cuimhne.
 
 [![Lint](https://github.com/kmizu/familiar-ai/actions/workflows/lint.yml/badge.svg)](https://github.com/kmizu/familiar-ai/actions/workflows/lint.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](./LICENSE)
 [![Python 3.10+](https://img.shields.io/badge/python-3.10+-blue.svg)](https://www.python.org/)
 [![GitHub Sponsors](https://img.shields.io/github/sponsors/kmizu?style=flat&logo=github&color=ea4aaa)](https://github.com/sponsors/kmizu)
 
-[→ English README](../README.md)
+🌍 [Ar fáil i 74 teanga](./SUPPORTED_LANGUAGES.md)
 
 ---
 
 [![Demo video](https://img.youtube.com/vi/hiR9uWRnjt4/0.jpg)](https://youtube.com/shorts/hiR9uWRnjt4)
 
-familiar-ai is AI comhoibrithe atá i do bhaile.
-Socraigh é laistigh de nóiméid. Ní theastaíonn cód.
+familiar-ai is AI companion a chónaíonn i do theach.
+Socraigh é laistigh de nóiméad. Ní bhfuil cód ag teastáil.
 
-Tugann sé le tuiscint ar an saol fíor trí cheamaraí, bogann sé ar choirp robot, labhraíonn sé go ard, agus cuimhneofa sé ar na rudaí a fheiceann sé. Tabhair ainm dó, scríobh a phearsantacht, agus lig dó cónaí leat.
+Tuigeann sé an domhan réalaíoch trí cheamaraí, gluaiseann sé timpeall ar chorp róbó, labhraíonn sé os ard, agus cuimhneamh ar a bhfeiceann sé. Tabhair ainm dó, scríobh a phearsantacht, agus lig dó cónaí leat.
 
-## Cad atá in ann a dhéanamh
+## Cad is féidir leis a dhéanamh
 
-- 👁 **Féach** — ghoid íomhánna ó cheamara PTZ Wi-Fi nó webcam USB
-- 🔄 **Féach timpeall** — sleamhnaíonn agus tilts an ceamara chun a thimpeallacht a fhiosrú
-- 🦿 **Gluais** — tiomáineann folcadán robot chun leaba a thréigean
-- 🗣 **Labhair** — labhraíonn trí ElevenLabs TTS
-- 🎙 **Éist** — ionchur guth uaireanta saor trí ElevenLabs Realtime STT (roghnach)
-- 🧠 **Cuimhne** — stórálann agus cuireann cuimhní ar ais go gníomhach le cuardach sémantach (SQLite + embeddings)
-- 🫀 **Teoiric na hInchinn** — glacann sé le dearcadh an duine eile sular freagraíonn sé
-- 💭 **Dóchas** — tá tiomachtaí intinne féin aige a spreagann iompraíocht uathrialach
+- 👁 **Feic** — ghabhann íomhánaí ó cheamara PTZ Wi-Fi nó webcam USB
+- 🔄 **Féach timpeall** — pivot agus tilts an cheamara chun a thimpealla
+- 🦿 **Gluais** — gluaiseann robó vacaim chun an seomra a chíoradh
+- 🗣 **Labhraigh** — labhraíonn trí ElevenLabs TTS
+- 🎙 **Éisteacht** — ionchur guth gan lámh trí ElevenLabs Realtime STT (tacaíocht)
+- 🧠 **Cuimhnigh** — stórann gníomhach agus cuireann cuimhní i gcuimhne le cuardach sémantach (SQLite + embeddings)
+- 🫀 **Teoiric an Intinn** — tógann sé peirspictíocht an duine eile sular freagraíonn sé
+- 💭 **Dóchas** — tá tiomantais inmheánacha aige a spreagann gníomhartha uathrialta
 
-## Conas a funcionan
+## Conas a oibríonn sé
 
-familiar-ai reáchtálann fána [ReAct](https://arxiv.org/abs/2210.03629) atá á thiomáint ag do rogha LLM. Tugann sé le tuiscint ar an saol trí uirlisí, smaoiníonn sé ar cad atá le déanamh ansin, agus gníomhóidh — díreach mar a dhéanfaidh duine.
+familiar-ai reáchtálann gnáthchiorcal [ReAct](https://arxiv.org/abs/2210.03629) atá neartaithe ag do rogha LLM. Tuigeann sé an domhan trí uirlisí, smaoineamh ar an gníomhaíocht atá le déanamh, agus gníomhaíonn — díreach mar a dhéanfaí le duine.
 
 ```
 user input
   → think → act (camera / move / speak / remember) → observe → think → ...
 ```
 
-Nuair a bhíonn sé neamhghníomhach, gníomhóidh sé ar a theastaíonn: fiosracht, ag iarraidh breathnú ar an taobh amuigh, ag iarraidh an duine a chónaíonn le chéile.
+Nuair a bhíonn sé neamhghníomhach, gníomhaíonn sé ar a dhóchas féin: fiosracht, ag iarraidh breathnú amach, ag mothú ar an duine atá ina chónaí leis.
 
-## Ag tosú
+## Conas le tosú
 
 ### 1. Suiteáil uv
 
+**macOS / Linux / WSL2:**
 ```bash
 curl -LsSf https://astral.sh/uv/install.sh | sh
 ```
 
+**Windows (PowerShell):**
+```powershell
+powershell -ExecutionPolicy ByPass -c "irm https://astral.sh/uv/install.ps1 | iex"
+```
+Nó: `winget install astral-sh.uv`
+
 ### 2. Suiteáil ffmpeg
 
-is **rith** é ffmpeg do ghabhálas íomhá ceamara agus athsheinm fuaime.
+ffmpeg is **gá** le haghaidh ghabháil íomhánna ceamara agus playback fuaime.
 
-| OS | Ordú |
+| OS | Orduithe |
 |----|---------|
 | macOS | `brew install ffmpeg` |
 | Ubuntu / Debian | `sudo apt install ffmpeg` |
 | Fedora / RHEL | `sudo dnf install ffmpeg` |
 | Arch Linux | `sudo pacman -S ffmpeg` |
-| Windows | `winget install ffmpeg` — nó íoslódáil ó [ffmpeg.org](https://ffmpeg.org/download.html) agus cuir i PATH |
+| Windows | `winget install ffmpeg` — nó íoslódáil ó [ffmpeg.org](https://ffmpeg.org/download.html) agus cuir isteach sa PATH |
 | Raspberry Pi | `sudo apt install ffmpeg` |
 
-Déan comhoiriúnacht: `ffmpeg -version`
+Deimhnigh: `ffmpeg -version`
 
 ### 3. Clone agus suiteáil
 
@@ -71,64 +78,71 @@ cd familiar-ai
 uv sync
 ```
 
-### 4. Conair
+### 4. Configir
 
 ```bash
 cp .env.example .env
-# Edit .env le do shocrú
+# Edit .env with your settings
 ```
 
-**Gá íosta:**
+**Riachtanach íosta:**
 
-| Athróg | Cur síos |
+| Comhlacht | Cur Síos |
 |----------|-------------|
 | `PLATFORM` | `anthropic` (réamhshocrú) \| `gemini` \| `openai` \| `kimi` \| `glm` |
-| `API_KEY` | Do eochair API don ardán a roghnaigh tú |
+| `API_KEY` | Do eochair API don ardán a roghnaigh |
 
-**Roghanna:**
+**Roghnach:**
 
-| Athróg | Cur síos |
+| Comhlacht | Cur Síos |
 |----------|-------------|
-| `MODEL` | Ainm an mhúnla (réamhshocrú bríomhar do gach ardán) |
-| `AGENT_NAME` | Ainm taispeána atá le feiceáil sa TUI (m.sh. `Yukine`) |
-| `CAMERA_HOST` | Seoladh IP d’do cheamara ONVIF/RTSP |
-| `CAMERA_USER` / `CAMERA_PASS` | Creidiúnachtaí an cheamara |
-| `ELEVENLABS_API_KEY` | Do aschur guth — [elevenlabs.io](https://elevenlabs.io/) |
-| `REALTIME_STT` | `true` chun ionchur guth saor a chumasú (gá le `ELEVENLABS_API_KEY`) |
-| `TTS_OUTPUT` | Cá le himirt fuaim: `local` (sóinsear PC, réamhshocrú) \| `remote` (sóinsear ceamara) \| `both` |
-| `THINKING_MODE` | Níl idirghníomhach — `auto` (réamhshocrú) \| `adaptive` \| `extended` \| `disabled` |
-| `THINKING_EFFORT` | Duine ag smaoineamh: `high` (réamhshocrú) \| `medium` \| `low` \| `max` (Opus 4.6 amháin) |
+| `MODEL` | Ainm an mhúnla (réamhshocrú ciallmhar de réir ardáin) |
+| `AGENT_NAME` | Ainm taispeána a thaispeántar sa TUI (e.g. `Yukine`) |
+| `CAMERA_HOST` | Seoladh IP do cheamara ONVIF/RTSP |
+| `CAMERA_USER` / `CAMERA_PASS` | Creidiúnaithe an cheamara |
+| `ELEVENLABS_API_KEY` | Le haghaidh guth aschur — [elevenlabs.io](https://elevenlabs.io/) |
+| `REALTIME_STT` | `true` le haghaidh ionchur guth saor ó lámh (teastaíonn `ELEVENLABS_API_KEY`) |
+| `TTS_OUTPUT` | Áit le haghaidh playback fuaime: `local` (speakear PC, réamhshocrú) \| `remote` (speakear ceamara) \| `both` |
+| `THINKING_MODE` | Níl ach do Anthropic — `auto` (réamhshocrú) \| `adaptive` \| `extended` \| `disabled` |
+| `THINKING_EFFORT` | Effort smaoineachta oiriúnach: `high` (réamhshocrú) \| `medium` \| `low` \| `max` (Opus 4.6 amháin) |
 
-### 5. Cruthaigh do chomhluadar
+### 5. Cruthaigh do familiar
 
 ```bash
 cp persona-template/en.md ME.md
-# Cuardaigh ME.md — tabhair ainm agus pearsantacht dó
+# Edit ME.md — tabhair ainm agus pearsantacht dó
 ```
 
 ### 6. Rith
 
+**macOS / Linux / WSL2:**
 ```bash
-./run.sh             # TUI téacsúil (moltar)
-./run.sh --no-tui    # REPL simplí
+./run.sh             # TUI téacs (molta)
+./run.sh --no-tui    # REPL gnaoí
+```
+
+**Windows:**
+```bat
+run.bat              # TUI téacs (molta)
+run.bat --no-tui     # REPL gnaoí
 ```
 
 ---
 
 ## Roghnú LLM
 
-> **Moltar: Kimi K2.5** — an feidhmíocht is fearr ar a bhfuil tástáil go dtí seo. Feiceann sé comhthéacs, ceisteanna leantacha a chur, agus gníomhóidh sé go uathrialach i slí nach ndéanann múnlaí eile. Praghas cosúil le Claude Haiku.
+> **Molta: Kimi K2.5** — is é an gníomhaí is fearr a tástáladh go dtí seo. Tugann sé faoi deara an comhthéacs, ceisteanna leanúnacha a chur, agus gníomhaíonn sé uathrialta ar bhealaachtaí nach ndéanann múnlaí eile. Praghsála cosúil le Claude Haiku.
 
-| Ardán | `PLATFORM=` | Múnla réamhshocrú | Cá le eochair a fháil |
+| Ardán | `PLATFORM=` | Múnla réamhshocraithe | Cá háit le h-eochair a fháil |
 |----------|------------|---------------|-----------------|
 | **Moonshot Kimi K2.5** | `kimi` | `kimi-k2.5` | [platform.moonshot.ai](https://platform.moonshot.ai) |
 | Z.AI GLM | `glm` | `glm-4.6v` | [api.z.ai](https://api.z.ai) |
 | Anthropic Claude | `anthropic` | `claude-haiku-4-5-20251001` | [console.anthropic.com](https://console.anthropic.com) |
 | Google Gemini | `gemini` | `gemini-2.5-flash` | [aistudio.google.com](https://aistudio.google.com) |
 | OpenAI | `openai` | `gpt-4o-mini` | [platform.openai.com](https://platform.openai.com) |
-| OpenAI- comhoiriúnach (Ollama, vllm…) | `openai` + `BASE_URL=` | — | — |
-| OpenRouter.ai (il-soláthar) | `openai` + `BASE_URL=https://openrouter.ai/api/v1` | — | [openrouter.ai](https://openrouter.ai) |
-| **Uirlis CLI** (claude -p, ollama…) | `cli` | (an ordú) | — |
+| OpenAI-compatible (Ollama, vllm…) | `openai` + `BASE_URL=` | — | — |
+| OpenRouter.ai (multi-provider) | `openai` + `BASE_URL=https://openrouter.ai/api/v1` | — | [openrouter.ai](https://openrouter.ai) |
+| **Uirlis CLI** (claude -p, ollama…) | `cli` | (an t-ord) | — |
 
 **Sampla `.env` do Kimi K2.5:**
 ```env
@@ -141,7 +155,7 @@ AGENT_NAME=Yukine
 ```env
 PLATFORM=glm
 API_KEY=...   # ó api.z.ai
-MODEL=glm-4.6v   # cumas radhairc; glm-4.7 / glm-5 = téacs-aon
+MODEL=glm-4.6v   # taobh súil; glm-4.7 / glm-5 = téacs amháin
 AGENT_NAME=Yukine
 ```
 
@@ -158,26 +172,26 @@ AGENT_NAME=Yukine
 PLATFORM=openai
 BASE_URL=https://openrouter.ai/api/v1
 API_KEY=sk-or-...   # ó openrouter.ai
-MODEL=mistralai/mistral-7b-instruct  # roghnach: le déanamh múnla
+MODEL=mistralai/mistral-7b-instruct  # roghnach: sonraigh múnla
 AGENT_NAME=Yukine
 ```
 
-> **Nóta:** Chun múnlaí áitiúla/NVIDIA a dhíchumasú, ná socraigh `BASE_URL` le pointe áitiúil mar `http://localhost:11434/v1`. Úsáid soláthraithe scamall in ionad sin.
+> **Nóta:** Chun múnlaí áitiúla/NVIDIA a dhíghníomhachtú, déan deifir nach socraigh `BASE_URL` chuig pointe deiridh áitiúil mar `http://localhost:11434/v1`. Úsáid soláthraithe néaróg níos fearr.
 
-**Sampla `.env` d'uirlis CLI:**
+**Sampla `.env` do uirlis CLI:**
 ```env
 PLATFORM=cli
-MODEL=llm -m gemma3 {}        # llm CLI (https://llm.datasette.io) — {} = arg promop
-# MODEL=ollama run gemma3:27b  # Ollama — gan {}, téacs téann tríd stdin
+MODEL=llm -m gemma3 {}        # llm CLI (https://llm.datasette.io) — {} = arg propmt
+# MODEL=ollama run gemma3:27b  # Ollama — gan {}, cuireadh an promt trí stdin
 ```
 
 ---
 
-## Freastalaithe MCP
+## Freastal MCP
 
-familiar-ai is féidir ceangal a dhéanamh le haon freastalaí [MCP (Model Context Protocol)](https://modelcontextprotocol.io). Tugann sé seo deis duit cuimhne éagsúla, rochtain ar chomhoiriúnacht, cuardach gréasáin, nó aon uirlis eile a chur isteach.
+familiar-ai féidir ceangal le haon freastalaí [MCP (Model Context Protocol)](https://modelcontextprotocol.io). Tosaíonn sé seo tú a chur ar leataobh am cuimhne, rochtain ar chórais, cuardach gréasáin, nó aon uirlis eile.
 
-Comhoiriúnacht freastalaithe i `~/.familiar-ai.json` (an comhoiriúnacht céanna le Claude Code):
+Conas freastalóirí a shocrú i `~/.familiar-ai.json` (an comhoibriú céanna leis an gCoidíonn Claude):
 
 ```json
 {
@@ -195,75 +209,75 @@ Comhoiriúnacht freastalaithe i `~/.familiar-ai.json` (an comhoiriúnacht céann
 }
 ```
 
-Tacaítear le dhá saghas iompar:
-- **`stdio`**: laistigh de phróiseas áitiúil (`ordú` + `args`)
+Dáileadh dhá chineál iompair:
+- **`stdio`**: seol subproceso áitiúil (`command` + `args`)
 - **`sse`**: ceangal le freastalaí HTTP+SSE (`url`)
 
-Athraigh suíomh an comhoiriúnachta le `MCP_CONFIG=/path/to/config.json`.
+Athróidh an comhad comhoibríochta le `MCP_CONFIG=/path/to/config.json`.
 
 ---
 
 ## Crua-earraí
 
-familiar-ai oibríonn le haon crua-earraí atá agat — nó aon rud ar chor ar bith.
+familiar-ai oibríonn le haon chrua-earraí atá agat — nó gan aon chrua-earraí ar chor ar bith.
 
-| Rannóg | Cad a dhéanann sé | Sampla | Gá? |
+| Páirt | Cad a dhéanann sé | Sampla | Riachtanach? |
 |------|-------------|---------|-----------|
-| Ceamara PTZ Wi-Fi | Súile + muineál | Tapo C220 (~$30) | **Moltar** |
-| Webcam USB | Súile (seasta) | Aon cheamara UVC | **Moltar** |
-| Folcadán robot | Cosa | Aon mhúnla comhoiriúnach Tuya | Níl |
-| PC / Raspberry Pi | Iníon | Aon rud a reáchtálann Python | **Sea** |
+| Ceamara PTZ Wi-Fi | Súil + muineál | Tapo C220 (~$30) | **Moltar** |
+| Webcam USB | Súil (duillín) | Aon cheamara UVC | **Moltar** |
+| Vacuím róbó | Cosanna | Aon mhúnla comhoiriúnach Tuya | Níl |
+| PC / Raspberry Pi | Cuimhne | Aon rud a reáchtálann Python | **Sea** |
 
-> **Moltar go láidir ceamara.** Gan é, is féidir le familiar-ai labhairt — ach ní féidir leis an saol a fheiceáil, atá mar chuid lárnach den rud.
+> **Moltar ceamara go forte.** Gan ceamara, is féidir le familiar-ai labhairt — ach ní féidir leis an domhan a fheiceáil, rud atá i ndáiríre mar an pointe ar fad.
 
 ### Socrú íosta (gan crua-earraí)
 
-Ar mhaith leat triail a bhaint as? Teastaíonn eochair API amháin uait:
+Ná fonn le triail? Ní gá duit ach eochair API:
 
 ```env
 PLATFORM=kimi
 API_KEY=sk-...
 ```
 
-Rith `./run.sh` agus tús a chur le comhrá. Cuir crua-earraí le chéile de réir mar a théann tú.
+Rith `./run.sh` (macOS/Linux/WSL2) nó `run.bat` (Windows) agus tús a chur le comhrá. Cuir crua-earraí isteach de réir a chéile.
 
 ### Ceamara PTZ Wi-Fi (Tapo C220)
 
-1. Sa aip Tapo: **Socruithe → Éagsúlachtaí → Cuntas Ceamara** — cruthaigh cuntas áitiúil (ní cuntas TP-Link)
-2. Faigh IP an cheamara i liosta na n-uirlisí sa doirteal
-3. Socraigh i `.env`:
+1. Sa aip Tapo: **Socruithe → Casta → Cuntais Ceamara** — cruthaigh cuntas áitiúil (ní cuntas TP-Link)
+2. Faigh IP an cheamara i liosta feistí do ródaire
+3. Socraigh isteach i `.env`:
    ```env
    CAMERA_HOST=192.168.1.xxx
    CAMERA_USER=do-úsáideoir-áitiúil
-   CAMERA_PASS=do-pasfhocal-áitiúil
+   CAMERA_PASS=do-idirbhearta-áitiúla
    ```
 
-### Guth (ElevenLabs)
+### Glór (ElevenLabs)
 
 1. Faigh eochair API ag [elevenlabs.io](https://elevenlabs.io/)
-2. Socraigh i `.env`:
+2. Socraigh isteach i `.env`:
    ```env
    ELEVENLABS_API_KEY=sk_...
-   ELEVENLABS_VOICE_ID=...   # roghnach, úsáidítear an guth réamhshocraithe más neamhghnách
+   ELEVENLABS_VOICE_ID=...   # roghnach, úsáideann guth réamhshocraithe más neamh
    ```
 
-Tá dhá áit imseacht ann, a rialófar ag `TTS_OUTPUT`:
+Tá dhá chinn playback ann, a rialófar trí `TTS_OUTPUT`:
 
 ```env
-TTS_OUTPUT=local    # Sóinsear PC (réamhshocraithe)
-TTS_OUTPUT=remote   # sóinsear an cheamara amháin
-TTS_OUTPUT=both     # sóinsear an cheamara + sóinsear PC le chéile
+TTS_OUTPUT=local    # Speakear PC (réamhshocraithe)
+TTS_OUTPUT=remote   # speakear ceamara amháin
+TTS_OUTPUT=both     # speakear ceamara + speakear PC go comhthreomhar
 ```
 
-#### A) Sóinsear an cheamara (trí go2rtc)
+#### A) Speakear ceamara (trí go2rtc)
 
-Socraigh `TTS_OUTPUT=remote` (nó `both`). Éilíonn sé [go2rtc](https://github.com/AlexxIT/go2rtc/releases):
+Socraigh `TTS_OUTPUT=remote` (nó `both`). Teastaíonn [go2rtc](https://github.com/AlexxIT/go2rtc/releases):
 
-1. Íoslódáil an binary ón [leathanach leasca](https://github.com/AlexxIT/go2rtc/releases):
+1. Íoslódáil an méid ó [an leathanach d’uisce](https://github.com/AlexxIT/go2rtc/releases):
    - Linux/macOS: `go2rtc_linux_amd64` / `go2rtc_darwin_amd64`
    - **Windows: `go2rtc_win64.exe`**
 
-2. Áitigh agus athainmnigh é:
+2. Cuardaigh agus athainm sé:
    ```
    # Linux / macOS
    ~/.cache/embodied-claude/go2rtc/go2rtc          # chmod +x riachtanach
@@ -272,104 +286,104 @@ Socraigh `TTS_OUTPUT=remote` (nó `both`). Éilíonn sé [go2rtc](https://github
    %USERPROFILE%\.cache\embodied-claude\go2rtc\go2rtc.exe
    ```
 
-3. Cruthaigh `go2rtc.yaml` sa chás céanna:
+3. Cruthaigh `go2rtc.yaml` sa áit chéanna:
    ```yaml
    streams:
      tapo_cam:
        - rtsp://YOUR_CAM_USER:YOUR_CAM_PASS@YOUR_CAM_IP/stream1
    ```
-   Úsáid creidiúnachtaí an chuntais áitiúil ceamara (ní cuntas scamall TP-Link).
+   Úsáid creidiúnachtaí an chuntais áitiúil do cheamara (ní cuntas do chuntasa TP-Link).
 
-4. Cuireann familiar-ai go2rtc ar bun go huathoibríoch ag an gcuirt. Má tá do cheamara comhoiriúnach le fuaim araon (cóimheá), seinnfidh an guth ó shóinsear an cheamara.
+4. Tosaíonn familiar-ai go2rtc go huathoibríoch ag an tús. Má tá do cheamara comhoiriúnach le guth péirí (canál cuid), imríonn an guth as seomra an cheamara.
 
-#### B) Sóinsear áitiúil PC
+#### B) Speakear áitiúil PC
 
-Is é an réamhshocrú (`TTS_OUTPUT=local`). Déanann sé iarracht imreoirí in ord: **paplay** → **mpv** → **ffplay**. Úsáidtear é freisin mar a ghabhtar ar ais nuair a bhíonn `TTS_OUTPUT=remote` agus go2rtc neamh-infhaighte.
+An réamhshocrú (`TTS_OUTPUT=local`). Déanann sé iarracht imreoirí i gcruth: **paplay** → **mpv** → **ffplay**. Úsáidtear freisin mar thacaíocht nuair a bhíonn `TTS_OUTPUT=remote` agus nach bhfuil go2rtc ar fáil.
 
 | OS | Suiteáil |
 |----|---------|
 | macOS | `brew install mpv` |
-| Ubuntu / Debian | `sudo apt install mpv` (nó `paplay` tríd `pulseaudio-utils`) |
+| Ubuntu / Debian | `sudo apt install mpv` (nó `paplay` trí `pulseaudio-utils`) |
 | WSL2 / WSLg | `sudo apt install pulseaudio-utils` — socraigh `PULSE_SERVER=unix:/mnt/wslg/PulseServer` i `.env` |
-| Windows | [mpv.io/suiteáil](https://mpv.io/installation/) — íoslódáil agus cuir i PATH, **nó** `winget install ffmpeg` |
+| Windows | [mpv.io/installation](https://mpv.io/installation/) — íoslódáil agus cuir isteach sa PATH, **nó** `winget install ffmpeg` |
 
-> Mura bhfuil imreoir fuaime ar fáil, cruthófar fós guth — ach ní bheidh sé in ann imirt.
+> Más rud é nach bhfuil imreoir fuaime ar fáil, tógfar an guth fós — ní imreoidh sé.
 
 ### Ionchur guth (Realtime STT)
 
-Socraigh `REALTIME_STT=true` i `.env` le haghaidh ionchur guth saor uathrialach:
+Socraigh `REALTIME_STT=true` i `.env` le haghaidh ionchur guth saor ó lámh i gcónaí:
 
 ```env
 REALTIME_STT=true
-ELEVENLABS_API_KEY=sk_...   # an eochair chéanna le TTS
+ELEVENLABS_API_KEY=sk_...   # an eochair céanna le TTS
 ```
 
-Cuireann familiar-ai fuaim an mhicreafón chuig ElevenLabs Scribe v2 agus comhoiriúnachtaí laistigh de chomhoiriúnachtaí nuair a stopann tú ag labhairt. Ní gá gníomh a bhaint. Comhoibríonn sé leis an modh push-to-talk (Ctrl+T).
+familiar-ai sruthlaíonn fuaim an micreafón do ElevenLabs Scribe v2 agus seolaimid clár/subh na mona nuair a stopann tú ag labhairt. Ní gá duilleog a bhrú. Coexists le mód push-to-talk (Ctrl+T).
 
 ---
 
 ## TUI
 
-tá TUI san áireamh ar familiar-ai a tógadh le [Textual](https://textual.textualize.io/):
+familiar-ai comhoibrítear UI téarmaíneach a tógadh le [Textual](https://textual.textualize.io/):
 
-- Stair comhrá scrolaithe le téacs beo
-- Críochnaigh le haghaidh `/quit`, `/clear`
-- Cuir isteach an gníomhaire mar atá sé ag smaoineamh
-- **Lóg comhrá** a shábháil go huathoibríoch i `~/.cache/familiar-ai/chat.log`
+- Stair comhoibrithe atá ag scrollaíocht le téacs ag sruthlú beo
+- Comhoiriúnacht ghabhála don `/quit`, `/clear`
+- Braith ar an ngníomhaí ag deireadh an chrua-script nuair a tá sé ag smaoineamh
+- **Log comhrá** a shábháil go huathoibríoch chuig `~/.cache/familiar-ai/chat.log`
 
-Chun an lóg a leanúint i dteagmhas eile (úsáideach le haghaidh cóipleabhar-paste):
+Chun na loga a leanúint i dteirminal eile (úsáideach le haghaidh cóipeáil-placeholder):
 ```bash
 tail -f ~/.cache/familiar-ai/chat.log
 ```
 
 ---
 
-## Pearsantacht (ME.md)
+## Persona (ME.md)
 
-Tá pearsantacht do chomhluadar i `ME.md`. Tá an comhad seo gitignored — is é do chuid féin.
+Maireann pearsantacht do familiar i `ME.md`. Tá an comhad seo gitignored — is é féin amháin é.
 
-Féach [`persona-template/en.md`](./persona-template/en.md) le haghaidh sampla, nó [`persona-template/ja.md`](./persona-template/ja.md) le haghaidh leagan Seapán.
+Féach [`persona-template/en.md`](./persona-template/en.md) le haghaidh sampla, nó [`persona-template/ja.md`](./persona-template/ja.md) do leagan Seapórach.
 
 ---
 
-## Ceisteanna Coitianta
+## FAQ
 
 **Q: An oibríonn sé gan GPU?**
-Tá. Oibríonn an múnla embedding (multilingual-e5-small) go maith ar CPU. Déanann GPU é níos tapúla ach ní gá.
+Sea. Oibríonn an múnla embedding (multilingual-e5-small) go maith ar an CPU. Déanann GPU sé níos gasta ach ní gá.
 
 **Q: An féidir liom ceamara eile a úsáid seachas Tapo?**
-Ba chóir go mbeadh aon cheamara a thacaíonn le ONVIF + RTSP oiriúnach. Tá Tapo C220 ar an gceamara a tástáladh.
+Ba chóir go mbeadh oiriúnach aon cheamara a thacaíonn le ONVIF + RTSP. Is é Tapo C220 an ceann a thástáil muid.
 
-**Q: An seoltar m'áilgéige áit éigin?**
-Seoltar íomhánna agus téacs chuig do LLM API roghnaithe le haghaidh próiseála. Stórálann cuimhní go háitiúil i `~/.familiar_ai/`.
+**Q: An bhfuil mo shonraí curtha chuig aon áit?**
+Tugtar íomhánna agus téacs chuig do LLM API roghnaithe le haghaidh próiseála. Stóráiltear cuimhní áitiúla i `~/.familiar_ai/`.
 
-**Q: Cén fáth a scríobhann an gníomhaire `（...）` seachas labhairt?**
-Sílim gur gurb é `ELEVENLABS_API_KEY` atá socraithe. Mura bhfuil, tá guth dí-chumasaithe agus tuigeann an gníomhaire ar ais go téacs.
+**Q: Cén fáth a scríobhann an gníomhaí `（...）` seachas ag labhairt?**
+Déantar deimhin go mbeidh `ELEVENLABS_API_KEY` socraithe. Murach sin, tá guth diúltaithe agus téann an gníomhaí ar ais chuig téacs.
 
-## Cúlra Teicniúil
+## Cúlra teicniúil
 
-Ar mhaith leat a fháil amach conas a oibríonn sé? Féach [docs/technical.md](./docs/technical.md) a luíonn le taighde agus cinntí dearaidh taobh thiar de familiar-ai — ReAct, SayCan, Reflexion, Voyager, an córas dúshlán, agus níos mó.
+Fonn ar conas a oibríonn sé? Féach [docs/technical.md](./docs/technical.md) don taighde agus na cinntí dearaidh a bhaineann le familiar-ai — ReAct, SayCan, Reflexion, Voyager, an córas dóchais, agus níos mó.
 
 ---
 
-## Foireann
+## Contributing
 
-Is turgnamh oscailte é familiar-ai. Más rud é go bhfuil aon chuid seo in oiriúnachtaí go teicniúil nó go fealsunachta, tá fáilte roimh gníomhartha.
+familiar-ai is turgnamh oscailte. Más gá dhó go bhfuil aon rud seo a chuireann le do chuid — teicniúil nó fealsúnachta — tá fáilte roimh na cur chuige.
 
-**Láithreacha maithe le tosú:**
+**Áiteanna maithe le tosú:**
 
 | Réimse | Cad atá ag teastáil |
 |------|---------------|
-| Crua-earraí nua | Tacaíocht d’níos mó ceamaraí (RTSP, IP Webcam), micréafón, imreoirí |
-| Uirlisí nua | Cuardach gréasáin, uathoibriú baile, calandar, aon rud trí MCP |
-| Cúlraí nua | Aon LLM nó múnla áitiúil a oireann don comhoiriúnacht `stream_turn` |
-| Teimpléid pearsantachta | Teimpléid ME.md do shain-laghamhála agus pearsantachtaí éagsúla |
-| Taighde | Níos fearr suíomhanna dúshlán, aisghabháil cuimhne, guth an intinn |
-| Doiciméadú | Tús céim, treoracha, aistriúcháin |
+| Crua-earraí nua | Tacaíocht do níos mó ceamaraí (RTSP, IP Webcam), micreafóin, gníomhaireachtaí |
+| Uirlisí nua | Cuardach gréasáin, uathoibriú baile, féilire, éin a dhéanann via MCP |
+| Nue cúirteanna | Aon LLM nó múnla áitiúil a oireann leis an gclár `stream_turn` |
+| Sainaithint samplaí | ME.md samplaí do theangacha agus pearsantachtaí éagsúla |
+| Taighde | Samhlacha dóchais níos fearr, faighte cuimhne, prómpáil teoirice-an-intinn |
+| Doiciméadú | Treoracha, siúlóidí, aistriúcháin |
 
-Féach [CONTRIBUTING.md](./CONTRIBUTING.md) le haghaidh suiteáil forbartha, stíl cód, agus treoirlínte PR.
+Féach [CONTRIBUTING.md](./CONTRIBUTING.md) do shocrú forbartha, stíl chód, agus treoirlínte PR.
 
-Má tá sé deacair ort ar bith an leagan, [oscail ceist](https://github.com/lifemate-ai/familiar-ai/issues) — beidh áthas orm tú a threorú i dtreo ceart.
+Más neamhshásúil atá tú ar conas a thosú, [oscail ábhar](https://github.com/lifemate-ai/familiar-ai/issues) — beidh áthas orm tú a chur ar an treo ceart.
 
 ---
 

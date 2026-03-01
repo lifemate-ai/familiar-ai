@@ -1,56 +1,63 @@
 # familiar-ai 🐾
 
-**Wani AI da ke rayuwa tare da ku** — tare da idanu, murya, ƙafafu, da ƙwaƙwalwa.
+**Wannan AI ne da ke zaune tare da kai** — yana da ido, murya, kafafu, da tunani.
 
 [![Lint](https://github.com/kmizu/familiar-ai/actions/workflows/lint.yml/badge.svg)](https://github.com/kmizu/familiar-ai/actions/workflows/lint.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](./LICENSE)
 [![Python 3.10+](https://img.shields.io/badge/python-3.10+-blue.svg)](https://www.python.org/)
 [![GitHub Sponsors](https://img.shields.io/github/sponsors/kmizu?style=flat&logo=github&color=ea4aaa)](https://github.com/sponsors/kmizu)
 
-[→ English README](../README.md)
+🌍 [Ana samunsa a harshen 74](./SUPPORTED_LANGUAGES.md)
 
 ---
 
 [![Demo video](https://img.youtube.com/vi/hiR9uWRnjt4/0.jpg)](https://youtube.com/shorts/hiR9uWRnjt4)
 
-familiar-ai abokin AI ne da ke rayuwa a cikin gidanka.
-Shirya shi cikin mintuna. Ba a bukatar coding.
+familiar-ai abokin tarayya ne na AI wanda ke zaune a gidanka.
+Sanya shi cikin mintuna. Ba a buƙatar kera.
 
-Yana gane duniya ta gaskiya ta hanyar kyamarori, yana motsi akan jikin robot, yana magana a fili, kuma yana tuna abin da yake gani. Ba shi da suna, rubuta halayensa, kuma ka bar shi ya zauna tare da kai.
+Yana gane duniya ta gaske ta hanyar kyamara, yana motsawa akan jikin robot, yana magana da ƙarfi, kuma yana tunawa da abin da ya gani. Ba shi da suna, rubuta halayensa, kuma bar shi ya zauna tare da kai.
 
-## Abin da zai iya yi
+## Me zai iya yi
 
-- 👁 **Gani** — yana kama hotuna daga Wi-Fi PTZ camera ko USB webcam
-- 🔄 **Duba** — yana motsawa da juyawa don bincika yanayinsa
-- 🦿 **Motsi** — yana tuka robot vacuum don yawo a dakin
-- 🗣 **Magana** — yana magana ta hanyar ElevenLabs TTS
-- 🎙 **Sauraro** — shigar murya mara hannu ta hanyar ElevenLabs Realtime STT (zaɓi)
-- 🧠 **Tuna** — yana adana da kuma tuna tunani tare da bincike mai ma'ana (SQLite + embeddings)
-- 🫀 **Theory of Mind** — yana ɗaukar matsayar wani kafin ya amsa
-- 💭 **Sha'awa** — yana da kansa abubuwan da suka sanya shi gudanar da hali kai tsaye
+- 👁 **Gani** — yana ɗaukar hotuna daga kyamara ta Wi-Fi PTZ ko USB webcam
+- 🔄 **Duba** — yana juyawa da tsayawa da kyamara don bincika kewayon sa
+- 🦿 **Motsi** — yana tuka na'urar shara ta robot don yawo a cikin dakin
+- 🗣 **Magana** — yana magana ta ElevenLabs TTS
+- 🎙 **Sauraro** — shigar murya mara hannu ta ElevenLabs Realtime STT (zaɓi)
+- 🧠 **Tuna** — yana adana da kuma tuna tunane-tunane tare da binciken ma'anar (SQLite + embeddings)
+- 🫀 **Tsarin Hankali** — yana ɗaukar hangen nesa na wanda ke tare da shi kafin ya amsa
+- 💭 **Sha'awa** — yana da hawa na ciki na kansa wanda ke haifar da halayen kansa
 
 ## Yadda yake aiki
 
-familiar-ai yana gudana a cikin [ReAct](https://arxiv.org/abs/2210.03629) shawara da aka karɓa daga zaɓin LLM ɗinka. Yana gane duniya ta hanyar kayan aiki, yana tunani akan abin da zai yi na gaba, kuma yana aikin — kamar yadda mutum zai yi.
+familiar-ai na gudanar da [ReAct](https://arxiv.org/abs/2210.03629) zagaye wanda aka ƙarfafa da zaɓin ku na LLM. Yana ganin duniya ta hanyoyi, yana tunani akan abin da za a yi na gaba, kuma yana aikata — kamar yadda mutum zai yi.
 
 ```
 user input
   → think → act (camera / move / speak / remember) → observe → think → ...
 ```
 
-Lokacin da babu aiki, yana aiki bisa ga sha'awarsa: son sanin, son duba waje, ko jin kewar wanda yake zaune tare da shi.
+Lokacin da ba ya yin komai, yana aikata bisa ga sha'awarsa: son sani, jin dadin kallon waje, rashin wanda yake tare da shi.
 
-## Fara
+## Fara aiki
 
 ### 1. Shigar da uv
 
+**macOS / Linux / WSL2:**
 ```bash
 curl -LsSf https://astral.sh/uv/install.sh | sh
 ```
 
+**Windows (PowerShell):**
+```powershell
+powershell -ExecutionPolicy ByPass -c "irm https://astral.sh/uv/install.ps1 | iex"
+```
+Ko: `winget install astral-sh.uv`
+
 ### 2. Shigar da ffmpeg
 
-ffmpeg yana **buƙata** don kama hoton kyamara da kuma kunna sauti.
+ffmpeg yana **da muhimmanci** don ɗaukar hotunan kyamara da kunna sauti.
 
 | OS | Umurni |
 |----|---------|
@@ -58,7 +65,7 @@ ffmpeg yana **buƙata** don kama hoton kyamara da kuma kunna sauti.
 | Ubuntu / Debian | `sudo apt install ffmpeg` |
 | Fedora / RHEL | `sudo dnf install ffmpeg` |
 | Arch Linux | `sudo pacman -S ffmpeg` |
-| Windows | `winget install ffmpeg` — ko sauke daga [ffmpeg.org](https://ffmpeg.org/download.html) kuma a ƙara zuwa PATH |
+| Windows | `winget install ffmpeg` — ko sauke daga [ffmpeg.org](https://ffmpeg.org/download.html) kuma ƙara zuwa PATH |
 | Raspberry Pi | `sudo apt install ffmpeg` |
 
 Tabbatar: `ffmpeg -version`
@@ -71,64 +78,71 @@ cd familiar-ai
 uv sync
 ```
 
-### 4. Tsara
+### 4. Daidaita
 
 ```bash
 cp .env.example .env
-# Edit .env tare da saitunan ku
+# Gyara .env tare da saitunan ku
 ```
 
-**Mafi ƙanƙanta buƙatar:**
+**Mafi ƙarancin ake buƙata:**
 
 | Canji | Bayani |
 |----------|-------------|
 | `PLATFORM` | `anthropic` (na tsohuwa) \| `gemini` \| `openai` \| `kimi` \| `glm` |
-| `API_KEY` | API key ɗin ku don dandamali da aka zaɓa |
+| `API_KEY` | Mabudin API naka don dandamali da aka zaɓa |
 
-**Zabi:**
+**Zaɓi:**
 
 | Canji | Bayani |
 |----------|-------------|
-| `MODEL` | Sunan samfur (madogara masu ma'ana bisa dandalin) |
-| `AGENT_NAME` | Sunan da ake nunawa a cikin TUI (misali: `Yukine`) |
-| `CAMERA_HOST` | Adireshin IP na kyamarar ONVIF/RTSP ɗinku |
-| `CAMERA_USER` / `CAMERA_PASS` | Takardun shaidar kyamara |
-| `ELEVENLABS_API_KEY` | Don fitar murya — [elevenlabs.io](https://elevenlabs.io/) |
-| `REALTIME_STT` | `true` don kunna shigar murya mai hannu na koyaushe (yana buƙatar `ELEVENLABS_API_KEY`) |
-| `TTS_OUTPUT` | Inda za a kunna sauti: `local` (masu magana na PC, tsohuwa) \| `remote` (masu magana na kyamara) \| `both` |
+| `MODEL` | Sunan samfur (masu ma'ana na tsohuwa bisa dandamali) |
+| `AGENT_NAME` | Sunan da zai bayyana a cikin TUI (misali `Yukine`) |
+| `CAMERA_HOST` | Adireshin IP na kyamarar ONVIF/RTSP dinka |
+| `CAMERA_USER` / `CAMERA_PASS` | Takaddun shaida na kyamara |
+| `ELEVENLABS_API_KEY` | Don fitar da murya — [elevenlabs.io](https://elevenlabs.io/) |
+| `REALTIME_STT` | `true` don kunna shigar murya mara hannu koyaushe (yana buƙatar `ELEVENLABS_API_KEY`) |
+| `TTS_OUTPUT` | Inda za a kunna sauti: `local` (muryar PC, na tsohuwa) \| `remote` (muryar kyamara) \| `both` |
 | `THINKING_MODE` | Anthropic kawai — `auto` (na tsohuwa) \| `adaptive` \| `extended` \| `disabled` |
-| `THINKING_EFFORT` | Ƙoƙarin tunani na daidaitawa: `high` (na tsohuwa) \| `medium` \| `low` \| `max` (Opus 4.6 kawai) |
+| `THINKING_EFFORT` | Tattaunawar tunani mai dacewa: `high` (na tsohuwa) \| `medium` \| `low` \| `max` (Opus 4.6 kawai) |
 
-### 5. Gina familiar ɗinka
+### 5. Kirkiri familiar dinka
 
 ```bash
 cp persona-template/en.md ME.md
-# Edit ME.md — ba wa suna da halaye
+# Gyara ME.md — ba shi suna da halaye
 ```
 
 ### 6. Gudanar
 
+**macOS / Linux / WSL2:**
 ```bash
-./run.sh             # Textual TUI (da aka ba da shawara)
-./run.sh --no-tui    # Plain REPL
+./run.sh             # TUI mai rubutu (an ba da shawara)
+./run.sh --no-tui    # REPL mai sauƙi
+```
+
+**Windows:**
+```bat
+run.bat              # TUI mai rubutu (an ba da shawara)
+run.bat --no-tui     # REPL mai sauƙi
 ```
 
 ---
 
-## Zaɓin LLM
+## Zabar LLM
 
-> **Ana ba da shawarar: Kimi K2.5** — mafi kyawun aikin wakili da aka gwada har yanzu. Yana lura da mahallin, yana tambayar tambayoyi masu zuwa, kuma yana aiki kai tsaye yadda wasu samfurori basu yi ba. Farashi yana kama da Claude Haiku.
+> **An ba da shawara: Kimi K2.5** — mafi kyawun aikin agentic da aka gwada har zuwa yanzu. Yana lura da mahallin, yana tambayar tambayoyi masu zurfi, kuma yana aikata kansa a hanyoyi da sauran samfuran ba su yi ba. Farashin yana da kusan daidai da Claude Haiku.
 
-| Dandalin | `PLATFORM=` | Samfurin tsohuwa | Inda za a samu maɓalli |
+| Dandamali | `PLATFORM=` | Samfur na tsohuwa | Inda za a sami mabudi |
 |----------|------------|---------------|-----------------|
 | **Moonshot Kimi K2.5** | `kimi` | `kimi-k2.5` | [platform.moonshot.ai](https://platform.moonshot.ai) |
 | Z.AI GLM | `glm` | `glm-4.6v` | [api.z.ai](https://api.z.ai) |
 | Anthropic Claude | `anthropic` | `claude-haiku-4-5-20251001` | [console.anthropic.com](https://console.anthropic.com) |
 | Google Gemini | `gemini` | `gemini-2.5-flash` | [aistudio.google.com](https://aistudio.google.com) |
 | OpenAI | `openai` | `gpt-4o-mini` | [platform.openai.com](https://platform.openai.com) |
-| OpenAI-masu dace (Ollama, vllm…) | `openai` + `BASE_URL=` | — | — |
-| OpenRouter.ai (mai ba da sabis da yawa) | `openai` + `BASE_URL=https://openrouter.ai/api/v1` | — | [openrouter.ai](https://openrouter.ai) |
-| **CLI kayan aiki** (claude -p, ollama…) | `cli` | (umurnin) | — |
+| OpenAI-compatible (Ollama, vllm…) | `openai` + `BASE_URL=` | — | — |
+| OpenRouter.ai (masu bayarwa da yawa) | `openai` + `BASE_URL=https://openrouter.ai/api/v1` | — | [openrouter.ai](https://openrouter.ai) |
+| **CLI tool** (claude -p, ollama…) | `cli` | (umurnin) | — |
 
 **Kimi K2.5 `.env` misali:**
 ```env
@@ -141,7 +155,7 @@ AGENT_NAME=Yukine
 ```env
 PLATFORM=glm
 API_KEY=...   # daga api.z.ai
-MODEL=glm-4.6v   # da ke da hangen nesa; glm-4.7 / glm-5 = rubutu kawai
+MODEL=glm-4.6v   # duba; glm-4.7 / glm-5 = rubutacce kawai
 AGENT_NAME=Yukine
 ```
 
@@ -149,7 +163,7 @@ AGENT_NAME=Yukine
 ```env
 PLATFORM=gemini
 API_KEY=AIza...   # daga aistudio.google.com
-MODEL=gemini-2.5-flash  # ko gemini-2.5-pro don ƙarfin ƙarfi
+MODEL=gemini-2.5-flash  # ko gemini-2.5-pro don ƙarfin iko
 AGENT_NAME=Yukine
 ```
 
@@ -158,26 +172,26 @@ AGENT_NAME=Yukine
 PLATFORM=openai
 BASE_URL=https://openrouter.ai/api/v1
 API_KEY=sk-or-...   # daga openrouter.ai
-MODEL=mistralai/mistral-7b-instruct  # zaɓi: bayyana samfur
+MODEL=mistralai/mistral-7b-instruct  # zaɓi: ƙayyade samfur
 AGENT_NAME=Yukine
 ```
 
-> **Lura:** Don kashe samfurin gida/NVIDIA, kawai kada ku saita `BASE_URL` zuwa adireshin gida kamar `http://localhost:11434/v1`. Yi amfani da masu bayar da gajimare maimakon haka.
+> **Lura:** Don kashe samfurorin gida/NVIDIA, kawai kada a saita `BASE_URL` zuwa ƙarshen gida kamar `http://localhost:11434/v1`. Yi amfani da masu bayarwa na gajere maimakon haka.
 
-**CLI kayan aiki `.env` misali:**
+**CLI tool `.env` misali:**
 ```env
 PLATFORM=cli
-MODEL=llm -m gemma3 {}        # llm CLI (https://llm.datasette.io) — {} = shigar da hujja
-# MODEL=ollama run gemma3:27b  # Ollama — ba {}, hujja tana zuwa ta stdin
+MODEL=llm -m gemma3 {}        # llm CLI (https://llm.datasette.io) — {} = hujja
+# MODEL=ollama run gemma3:27b  # Ollama — babu {}, hujja ta yi amfani da stdin
 ```
 
 ---
 
 ## MCP Servers
 
-familiar-ai na iya haɗawa da kowanne [MCP (Model Context Protocol)](https://modelcontextprotocol.io) uwar garke. Wannan yana ba ku damar haɗawa da ƙwaƙwalwar waje, samun damar tsarin fayil, bincike na yanar gizo, ko kowanne kayan aiki.
+familiar-ai na iya haɗawa da kowanne [MCP (Model Context Protocol)](https://modelcontextprotocol.io) server. Wannan yana ba ku damar haɗa ƙwaƙwalwar waje, damar fayil, bincike a yanar gizo, ko kowanne kayan aiki.
 
-Saita uwar garken a cikin `~/.familiar-ai.json` (tsarin iri daya da Claude Code):
+Daidaita servers a `~/.familiar-ai.json` (irin wannan tsarin da Claude Code):
 
 ```json
 {
@@ -195,43 +209,43 @@ Saita uwar garken a cikin `~/.familiar-ai.json` (tsarin iri daya da Claude Code)
 }
 ```
 
-An tallafa wa nau'ikan sufuri guda biyu:
-- **`stdio`**: fara wani tsarin gida (`command` + `args`)
-- **`sse`**: haɗawa da uwar garken HTTP+SSE (`url`)
+An goyi bayan nau'ikan sufuri guda biyu:
+- **`stdio`**: fara wani subprocess na gida (`command` + `args`)
+- **`sse`**: haɗa da HTTP+SSE server (`url`)
 
-Maimaita wurin fayil ɗin da aka saita tare da `MCP_CONFIG=/path/to/config.json`.
+Canza wurin fayil ɗin saiti tare da `MCP_CONFIG=/path/to/config.json`.
 
 ---
 
 ## Kayan aiki
 
-familiar-ai yana aiki tare da duk kayan aikin da kuke da su — ko babu koɗan ma.
+familiar-ai yana aiki tare da kowanne kayan aiki da kuke da shi — ko ba komai ba.
 
-| Sashi | Abin da yakesa | Misali | Ana buƙata? |
+| Sashi | Abin da yake yi | Misali | Ana buƙata? |
 |------|-------------|---------|-----------|
-| Wi-Fi PTZ kyamara | Idanu + wuyan | Tapo C220 (~$30) | **Ana ba da shawarar** |
-| USB webcam | Idanu (ugo) | Duk wani kyamarar UVC | **Ana ba da shawarar** |
-| Robot vacuum | ƙafafu | Duk wani samfurin da ya dace da Tuya | A'a |
-| PC / Raspberry Pi | Ƙwaƙwalwa | Ko wani abu da ke gudanar da Python | **Eh** |
+| Wi-Fi PTZ kyamara | Ido + wuya | Tapo C220 (~$30) | **An ba da shawara** |
+| USB webcam | Ido (daskare) | Kowane kyamara UVC | **An ba da shawara** |
+| Robot vacuum | Kafafu | Kowane samfurin da ya dace da Tuya | A'a |
+| PC / Raspberry Pi | Kwamfuta | Kowane abu da ke gudanar da Python | **Iya** |
 
-> **An ba da shawarar kyamara sosai.** Ba tare da kyamara ba, familiar-ai na iya magana — amma baya iya ganin duniya, wanda shine babban maɓallin.
+> **Ana ba da shawarar kyamara sosai.** Sai dai idan ba shi da ita, familiar-ai na iya magana — amma ba zai iya ganin duniya ba, wanda shine babban dalilin.
 
-### Ƙananan sanya (babu kayan aiki)
+### Tsarin karami (ba ainihi)
 
-Kawai kuna son gwada shi? Kuna buƙatar kawai maɓallin API:
+Kawai kana so ka gwada? Kuna buƙatar kawai mabudin API:
 
 ```env
 PLATFORM=kimi
 API_KEY=sk-...
 ```
 
-Gudanar da `./run.sh` kuma fara tattaunawa. ƙara kayan aiki yayin da kuke ci gaba.
+Gudanar da `./run.sh` (macOS/Linux/WSL2) ko `run.bat` (Windows) kuma fara tattaunawa. Ƙara kayan aiki yayin da kuke tafiya.
 
 ### Wi-Fi PTZ kyamara (Tapo C220)
 
-1. A cikin manhajar Tapo: **Saituna → Mai zurfi → Asusun Kyamara** — ƙirƙiri asusun gida (ba asusun TP-Link ba)
-2. Nemi adireshin IP na kyamarar a cikin jerin na'ura na router ɗinku
-3. Sanya a cikin `.env`:
+1. A cikin aikace-aikacen Tapo: **Saituna → Ci gaba → Asusun Kyamera** — ƙirƙiri asusun gida (ba asusun TP-Link ba)
+2. Nemo adireshin IP na kyamarar a cikin jerin na'urorin router dinka
+3. Saita a cikin `.env`:
    ```env
    CAMERA_HOST=192.168.1.xxx
    CAMERA_USER=your-local-user
@@ -240,84 +254,84 @@ Gudanar da `./run.sh` kuma fara tattaunawa. ƙara kayan aiki yayin da kuke ci ga
 
 ### Murya (ElevenLabs)
 
-1. Samu maɓalli na API a [elevenlabs.io](https://elevenlabs.io/)
-2. Sanya a cikin `.env`:
+1. Samu mabudin API a [elevenlabs.io](https://elevenlabs.io/)
+2. Saita a cikin `.env`:
    ```env
    ELEVENLABS_API_KEY=sk_...
-   ELEVENLABS_VOICE_ID=...   # na zaɓi, yana amfani da murya ta tsohuwa idan an barshi
+   ELEVENLABS_VOICE_ID=...   # zaɓi, yana amfani da murya ta tsohuwa idan an barshi
    ```
 
-Akwai wurare guda biyu na kunna sauti, ana tsarawa ta hanyar `TTS_OUTPUT`:
+Akwai wurare guda biyu na kunna sauti, wanda aka sarrafa ta `TTS_OUTPUT`:
 
 ```env
-TTS_OUTPUT=local    # Masu magana na PC (na tsohuwa)
-TTS_OUTPUT=remote   # masu magana na kyamara kawai
-TTS_OUTPUT=both     # masu magana na kyamara + masu magana na PC a lokaci guda
+TTS_OUTPUT=local    # Muryar PC (na tsohuwa)
+TTS_OUTPUT=remote   # muryar kyamara kawai
+TTS_OUTPUT=both     # muryar kyamara + muryar PC a lokaci guda
 ```
 
-#### A) Masu magana na kyamara (ta hanyar go2rtc)
+#### A) Muryar kyamara (ta go2rtc)
 
-Sanya `TTS_OUTPUT=remote` (ko `both`). Yana buƙatar [go2rtc](https://github.com/AlexxIT/go2rtc/releases):
+Saita `TTS_OUTPUT=remote` (ko `both`). Yana buƙatar [go2rtc](https://github.com/AlexxIT/go2rtc/releases):
 
 1. Sauke binary daga [shafin fitarwa](https://github.com/AlexxIT/go2rtc/releases):
    - Linux/macOS: `go2rtc_linux_amd64` / `go2rtc_darwin_amd64`
    - **Windows: `go2rtc_win64.exe`**
 
-2. Ajiye da sake masa suna:
+2. Ajiye kuma sake suna:
    ```
    # Linux / macOS
-   ~/.cache/embodied-claude/go2rtc/go2rtc          # an buƙaci chmod +x
+   ~/.cache/embodied-claude/go2rtc/go2rtc          # chmod +x yana buƙatar
 
    # Windows
    %USERPROFILE%\.cache\embodied-claude\go2rtc\go2rtc.exe
    ```
 
-3. Kirkira `go2rtc.yaml` a cikin wannan babban fayil ɗin:
+3. Kirkiri `go2rtc.yaml` a cikin wannan kundin:
    ```yaml
    streams:
      tapo_cam:
        - rtsp://YOUR_CAM_USER:YOUR_CAM_PASS@YOUR_CAM_IP/stream1
    ```
-   Yi amfani da takardun shaidar kyamarar gida (ba asusun gajimare na TP-Link dinku ba).
+   Yi amfani da takaddun shaida na asusun kyamara na gida (ba asusun gajeren TP-Link dinka ba).
 
-4. familiar-ai yana farawa go2rtc ta atomatik a lokacin ƙaddamarwa. Idan kyamarar ku tana goyon bayan sauti biyu (kan layin baya), murya tana fitowa daga majalisar kyamara.
+4. familiar-ai yana fara go2rtc ta atomatik a lokacin kaddamarwa. Idan kyamaran ka tana goyon bayan muryar bi-directional (backchannel), murya za ta fito daga muryar kyamara.
 
-#### B) Masu magana na PC na gida
+#### B) Muryar PC na gida
 
-Na tsohuwa (`TTS_OUTPUT=local`). Yana gwada 'yan wasa a jere: **paplay** → **mpv** → **ffplay**. Hakanan ana amfani dashi azaman madadin lokacin da `TTS_OUTPUT=remote` kuma go2rtc bai samu ba.
+Na tsohuwa (`TTS_OUTPUT=local`). Yana gwada 'yan wasan kwaikwayo a cikin tsarin: **paplay** → **mpv** → **ffplay**. Hakanan ana amfani da shi a matsayin madadin lokacin da `TTS_OUTPUT=remote` da go2rtc ba su samu ba.
 
-| OS | Sanya |
+| OS | Shigar |
 |----|---------|
 | macOS | `brew install mpv` |
 | Ubuntu / Debian | `sudo apt install mpv` (ko `paplay` ta hanyar `pulseaudio-utils`) |
 | WSL2 / WSLg | `sudo apt install pulseaudio-utils` — saita `PULSE_SERVER=unix:/mnt/wslg/PulseServer` a cikin `.env` |
 | Windows | [mpv.io/installation](https://mpv.io/installation/) — sauke kuma ƙara zuwa PATH, **ko** `winget install ffmpeg` |
 
-> Idan babu mai kunna sauti, har yanzu ana amfani da magana — kawai ba zata yi wasa ba.
+> Idan babu wasan kwaikwayo na sauti, har yanzu ana haifar da magana — kawai ba za ta kunna ba.
 
-### Shigar da murya (Realtime STT)
+### Shigar murya (Realtime STT)
 
-Sanya `REALTIME_STT=true` a cikin `.env` don shigar da murya mai hannu na koyaushe:
+Saita `REALTIME_STT=true` a cikin `.env` don shigar murya mara hannu koyaushe:
 
 ```env
 REALTIME_STT=true
-ELEVENLABS_API_KEY=sk_...   # maɓallin da ya dace da TTS
+ELEVENLABS_API_KEY=sk_...   # mabuɗin iri ɗaya da TTS
 ```
 
-familiar-ai yana watsa sautin microphone zuwa ElevenLabs Scribe v2 kuma yana ajiyewa ta atomatik lokacin da kuka dakatar da magana. Babu buƙatar danna maɓalli. Yana jituwa da hanyar matsa don magana (Ctrl+T).
+familiar-ai yana yada saut din mikrofon ga ElevenLabs Scribe v2 kuma yana ajiyar rubuce-rubucen sa lokacin da ka dakatar da magana. Babu buƙatar danna maɓallin. Yana zama tare da yanayin danna-danna (Ctrl+T).
 
 ---
 
 ## TUI
 
-familiar-ai yana haɗawa da UI na terminal wanda aka gina tare da [Textual](https://textual.textualize.io/):
+familiar-ai yana ƙunshe da UI na terminal mai gina tare da [Textual](https://textual.textualize.io/):
 
-- Tarihin tattaunawa mai juyawa tare da rubutu mai gudana
-- Cikakken shahararru ga `/quit`, `/clear`
-- Kawai rubuta yayin da yake tunani don katse wakilin a tsakiya
-- **Tarihin tattaunawa** da aka ajiye ta atomatik zuwa `~/.cache/familiar-ai/chat.log`
+- Tarihin tattaunawa mai jujjuyawa tare da rubutun kai tsaye
+- Cikakken shafin don `/quit`, `/clear`
+- Tsallake mai wakilta a tsaka-tsaki ta hanyar rubutu yayin da yake tunani
+- **Tattalin bayanai** ana adana ta atomatik zuwa `~/.cache/familiar-ai/chat.log`
 
-Don bin tarihin a wani tashar (mai amfani don kwafe-mika):
+Don bin bayanan a wani terminal (mafi amfani don kwafin da liƙa):
 ```bash
 tail -f ~/.cache/familiar-ai/chat.log
 ```
@@ -326,50 +340,50 @@ tail -f ~/.cache/familiar-ai/chat.log
 
 ## Persona (ME.md)
 
-Halayen familiar ɗinka suna cikin `ME.md`. Wannan fayil din an yi masa gitignored — yana naka ne kawai.
+Halayen abokin tarayya naka suna cikin `ME.md`. Wannan fayil din an yi masa gitignored — naka kadai ne.
 
-Duba [`persona-template/en.md`](./persona-template/en.md) don misali, ko [`persona-template/ja.md`](./persona-template/ja.md) don sigar Jafananci.
+Dubi [`persona-template/en.md`](./persona-template/en.md) don misali, ko [`persona-template/ja.md`](./persona-template/ja.md) don sigar Jafananci.
 
 ---
 
-## FAQ
+## Tambayoyi akai-akai
 
-**Q: Shin yana aiki ba tare da GPU ba?**
-Ee. Samfurin embedding (multilingual-e5-small) yana gudana lafiya a CPU. GPU yana sa shi zama mai sauri amma ba a buƙata.
+**Q: Yana aiki ba tare da GPU ba?**
+Iya. Samfurin embedding (multilingual-e5-small) yana aiki da kyau akan CPU. GPU yana sa shi ya fi sauri amma ba a buƙatar shi.
 
-**Q: Zan iya amfani da kyamara wanda ba Tapo ba?**
-Duk wata kyamara da ke goyon bayan ONVIF + RTSP yakamata ta yi aiki. Tapo C220 shine abin da muka gwada.
+**Q: Zan iya amfani da kyamara ta daban da Tapo?**
+Kowane kyamara da ke goyon bayan ONVIF + RTSP ya kamata ya yi aiki. Tapo C220 ita ce abin da muka gwada tare da shi.
 
-**Q: Shin bayanan na suna tafi ko ina?**
-Hotuna da rubutu suna tafi zuwa API LLM da kuka zaɓa don sarrafawa. Tunani ana adana su a cikin `~/.familiar_ai/`.
+**Q: Shin bayanan nawa suna tafi wani waje?**
+Hotuna da rubuce-rubuce suna tafi zuwa API na LLM da aka zaɓa don sarrafawa. Tarihin ana adanawa a gida a `~/.familiar_ai/`.
 
-**Q: Me yasa wakilin yake rubuta `（...）` maimakon magana?**
-Tabbatar an saita `ELEVENLABS_API_KEY`. Idan ba haka ba, murya an kashe kuma wakilin yana komawa ga rubutu.
+**Q: Me yasa wakilin ke rubuta `（...）` maimakon magana?**
+Tabbatar cewa `ELEVENLABS_API_KEY` an saita. Idan ba haka ba, murya ta zama akashe, kuma wakilin yana koma rubutu.
 
 ## Bayanin fasaha
 
-Shin kuna son sanin yadda yake aiki? Duba [docs/technical.md](./docs/technical.md) don bincike da yanke shawara na zane a bayan familiar-ai — ReAct, SayCan, Reflexion, Voyager, tsarin sha'awa, da ƙari.
+Kana sha'awar yadda yake aiki? Duba [docs/technical.md](./docs/technical.md) don binciken da shawarar zane a bayan familiar-ai — ReAct, SayCan, Reflexion, Voyager, tsarin sha'awa, da ƙari.
 
 ---
 
-## Gudunmawa
+## Gudummawa
 
-familiar-ai yana da wani gwaji na bude. Idan wani daga cikin wannan ya yi daidai da ku — ta fasaha ko falsafa — ana maraba da gudummawa.
+familiar-ai gwaji ne na bude. Idan wani daga cikin wannan yana jaje muku — fasaha ko falsafa — ana maraba da gudummawar ku sosai.
 
-**Wurare masu kyau don farawa:**
+**Kyawawan wurare don farawa:**
 
 | Yanki | Abin da ake buƙata |
 |------|---------------|
-| Sabbin kayan aiki | Goyon bayan kyamarori da yawa (RTSP, IP Webcam), microphones, actuators |
-| Sabbin kayan aiki | Bincike na yanar gizo, sarrafa gida, kalanda, duk wani abu ta hanyar MCP |
-| Sabbin hanyoyi | Kowanne LLM ko samfurin gida da ya dace da tsarin `stream_turn` |
-| Templates na persona | Templates na ME.md don harsuna da halaye daban-daban |
-| Bincike | Mafi kyawun samfurin sha'awa, karɓar tunani, tambayar theory-of-mind |
-| Takardun shaida | Darussan, jagororin, fassarar |
+| Sabon kayan aiki | Goyon bayan ƙarin kyamarori (RTSP, IP Webcam), mikrofon da masu motsa jiki |
+| Sabbin kayan aiki | Bincike a yanar gizo, sarrafa gida, kalanda, komai ta hanyar MCP |
+| Sabbin backend | Kowane LLM ko samfurin gida da ya dace da hanyar `stream_turn` |
+| Templates na Persona | Templates ME.md don harsuna da halaye daban-daban |
+| Bincike | Mafi kyawun samfuran sha'awa, dawo da ƙwaƙwalwa, tambayar tsarin hankali |
+| Takardun shaida | Tutorials, hanyoyi, fassara |
 
-Duba [CONTRIBUTING.md](./CONTRIBUTING.md) don saitin ci gaba, salo na lamba, da ka'idodin PR.
+Duba [CONTRIBUTING.md](./CONTRIBUTING.md) don saiti na ci gaba, salon lambar, da ƙa'idodin PR.
 
-Idan baku ga inda za ku fara ba, [bude batu](https://github.com/lifemate-ai/familiar-ai/issues) — farin cikin nuna ku a hanya madaidaici.
+Idan ba ku da tabbacin inda za ku fara, [bude batu](https://github.com/lifemate-ai/familiar-ai/issues) — farin ciki don nuna muku hanya mai kyau.
 
 ---
 

@@ -1,69 +1,76 @@
 # familiar-ai 🐾
 
-**AI yomwe imakhala pambali panu** — yokhala ndi maso, mawu, mapazi, ndi kukumbukira.
+**AI imene imakhala ndi inu** — yomwe ili ndi maso, mawu, magazi, komanso ndangomera.
 
 [![Lint](https://github.com/kmizu/familiar-ai/actions/workflows/lint.yml/badge.svg)](https://github.com/kmizu/familiar-ai/actions/workflows/lint.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](./LICENSE)
 [![Python 3.10+](https://img.shields.io/badge/python-3.10+-blue.svg)](https://www.python.org/)
 [![GitHub Sponsors](https://img.shields.io/github/sponsors/kmizu?style=flat&logo=github&color=ea4aaa)](https://github.com/sponsors/kmizu)
 
-[→ English README](../README.md)
+🌍 [Zikulimbikitsidwa mu 74 chitchulidwe](./SUPPORTED_LANGUAGES.md)
 
 ---
 
 [![Demo video](https://img.youtube.com/vi/hiR9uWRnjt4/0.jpg)](https://youtube.com/shorts/hiR9uWRnjt4)
 
-familiar-ai ndi bwenzi la AI yomwe imakhala m'banja mwanu.
-Iikwanira mu mphindi. Palibe coding yomwe ikufunika.
+familiar-ai ndi chida cha AI chomwe chili m'nyumba mwanu.
+Ikani m'masitole. Sitigula mau.
 
-Imadziwitsidwa ndi dziko lenileni kudzera mu kamera, imayenda pa thupi la robot, imakamba, ndipo imakumbukira zomwe imawona. Perekani dzina, lembani makhalidwe ake, ndiponso mupeze imakhala nanu.
+Imawona dziko lenileni kudzera pa makamera, imatembenukira pa thupi la robot, imalankhula, ndipo imakumbukira zomwe imawona. Mupatseni dzina, lembani machitidwe ake, ndipo muzimupirira.
 
-## Zomwe ikhoza kuchita
+## Zomwe angachite
 
-- 👁 **Onani** — imakonzera zithunzi kuchokera ku Wi-Fi PTZ kamera kapena USB webcam
-- 🔄 **Onani m'zinthu** — imapita ndi kukwezera kamera kuti iphunzitse zomwe zili pafupi
-- 🦿 **Yenda** — imagwira robot vacuum kuti ikhale mu chipinda
-- 🗣 **Lankhulani** — imakambirana kudzera pa ElevenLabs TTS
-- 🎙 **Mvetsereni** — mawu osavomerezeka kudzera pa ElevenLabs Realtime STT (osankha)
-- 🧠 **Kumbukirani** — imakonza ndikuika bwino kukumbukira ndi kafukafuka ka semantic (SQLite + embeddings)
-- 🫀 **Nzeru za Moyo** — imadhulitsa mtima wa munthu wina musanayankhule
-- 💭 **Chimwemwe** — imakhala ndi mtundu wake wokhazikika womwe umadzasokoneza uphawi wokhulupilira
+- 👁 **Onani** — imapeza zithunzi kuchokera ku Wi-Fi PTZ kamera kapena USB webcam
+- 🔄 **Kuwona momwemo** — imapanga komanso kutembenuka kwa kamera kuti iwone zinthu zomwe zikuchitika
+- 🦿 **Kuyenda** — imatembenukira ndi vacuum robot kuti iphunzire m'nyumba
+- 🗣 **Lankhulani** — imalankhula kudzera pa ElevenLabs TTS
+- 🎙 **Mvetsera** — mawu osapatsika kudzera pa ElevenLabs Realtime STT (opt-in)
+- 🧠 **Kumbukirani** — imakhala ndi kukumbukira komanso kukumbukira ndi kufufuza kwa semantics (SQLite + embeddings)
+- 🫀 **Malangizo a Siriku** — imatengera maganizo a munthu ena musanafike
+- 💭 **Kufuna** — imakhala ndi zolinga zake zokha zomwe zimapangitsa kuchita zakutchula
 
-## Momwe zimatangira
+## Momwe imagwira
 
-familiar-ai imangogwirira ntchito [ReAct](https://arxiv.org/abs/2210.03629) loop yomwe ikuyendetsedwa ndi LLM yomwe mumasankha. Imadziwa dziko kudzera mu zida, imaganizira zomwe zidzachitike, ndiponso imayankha — monga munthu.
+familiar-ai imayambitsa [ReAct](https://arxiv.org/abs/2210.03629) loop yomwe imapangidwa ndi LLM yomwe mukusankha. Imawona dziko kudzera mu zida, imaganiza momwe angachitire pambuyo pake, ndipo imachita - monga momwe munthu angachitire.
 
 ```
 user input
   → think → act (camera / move / speak / remember) → observe → think → ...
 ```
 
-Ikamakhala, imachita zokondedwa zawo: curiosity, kufuna kuona kunja, kuda munthu amene imakhala naye.
+Ikakhala yokhalamo, imachita malinga ndi zofuna zake: kufuna, kufuna kuwona kunja, kukumbukira munthu yomwe ili naye.
 
-## Kukhazikika
+## Kuyang'ana
 
 ### 1. Ikani uv
 
+**macOS / Linux / WSL2:**
 ```bash
 curl -LsSf https://astral.sh/uv/install.sh | sh
 ```
 
+**Windows (PowerShell):**
+```powershell
+powershell -ExecutionPolicy ByPass -c "irm https://astral.sh/uv/install.ps1 | iex"
+```
+Kapena: `winget install astral-sh.uv`
+
 ### 2. Ikani ffmpeg
 
-ffmpeg ndi **chofunika** kuti mukhale ndi zithunzi kuchokera ku kamera ndi mawu amaperekedwa.
+ffmpeg ndi **wing'amba** yofunika kuti mugwiritse ntchito kufufuza zithunzi zamakamera ndi kuyimba mawu.
 
-| OS | Command |
+| OS | Malangizo |
 |----|---------|
 | macOS | `brew install ffmpeg` |
 | Ubuntu / Debian | `sudo apt install ffmpeg` |
 | Fedora / RHEL | `sudo dnf install ffmpeg` |
 | Arch Linux | `sudo pacman -S ffmpeg` |
-| Windows | `winget install ffmpeg` — kapena download kuchokera ku [ffmpeg.org](https://ffmpeg.org/download.html) ndiyeno ikani mu PATH |
+| Windows | `winget install ffmpeg` — kapena download kuchokera ku [ffmpeg.org](https://ffmpeg.org/download.html) ndikuwonjezera ku PATH |
 | Raspberry Pi | `sudo apt install ffmpeg` |
 
 Onetsetsani: `ffmpeg -version`
 
-### 3. Clone ndi kugwiritsa ntchito
+### 3. Chitani ndiku ikani
 
 ```bash
 git clone https://github.com/lifemate-ai/familiar-ai
@@ -71,64 +78,71 @@ cd familiar-ai
 uv sync
 ```
 
-### 4. Sinthani
+### 4. Kukhazikitsa
 
 ```bash
 cp .env.example .env
-# Sinthani .env ndi zokonzedwe zanu
+# Sinthani .env ndi masetup anu
 ```
 
-**Zofunika pansi:**
+**Zofunika kwambiri:**
 
-| Variable | Description |
+| Variable | Kufotokozera |
 |----------|-------------|
-| `PLATFORM` | `anthropic` (default) \| `gemini` \| `openai` \| `kimi` \| `glm` |
-| `API_KEY` | API key yanu ya platfomu yomwe mumasankha |
+| `PLATFORM` | `anthropic` (mankhwala) \| `gemini` \| `openai` \| `kimi` \| `glm` |
+| `API_KEY` | API key yanu yopita ku platform yomwe mwachita |
 
 **Zosankha:**
 
-| Variable | Description |
+| Variable | Kufotokozera |
 |----------|-------------|
-| `MODEL` | Dzina la model (zofunikira zofunika monga pa platfomu) |
-| `AGENT_NAME` | Dzina lomwe limawonekeratu mu TUI (e.g. `Yukine`) |
+| `MODEL` | Dzina la model (zokwana pa phunziro) |
+| `AGENT_NAME` | Dzina looneka mu TUI (mwachitsanzo `Yukine`) |
 | `CAMERA_HOST` | IP adilesi ya kamera yanu ya ONVIF/RTSP |
-| `CAMERA_USER` / `CAMERA_PASS` | Maonekedwe a kamera |
-| `ELEVENLABS_API_KEY` | Kwa mawu amaperekedwa — [elevenlabs.io](https://elevenlabs.io/) |
-| `REALTIME_STT` | `true` kuti ikhale pansi pa mawu osavomerezeka (ikufuna `ELEVENLABS_API_KEY`) |
-| `TTS_OUTPUT` | Kumene kumaperekedwa mawu: `local` (PC speaker, default) \| `remote` (kamera speaker) \| `both` |
-| `THINKING_MODE` | Anthropic pokha — `auto` (default) \| `adaptive` \| `extended` \| `disabled` |
-| `THINKING_EFFORT` | Kulimbikira kwa kukumbukira: `high` (default) \| `medium` \| `low` \| `max` (Opus 4.6 pokha) |
+| `CAMERA_USER` / `CAMERA_PASS` | Makalata a kamera |
+| `ELEVENLABS_API_KEY` | Pachitani mawu — [elevenlabs.io](https://elevenlabs.io/) |
+| `REALTIME_STT` | `true` kuti muike nthawi zonse kuti mukhale ndi mawu (ikufunika `ELEVENLABS_API_KEY`) |
+| `TTS_OUTPUT` | Komwe ku playwa mawu: `local` (PC speaker, mankhwala) \| `remote` (kamera speaker) \| `both` |
+| `THINKING_MODE` | Anthropic chabe — `auto` (mankhwala) \| `adaptive` \| `extended` \| `disabled` |
+| `THINKING_EFFORT` | Luso losinthasintha: `high` (mankhwala) \| `medium` \| `low` \| `max` (Opus 4.6 chabe) |
 
-### 5. Pangani familiar yanu
+### 5. Pangani zanu
 
 ```bash
 cp persona-template/en.md ME.md
-# Sinthani ME.md — perekani dzina ndi makhalidwe
+# Sinthani ME.md — mutapatsa dzina ndi machitidwe
 ```
 
-### 6. Dziwitsani
+### 6. Yendani
 
+**macOS / Linux / WSL2:**
 ```bash
-./run.sh             # Textual TUI (yoyenera)
+./run.sh             # Textual TUI (zolimbikitsidwa)
 ./run.sh --no-tui    # Plain REPL
+```
+
+**Windows:**
+```bat
+run.bat              # Textual TUI (zolimbikitsidwa)
+run.bat --no-tui     # Plain REPL
 ```
 
 ---
 
-## Kusankha LLM
+## Kusayiza LLM
 
-> **Zoyenera: Kimi K2.5** — magwiridwe abwino a agent omwe adapita bwino mpaka pano. Imadziwa maonekedwe, ndiyeno ikufunsa mafunso otsatirapo, ndipo imachita nokha monga momwe ma modeli ena safunira. Mtengo ukugwirizana ndi Claude Haiku.
+> **Zokhulupirira: Kimi K2.5** — kuchita bwino kwambiri ngati chida chomwe takatengera. Imagwira ntchito m'njira zingapo, ikufunsa masomphenya omwe mukuwona, ndikuchita mwachilendo. Zimapangidwa molingana ndi Claude Haiku.
 
-| Platform | `PLATFORM=` | Model ya default | Kumene mungapeze mlandu |
+| Platform | `PLATFORM=` | Model yamakonda | Kodi mwapeza dikasiyoni |
 |----------|------------|---------------|-----------------|
 | **Moonshot Kimi K2.5** | `kimi` | `kimi-k2.5` | [platform.moonshot.ai](https://platform.moonshot.ai) |
 | Z.AI GLM | `glm` | `glm-4.6v` | [api.z.ai](https://api.z.ai) |
 | Anthropic Claude | `anthropic` | `claude-haiku-4-5-20251001` | [console.anthropic.com](https://console.anthropic.com) |
 | Google Gemini | `gemini` | `gemini-2.5-flash` | [aistudio.google.com](https://aistudio.google.com) |
 | OpenAI | `openai` | `gpt-4o-mini` | [platform.openai.com](https://platform.openai.com) |
-| OpenAI-compatible (Ollama, vllm…) | `openai` + `BASE_URL=` | — | — |
+| OpenAI-otsogoloko (Ollama, vllm…) | `openai` + `BASE_URL=` | — | — |
 | OpenRouter.ai (multi-provider) | `openai` + `BASE_URL=https://openrouter.ai/api/v1` | — | [openrouter.ai](https://openrouter.ai) |
-| **CLI tool** (claude -p, ollama…) | `cli` | (the command) | — |
+| **CLI tool** (claude -p, ollama…) | `cli` | (malangizo) | — |
 
 **Kimi K2.5 `.env` chitsanzo:**
 ```env
@@ -141,7 +155,7 @@ AGENT_NAME=Yukine
 ```env
 PLATFORM=glm
 API_KEY=...   # kuchokera ku api.z.ai
-MODEL=glm-4.6v   # vision-enabled; glm-4.7 / glm-5 = text-only
+MODEL=glm-4.6v   # njira yanu; glm-4.7 / glm-5 = malemba okha
 AGENT_NAME=Yukine
 ```
 
@@ -149,7 +163,7 @@ AGENT_NAME=Yukine
 ```env
 PLATFORM=gemini
 API_KEY=AIza...   # kuchokera ku aistudio.google.com
-MODEL=gemini-2.5-flash  # kapena gemini-2.5-pro kuti ikhale ndi mphamvu zambiri
+MODEL=gemini-2.5-flash  # kapena gemini-2.5-pro chifukwa chosavuta kwambiri
 AGENT_NAME=Yukine
 ```
 
@@ -158,26 +172,26 @@ AGENT_NAME=Yukine
 PLATFORM=openai
 BASE_URL=https://openrouter.ai/api/v1
 API_KEY=sk-or-...   # kuchokera ku openrouter.ai
-MODEL=mistralai/mistral-7b-instruct  # zogwirizana: onani model
+MODEL=mistralai/mistral-7b-instruct  # zosankha: notched model
 AGENT_NAME=Yukine
 ```
 
-> **Nkhani:** Kuti mutseke malo a local/NVIDIA models, ingosankha kuti `BASE_URL` ikhale pa endpoint yanga ya m'kati monga `http://localhost:11434/v1`. Mugwiritse ntchito ogulitsa a mu mtambo m'malo.
+> **Chidule:** Kuti musawonongedwe m'njira zapanjali / NVIDIA, ingowonjezani `BASE_URL` kuti ikhale pamalo a lokal monga `http://localhost:11434/v1`. Gwiritsani ntchito opanga mawu.
 
 **CLI tool `.env` chitsanzo:**
 ```env
 PLATFORM=cli
-MODEL=llm -m gemma3 {}        # llm CLI (https://llm.datasette.io) — {} = prompt arg
-# MODEL=ollama run gemma3:27b  # Ollama — palibe {}, prompt imapita kudzera pa stdin
+MODEL=llm -m gemma3 {}        # llm CLI (https://llm.datasette.io) — {} = dikasiyoni ya kasamalidwe
+# MODEL=ollama run gemma3:27b  # Ollama — palibe {}, dikasiyoni imagwirizanitsidwa ndi stdin
 ```
 
 ---
 
 ## MCP Servers
 
-familiar-ai ikhoza kulumikizana ndi [MCP (Model Context Protocol)](https://modelcontextprotocol.io) server iliyonse. Izi zimakupatsani mwayi wotheka kuika kukumbukira kwina, kupeza ma filesystem, kufufuza pa web, kapena zida zina.
+familiar-ai ingagwire ntchito ndi **[MCP (Model Context Protocol)](https://modelcontextprotocol.io)** server. Izi zimakuthandizani kuwonjezera njira ya chifuniro, kuchita m’magalimoto, kufufuza pa web, kapena chida china chilichonse.
 
-Sinthani ma server mu `~/.familiar-ai.json` (mfundo yomweyo monga Claude Code):
+Kukhazikitsa ma server mu `~/.familiar-ai.json` (chofanana ndi Claude Code):
 
 ```json
 {
@@ -195,129 +209,129 @@ Sinthani ma server mu `~/.familiar-ai.json` (mfundo yomweyo monga Claude Code):
 }
 ```
 
-Mitundu iwiri ya ma transport imathandizidwa:
-- **`stdio`**: yambani subprocess ya m'kati (`command` + `args`)
-- **`sse`**: njira ku HTTP+SSE server (`url`)
+Amakhala ndi mitundu iwiri ya kutumiza:
+- **`stdio`**: kutsegula pulogalamu ya lokal (`command` + `args`)
+- **`sse`**: kulumikizana ndi HTTP+SSE server (`url`)
 
-Sinthani malo a config file ndi `MCP_CONFIG=/path/to/config.json`.
+Sinthani malo a fayilo ya config ndi `MCP_CONFIG=/path/to/config.json`.
 
 ---
 
 ## Hardware
 
-familiar-ai ikhoza kugwira ntchito ndi hardware iliyonse yomwe muli nayo — kapena palibe ngakhale.
+familiar-ai ikugwira ntchito ndi hardware yanu iliyonse — kapena ilibe chilichonse.
 
-| Part | Zomwe zimachita | Chitsanzo | Zofunika? |
+| Gawo | Zomwe amachita | Mwachitsanzo | Zofunika? |
 |------|-------------|---------|-----------|
-| Wi-Fi PTZ camera | Maso + mphuno | Tapo C220 (~$30) | **Zoyenera** |
-| USB webcam | Maso (osavuta) | Kamera iliyonse ya UVC | **Zoyenera** |
-| Robot vacuum | Mapazi | Model iliyonse yomwe ili ndi Tuya | Ayi |
-| PC / Raspberry Pi | Brain | Chilichonse chomwe chimalimbikitsa Python | **Inde** |
+| Wi-Fi PTZ camera | Maso + khosi | Tapo C220 (~$30) | **Zokhulupirira** |
+| USB webcam | Maso (omangidwa) | Kamera iliyonse ya UVC | **Zokhulupirira** |
+| Robot vacuum | Magazi | Chochita chilichonse cha Tuya | Ayi |
+| PC / Raspberry Pi | Maganizo | Chilichonse chomwe chimagwiritsidwa ntchito ndi Python | **Chofunika** |
 
-> **Kamera ikugwiritsidwa ntchito kwambiri.** Pwithout kamera imatha kulankhula — koma ikhoza kuona dziko, zomwe ndizomwe zingathetse.
+> **Kamera iyenera kuthandizidwa.** Popanda imwe, familiar-ai ingalankhule — koma siyikuwona dziko, zomwe zili kundochita mopanga.
 
-### Minimal setup (palibe hardware)
+### Kukhazikitsa koyamba (popanda hardware)
 
-Mukufuna kuiyesa? Muyenera kungobwezeretsa API key:
+Mukufuna kuyesa? Mukangofuna API key:
 
 ```env
 PLATFORM=kimi
 API_KEY=sk-...
 ```
 
-Dziwitseni `./run.sh` ndiponso yanu. Ikani hardware monga mukupitilira.
+Yendani `./run.sh` (macOS/Linux/WSL2) kapena `run.bat` (Windows) ndikuyamba kuyankhulana. Onjezerani hardware mukamayenda.
 
 ### Wi-Fi PTZ camera (Tapo C220)
 
-1. Mu Tapo app: **Settings → Advanced → Camera Account** — pangani akaunti ya lokal (osati TP-Link account)
-2. Pitani ku IP ya kamera mu mndandanda wa zida zanu
-3. Sinthani mu `.env`:
+1. Mu app ya Tapo: **Settings → Advanced → Camera Account** — pangani akaunti yokhazikika (sitiyi TP-Link)
+2. Fufuzani IP ya kamera mu mndandanda wa zida zanu
+3. Onjezani mu `.env`:
    ```env
    CAMERA_HOST=192.168.1.xxx
    CAMERA_USER=your-local-user
    CAMERA_PASS=your-local-pass
    ```
 
-### Voice (ElevenLabs)
+### Mawu (ElevenLabs)
 
-1. Pezani API key ku [elevenlabs.io](https://elevenlabs.io/)
-2. Sinthani mu `.env`:
+1. Pankhani API key pa [elevenlabs.io](https://elevenlabs.io/)
+2. Onjezani mu `.env`:
    ```env
    ELEVENLABS_API_KEY=sk_...
-   ELEVENLABS_VOICE_ID=...   # zosankha, zimagwiritsa ntchito mawu a default
+   ELEVENLABS_VOICE_ID=...   # yosankha, imagwiritsa ntchito mawu omaliza ngati ngakhale sinachitike
    ```
 
-Kukhala malo awiri ochezera, omwe angagwiritsidwe ntchito ndi `TTS_OUTPUT`:
+Pali malo awiri oimba, omwe amalamulira ndi `TTS_OUTPUT`:
 
 ```env
-TTS_OUTPUT=local    # PC speaker (default)
-TTS_OUTPUT=remote   # kamera speaker yokha
-TTS_OUTPUT=both     # kamera speaker + PC speaker nthawi imodzi
+TTS_OUTPUT=local    # PC speaker (mankhwala)
+TTS_OUTPUT=remote   # kamera weksiper
+TTS_OUTPUT=both     # kamera speaker + PC speaker ndikuwonongera
 ```
 
-#### A) Kamera speaker (kupita kwa go2rtc)
+#### A) Kamera speaker (ndikukhala go2rtc)
 
-Set `TTS_OUTPUT=remote` (kapena `both`). Ikufuna [go2rtc](https://github.com/AlexxIT/go2rtc/releases):
+Onjezani `TTS_OUTPUT=remote` (kapena `both`). Ikufunika [go2rtc](https://github.com/AlexxIT/go2rtc/releases):
 
-1. Dziwani the binary kuchokera ku [releases page](https://github.com/AlexxIT/go2rtc/releases):
+1. Download binary kuchokera pa [zotsatira](https://github.com/AlexxIT/go2rtc/releases):
    - Linux/macOS: `go2rtc_linux_amd64` / `go2rtc_darwin_amd64`
    - **Windows: `go2rtc_win64.exe`**
 
-2. Ikani ndi kutchedwa:
+2. Ikani komanso badiritsani:
    ```
    # Linux / macOS
-   ~/.cache/embodied-claude/go2rtc/go2rtc          # chmod +x akufunika
+   ~/.cache/embodied-claude/go2rtc/go2rtc          # chmod +x ikufunika
 
    # Windows
    %USERPROFILE%\.cache\embodied-claude\go2rtc\go2rtc.exe
    ```
 
-3. Pangani `go2rtc.yaml` mu mndandanda womwewo:
+3. Pangani `go2rtc.yaml` mu directory yomweyo:
    ```yaml
    streams:
      tapo_cam:
        - rtsp://YOUR_CAM_USER:YOUR_CAM_PASS@YOUR_CAM_IP/stream1
    ```
-   Gwiritsani ntchito ma adiresi a akaunti ya kamera (osati akaunti ya TP-Link cloud).
+   Gwiritsani ntchito mawala a khama osiyanasiyana (osati akaunti yanu ya TP-Link).
 
-4. familiar-ai imayambitsa go2rtc mwachangu pa nthawi ya kukhazikika. Ngati kamera yanu ikugwira ntchito ya mawu awiri (backchannel), mawu amatuluka kuchokera ku kamera speaker.
+4. familiar-ai imayambitsa go2rtc otumikira pakugodzira. Ngati kamera yanu imathandizidwa ndi mawu a aliyense (backchannel), mawu akhalabe kuchokera mu kamera speaker.
 
 #### B) Local PC speaker
 
-Chosankha (TTS_OUTPUT=local). Imayesa wosewera m'njira: **paplay** → **mpv** → **ffplay**. Izi zimagwira ntchito ngati chotsatira pamene `TTS_OUTPUT=remote` ndi go2rtc sikupatikana.
+Mankhwala (`TTS_OUTPUT=local`). Imayesera osewera molingana: **paplay** → **mpv** → **ffplay**. Ikagwidwa ngati fallback pamene `TTS_OUTPUT=remote` ndipo go2rtc ikukhalabe.
 
 | OS | Ikani |
 |----|---------|
 | macOS | `brew install mpv` |
-| Ubuntu / Debian | `sudo apt install mpv` (kapena `paplay` kudzera pa `pulseaudio-utils`) |
-| WSL2 / WSLg | `sudo apt install pulseaudio-utils` — set `PULSE_SERVER=unix:/mnt/wslg/PulseServer` mu `.env` |
-| Windows | [mpv.io/installation](https://mpv.io/installation/) — download ndi ikani mu PATH, **kapena** `winget install ffmpeg` |
+| Ubuntu / Debian | `sudo apt install mpv` (kapena `paplay` kudzera mu `pulseaudio-utils`) |
+| WSL2 / WSLg | `sudo apt install pulseaudio-utils` — onjezani `PULSE_SERVER=unix:/mnt/wslg/PulseServer` mu `.env` |
+| Windows | [mpv.io/installation](https://mpv.io/installation/) — download ndikuwonjezera ku PATH, **kapena** `winget install ffmpeg` |
 
-> Ngati sitikuphatikizidwa, mawu amakhala, koma sadzalembedwa.
+> Ngati palibe wosewera wa mawu, mawu akhala akuchitika — sama amwano.
 
-### Voice input (Realtime STT)
+### Mawu Olankhulira (Realtime STT)
 
-Set `REALTIME_STT=true` mu `.env` kuti ikhale ikugwira mawu osavomerezeka:
+Onjezani `REALTIME_STT=true` mu `.env` kuti mukhale nthawi zonse, ambiri:
 
 ```env
 REALTIME_STT=true
-ELEVENLABS_API_KEY=sk_...   # mlandu womwe mumagwiritsa ntchito monga TTS
+ELEVENLABS_API_KEY=sk_...   # ndikofanana ndi TTS
 ```
 
-familiar-ai imalimbikira kudesala mawu kuchokera ku ElevenLabs Scribe v2 ndikuikapo zipangizo zikalembedwa mukamacheza. Palibe dinani pomwe mukulankhula. Itha kupanga zokondedwa zam'mbuyo (Ctrl+T).
+familiar-ai imatenga mawu a maekala kudzera pa ElevenLabs Scribe v2 ndipo imatchula zolembedwa pamene mutakhazikitsa. Palibe chotsatira chofunika. Ikhoza kuchitira pamene pamene push-to-talk mode (Ctrl+T).
 
 ---
 
 ## TUI
 
-familiar-ai ili ndi terminal UI yolembedwa ndi [Textual](https://textual.textualize.io/):
+familiar-ai ikuphatikizapo banja la terminal limapangidwa ndi [Textual](https://textual.textualize.io/):
 
-- Zowonjezera zokumbukira zomwe zimachitika ndi mawu osankhidwa
+- Zolemba zolembedwenso pamasomphenya ndi mawu oyang'ana
 - Tab-completion ya `/quit`, `/clear`
-- Kukana ma agent musanayambe kutchula
-- **Log ya kasamalidwe** ikutsa mawonekedwe ku `~/.cache/familiar-ai/chat.log`
+- Khalani mmbuyomo kuchita kumaliza zoyankhulana
+- **Log ya zoyankhulana** imasungidwa pa `~/.cache/familiar-ai/chat.log`
 
-Kuti muwone log mu terminal ina (zofunikira pa copy-paste):
+Kuti muwone log mu terminal ina (zothandiza momwe mungachitire):
 ```bash
 tail -f ~/.cache/familiar-ai/chat.log
 ```
@@ -326,53 +340,53 @@ tail -f ~/.cache/familiar-ai/chat.log
 
 ## Persona (ME.md)
 
-Makhalidwe a familiar yanu amakhala mu `ME.md`. Fayilo iyi ikugwiritsidwa ntchito — ndi yanu yokha.
+Machitidwe a familiar anu ali mu `ME.md`. Fayilo iyi ikulembedwanso mu git — ndi yanu yekha.
 
-Onani [`persona-template/en.md`](./persona-template/en.md) kuti mupeze chitsanzo, kapena [`persona-template/ja.md`](./persona-template/ja.md) kuti mupeze chikhalidwe cha Chijapani.
+Onani [`persona-template/en.md`](./persona-template/en.md) kuti muone chitsanzo, kapena [`persona-template/ja.md`](./persona-template/ja.md) kuti muone chikhalidwe cha Japanese.
 
 ---
 
 ## FAQ
 
-**Q: Ndikhoza kugwiritsa ntchito popanda GPU?**
-Inde. Mphamvu ya embedding model (multilingual-e5-small) ikhoza kugwiritsidwa ntchito bwino pa CPU. GPU imakhala yothandiza kwambiri koma sikofunika.
+**Q: Ngati sichita ntchito popanda GPU?**
+Inde. Model ya embedding (multilingual-e5-small) imagwira bwino pa CPU. GPU imathandizira mwachangu koma si chofunika.
 
-**Q: Ndikhoza kugwiritsa ntchito kamera yina kupatulira Tapo?**
-Kamera iliyonse yomwe imakhala ndi ONVIF + RTSP ikhoza kugwira ntchito. Tapo C220 ndicho chomwe takupitirira.
+**Q: Ngati ndikufuna kuika kamera ina kuposa Tapo?**
+Kamera iliyonse yomwe imathandizira ONVIF + RTSP iyenera kuthandizidwa. Tapo C220 ndiye yomwe takuchita.
 
-**Q: Kodi data yanga imatumizidwa kulikonse?**
-Zithunzi ndi zolembedwa zimatumizidwa ku mlandu wanu wa LLM yosankhidwa kuti ifufuzidwe. Zokumbukira zimakulungidwa m'thumba la `~/.familiar_ai/`.
+**Q: Kodi data yanga ikupita kuti?**
+Zithunzi komanso mawu amatumizidwa ku LLM API yanu yopezeka. Zomwe zili mukumbukira zimakhala lokha mu `~/.familiar_ai/`.
 
-**Q: N'chifukwa chiani agent yozilankhulira `（...）` m'malo mochita?**
-Onetsetsani kuti `ELEVENLABS_API_KEY` yaperekedwa. Ngati sichikuyendetsedwa, mawu amathera ndipo agent imabwerera ku text.
+**Q: Nchedzerenge malankhulidwe ngati `（...）` m'malo molankhula?**
+Onetsetani kuti `ELEVENLABS_API_KEY` ikukhazikidwa. Popanda izo, mawu siyikhale ndipo chida chili mu mkwatibochi lipoti.
 
 ## Technical background
 
-Mukufuna kudziwa momwe zimakhalira? Onani [docs/technical.md](./docs/technical.md) kuti muwone kafukufuku ndi kuganizira za zomwe zili kuseri kwa familiar-ai — ReAct, SayCan, Reflexion, Voyager, dongosolo la chikhumbo, ndi zambiri.
+Mukuzonda momwe imagwirira ntchito? Onani [docs/technical.md](./docs/technical.md) pomwe muonera kafuko kake ndi kuchita kapena ndondomeko zaposachedwa za familiar-ai — ReAct, SayCan, Reflexion, Voyager, njira yofuna, ndi zina zambiri.
 
 ---
 
-## Contributing
+## Kuthandizira
 
-familiar-ai ndi chiyesero chopenya. Ngati chilichonse cha ichi chimakukhudzani — molimbikitsa kapena mwachidziwitso — zolimbikitsa zikuwelcome kwambiri.
+familiar-ai ndi kulimbikitsa kumene. Ngati chilichonse chikuchepetsera — mwachipanga kapena filozofiya — chithandizo chimakhala chovomerezeka.
 
-**Madera abwino oyamba:**
+**Malo abwino oyambirira:**
 
-| Madera | Zomwe zikufunika |
+| Malo | Zomwe zikufunika |
 |------|---------------|
-| Hardware yatsopano | Thandizo la kamera zingapo (RTSP, IP Webcam), ma microphone, actuators |
-| Zida zatsopano | Web search, kukwaniritsa kwathu, nthawi, chilichonse kudzera pa MCP |
-| Backends zatsopano | LLM iliyonse kapena model yochitikira yomwe ikugwirizana ndi `stream_turn` interface |
-| Templates za Persona | ME.md ma templates a mitundu yatsopano ndi makhalidwe |
-| Research | Zitsulo zaposachedwapa chimwemwe, kukumbukira, mawu osalankhulira |
-| Documentation | Tutorials, walkthroughs, ma translations |
+| Hardware yatsopano | Kuthandiza ma camera angapo (RTSP, IP Webcam), ma microfone, ma actuator |
+| Zida zatsopano | Kufufuza pa web, kuwonjezera m'nyumba, kalendala, chilichonse kudzera mu MCP |
+| Backends yatsopano | LLM iliyonse kapena model yokhala pansi yomwe ikugwirizana ndi `stream_turn` |
+| Templates ya Persona | Ma template a ME.md a mitundu yosiyanasiyana ndi machitidwe |
+| Kafukufuku | Machitidwe abwino m'njira, kukumbukira, njira ya mamaso |
+| Zotsatizana | Zokwaniritsa, zotsatizana, kutanthauzira |
 
-Onani [CONTRIBUTING.md](./CONTRIBUTING.md) kuti mupeze akapolo, kalembedwe kachitidwe, ndi mawu a PR.
+Onani [CONTRIBUTING.md](./CONTRIBUTING.md) kuti muwonetsetse kugwira ntchito, masitepe a kode, ndi malangizo a PR.
 
-Ngati mukuganiza kuti mukuchita bwino bwanji, [yambitsani phunziro](https://github.com/lifemate-ai/familiar-ai/issues) — ndikuwona posachedwa.
+Ngati simukudziwa momwe mungayambe, [tsegulani mlandu](https://github.com/lifemate-ai/familiar-ai/issues) — ndifuna kutsegula mwamphamvu m'njira yabwino.
 
 ---
 
-## License
+## Mikalata
 
 [MIT](./LICENSE)

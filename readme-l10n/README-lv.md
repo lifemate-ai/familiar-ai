@@ -1,56 +1,64 @@
+```markdown
 # familiar-ai 🐾
 
-**Mākslīgais intelekts, kas dzīvo līdzās tevi** — ar acīm, balsi, kājām un atmiņu.
+**Mākslīgais intelekts, kas dzīvo kopā ar jums** — ar acīm, balsi, kājām un atmiņu.
 
 [![Lint](https://github.com/kmizu/familiar-ai/actions/workflows/lint.yml/badge.svg)](https://github.com/kmizu/familiar-ai/actions/workflows/lint.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](./LICENSE)
 [![Python 3.10+](https://img.shields.io/badge/python-3.10+-blue.svg)](https://www.python.org/)
 [![GitHub Sponsors](https://img.shields.io/github/sponsors/kmizu?style=flat&logo=github&color=ea4aaa)](https://github.com/sponsors/kmizu)
 
-[→ English README](../README.md)
+🌍 [Pieejams 74 valodās](./SUPPORTED_LANGUAGES.md)
 
 ---
 
 [![Demo video](https://img.youtube.com/vi/hiR9uWRnjt4/0.jpg)](https://youtube.com/shorts/hiR9uWRnjt4)
 
-familiar-ai ir mākslīgā intelekta biedrs, kas dzīvo tavā mājā.
-Iestādi to dažu minūšu laikā. Nav nepieciešama kodēšana.
+familiar-ai ir AI pavadonis, kas dzīvo jūsu mājās.
+Iestatiet to dažu minūšu laikā. Nav nepieciešama kodēšana.
 
-Tas uztver reālo pasauli caur kamerām, pārvietojas uz robota korpusa, runā skaļi un atceras to, ko redz. Pasniedz tam vārdu, uzraksti tā personību un ļauj tam dzīvot līdzās tev.
+Tas uztver reālo pasauli caur kamerām, pārvietojas uz robota ķermeņa, runā skaļi un atceras to, ko redz. Iedodiet tam vārdu, rakstiet tā personību un ļaujiet tam dzīvot kopā ar jums.
 
 ## Ko tas var darīt
 
-- 👁 **Redzēt** — iegūst attēlus no Wi-Fi PTZ kameras vai USB web-kameras
-- 🔄 **Paskatīties apkārt** — groza un slīpē kameru, lai izpētītu apkārtni
-- 🦿 **Pārvietoties** — vada robotu putekļu sūcēju, lai staigātu pa telpu
+- 👁 **Redzēt** — uzņem attēlus no Wi-Fi PTZ kameras vai USB webkameras
+- 🔄 **Aplūkot apkārt** — griež un maina kameras leņķi, lai izpētītu apkārtni
+- 🦿 **Pārvietoties** — vada robota sūknēšanas ierīci, lai pārvietotos pa istabu
 - 🗣 **Runāt** — runā caur ElevenLabs TTS
-- 🎙 **Klausīties** — bezvadu balss ievade caur ElevenLabs Realtime STT (pēc izvēles)
-- 🧠 **Atcerēties** — aktīvi uzglabā un atsauc atmiņas ar semantisko meklēšanu (SQLite + embeddings)
-- 🫀 **Prāta teorija** — ņem citu cilvēku perspektīvu pirms atbildēšanas
-- 💭 **Vēlēšanās** — ir tās iekšējās vēlmes, kas izraisa autonomu uzvedību
+- 🎙 **Klausīties** — bezrokas balss ievade caur ElevenLabs Realtime STT (piekrišana)
+- 🧠 **Atcerēties** — aktīvi uzglabā un atsauc atmiņas ar semantisko meklēšanu (SQLite + iemaldījumi)
+- 🫀 **Prāta teorija** — ņem otra cilvēka perspektīvu pirms atbildēšanas
+- 💭 **Vēlme** — piemīt iekšējās vēlmes, kas izraisa autonomu uzvedību
 
 ## Kā tas darbojas
 
-familiar-ai darbojas ar [ReAct](https://arxiv.org/abs/2210.03629) ciklu, ko virza tava izvēlētā LLM. Tas uztver pasauli caur rīkiem, domā par nākamo soli un rīkojas — tieši kā to darītu cilvēks.
+familiar-ai darbojas ar [ReAct](https://arxiv.org/abs/2210.03629) ciklu, ko aktivizē jūsu izvēlētais LLM. Tas uztver pasauli caur rīkiem, domā par to, ko darīt tālāk, un rīkojas — tieši tā, kā to darītu cilvēks.
 
 ```
 user input
   → think → act (camera / move / speak / remember) → observe → think → ...
 ```
 
-Kad tas ir neaktīvs, tas rīkojas saskaņā ar savām vēlmēm: ziņkārību, vēlmi paskatīties ārā, ilgoties pēc cilvēka, ar kuru dzīvo.
+Kad tas ir neaktīvs, tas rīkojas saskaņā ar savām vēlmēm: ziņķarība, vēlme paskatīties ārā, izsist savai personai, ar kuru tas dzīvo.
 
 ## Sākt darbu
 
-### 1. Instalē uv
+### 1. Instalējiet uv
 
+**macOS / Linux / WSL2:**
 ```bash
 curl -LsSf https://astral.sh/uv/install.sh | sh
 ```
 
-### 2. Instalē ffmpeg
+**Windows (PowerShell):**
+```powershell
+powershell -ExecutionPolicy ByPass -c "irm https://astral.sh/uv/install.ps1 | iex"
+```
+Vai: `winget install astral-sh.uv`
 
-ffmpeg ir **nepieciešams** kameru attēlu iegūšanai un audio atskaņošanai.
+### 2. Instalējiet ffmpeg
+
+ffmpeg ir **nepieciešams** kameru attēlu uzņemšanai un audio atskaņošanai.
 
 | OS | Komanda |
 |----|---------|
@@ -58,12 +66,12 @@ ffmpeg ir **nepieciešams** kameru attēlu iegūšanai un audio atskaņošanai.
 | Ubuntu / Debian | `sudo apt install ffmpeg` |
 | Fedora / RHEL | `sudo dnf install ffmpeg` |
 | Arch Linux | `sudo pacman -S ffmpeg` |
-| Windows | `winget install ffmpeg` — vai lejupielādē no [ffmpeg.org](https://ffmpeg.org/download.html) un pievieno PATH |
+| Windows | `winget install ffmpeg` — vai lejupielādējiet no [ffmpeg.org](https://ffmpeg.org/download.html) un pievienojiet PATH |
 | Raspberry Pi | `sudo apt install ffmpeg` |
 
-Pārbaudi: `ffmpeg -version`
+Pārbaudiet: `ffmpeg -version`
 
-### 3. Klonē un instalē
+### 3. Klonējiet un instalējiet
 
 ```bash
 git clone https://github.com/lifemate-ai/familiar-ai
@@ -71,53 +79,60 @@ cd familiar-ai
 uv sync
 ```
 
-### 4. Konfigurē
+### 4. Konfigurācija
 
 ```bash
 cp .env.example .env
-# Rediģē .env ar saviem iestatījumiem
+# Rediģējiet .env ar saviem iestatījumiem
 ```
 
-**Minimālās prasības:**
+**Minimālie prasības:**
 
 | Mainīgais | Apraksts |
 |-----------|----------|
 | `PLATFORM` | `anthropic` (noklusējums) \| `gemini` \| `openai` \| `kimi` \| `glm` |
-| `API_KEY` | Tavs API atslēga izvēlētajai platformai |
+| `API_KEY` | Jūsu API atslēga izvēlētajai platformai |
 
-**Pēc izvēles:**
+**Piemēram:**
 
 | Mainīgais | Apraksts |
 |-----------|----------|
-| `MODEL` | Modeļa nosaukums (saprātīgas noklusējuma vērtības katrai platformai) |
-| `AGENT_NAME` | Rādāmais nosaukums TUI (piemēram, `Yukine`) |
-| `CAMERA_HOST` | Tavu ONVIF/RTSP kameras IP adrese |
-| `CAMERA_USER` / `CAMERA_PASS` | Kameras akreditācijas dati |
-| `ELEVENLABS_API_KEY` | Balsi izejai — [elevenlabs.io](https://elevenlabs.io/) |
-| `REALTIME_STT` | `true`, lai iespējotu vienmēr aktīvu bezvadu balss ievadi (prasa `ELEVENLABS_API_KEY`) |
-| `TTS_OUTPUT` | Kur atskaņot audio: `local` (datora skaļrunis, noklusējums) \| `remote` (kameras skaļrunis) \| `both` |
+| `MODEL` | Modeļa nosaukums (jēgpilni noklusējumi katrai platformai) |
+| `AGENT_NAME` | Redzamais vārds, kas parādās TUI (piemēram, `Yukine`) |
+| `CAMERA_HOST` | Jūsu ONVIF/RTSP kameras IP adrese |
+| `CAMERA_USER` / `CAMERA_PASS` | Kameras kredenciāli |
+| `ELEVENLABS_API_KEY` | Balss izejai — [elevenlabs.io](https://elevenlabs.io/) |
+| `REALTIME_STT` | `true`, lai aktivizētu vienmēr ieslēgtu bezrokas balss ievadi (prasa `ELEVENLABS_API_KEY`) |
+| `TTS_OUTPUT` | Kur atskaņot audio: `local` (PC skaļrunis, noklusējums) \| `remote` (kameras skaļrunis) \| `both` |
 | `THINKING_MODE` | Tikai Anthropic — `auto` (noklusējums) \| `adaptive` \| `extended` \| `disabled` |
-| `THINKING_EFFORT` | Adaptīva domāšanas piepūle: `high` (noklusējums) \| `medium` \| `low` \| `max` (tikai Opus 4.6) |
+| `THINKING_EFFORT` | Adaptīvais domāšanas piepūles līmenis: `high` (noklusējums) \| `medium` \| `low` \| `max` (tikai Opus 4.6) |
 
-### 5. Izveido savu paziņu
+### 5. Izveidojiet savu familiar
 
 ```bash
 cp persona-template/en.md ME.md
-# Rediģē ME.md — piešķir tam vārdu un personību
+# Rediģējiet ME.md — dodiet tam vārdu un personību
 ```
 
-### 6. Palaiž
+### 6. Palaižam
 
+**macOS / Linux / WSL2:**
 ```bash
-./run.sh             # Teksta TUI (ieteicams)
+./run.sh             # Teksts TUI (ieteicams)
 ./run.sh --no-tui    # Parasts REPL
+```
+
+**Windows:**
+```bat
+run.bat              # Teksts TUI (ieteicams)
+run.bat --no-tui     # Parasts REPL
 ```
 
 ---
 
 ## Izvēloties LLM
 
-> **Ieteicams: Kimi K2.5** — līdz šim labākā veiktspēja aģentiem. Pamanīt kontekstu, uzdot papildu jautājumus un rīkoties autonomi veidos, ko citi modeļi nepiedāvā. Cenšas līdzīgi kā Claude Haiku.
+> **Ieteicams: Kimi K2.5** — labākā agentiskā veiktspēja līdz šim pārbaudīta. Pamanām kontekstu, uzdod turpmākus jautājumus un rīkojas autonomi tādās manierēs, kādas citi modeļi to nedara. Cenas ziņā līdzīgs Claude Haiku.
 
 | Platforma | `PLATFORM=` | Noklusējuma modelis | Kur iegūt atslēgu |
 |-----------|------------|---------------------|-------------------|
@@ -126,8 +141,8 @@ cp persona-template/en.md ME.md
 | Anthropic Claude | `anthropic` | `claude-haiku-4-5-20251001` | [console.anthropic.com](https://console.anthropic.com) |
 | Google Gemini | `gemini` | `gemini-2.5-flash` | [aistudio.google.com](https://aistudio.google.com) |
 | OpenAI | `openai` | `gpt-4o-mini` | [platform.openai.com](https://platform.openai.com) |
-| OpenAI-saderīgas (Ollama, vllm…) | `openai` + `BASE_URL=` | — | — |
-| OpenRouter.ai (multi-provider) | `openai` + `BASE_URL=https://openrouter.ai/api/v1` | — | [openrouter.ai](https://openrouter.ai) |
+| OpenAI saderīgs (Ollama, vllm…) | `openai` + `BASE_URL=` | — | — |
+| OpenRouter.ai (vairāku nodrošinātāju) | `openai` + `BASE_URL=https://openrouter.ai/api/v1` | — | [openrouter.ai](https://openrouter.ai) |
 | **CLI rīks** (claude -p, ollama…) | `cli` | (komanda) | — |
 
 **Kimi K2.5 `.env` piemērs:**
@@ -141,7 +156,7 @@ AGENT_NAME=Yukine
 ```env
 PLATFORM=glm
 API_KEY=...   # no api.z.ai
-MODEL=glm-4.6v   # redzes atbalsts; glm-4.7 / glm-5 = tikai teksts
+MODEL=glm-4.6v   # redzes iespēja; glm-4.7 / glm-5 = tikai tekstam
 AGENT_NAME=Yukine
 ```
 
@@ -149,7 +164,7 @@ AGENT_NAME=Yukine
 ```env
 PLATFORM=gemini
 API_KEY=AIza...   # no aistudio.google.com
-MODEL=gemini-2.5-flash  # vai gemini-2.5-pro ar augstākām spējām
+MODEL=gemini-2.5-flash  # vai gemini-2.5-pro ar augstāku jaudu
 AGENT_NAME=Yukine
 ```
 
@@ -158,26 +173,26 @@ AGENT_NAME=Yukine
 PLATFORM=openai
 BASE_URL=https://openrouter.ai/api/v1
 API_KEY=sk-or-...   # no openrouter.ai
-MODEL=mistralai/mistral-7b-instruct  # pēc izvēles: norādīt modeli
+MODEL=mistralai/mistral-7b-instruct  # opcional: norādiet modeli
 AGENT_NAME=Yukine
 ```
 
-> **Piezīme:** Lai atspēc tu lokālos/NVIDIA modeļus, vienkārši nenosaki `BASE_URL` uz lokālu beigu punktu, kā `http://localhost:11434/v1`. Izmanto mākoņa pakalpojumu sniedzējus.
+> **Piezīme:** Lai atslēgtu vietējās/NVIDIA modeļus, vienkārši nenorādiet `BASE_URL` uz vietējo gala punktu, piemēram, `http://localhost:11434/v1`. Izmantojiet mākoņu sniedzējus.
 
 **CLI rīka `.env` piemērs:**
 ```env
 PLATFORM=cli
-MODEL=llm -m gemma3 {}        # llm CLI (https://llm.datasette.io) — {} = prompt args
-# MODEL=ollama run gemma3:27b  # Ollama — bez {}, prompt tiek iekļauts caur stdin
+MODEL=llm -m gemma3 {}        # llm CLI (https://llm.datasette.io) — {} = uzvedne
+# MODEL=ollama run gemma3:27b  # Ollama — nav {}, uzvedne iet caur stdin
 ```
 
 ---
 
-## MCP Serveri
+## MCP serveri
 
-familiar-ai var savienoties ar jebkuru [MCP (Model Context Protocol)](https://modelcontextprotocol.io) serveri. Tas ļauj pievienot ārējās atmiņas, failu piekļuvi, tīmekļa meklēšanu vai jebkuru citu rīku.
+familiar-ai var pieslēgties jebkuram [MCP (Model Context Protocol)](https://modelcontextprotocol.io) serverim. Tas ļauj pievienot ārēju atmiņu, piekļuvi failu sistēmai, tīmekļa meklēšanu vai jebkuru citu rīku.
 
-Konfigurē serverus `~/.familiar-ai.json` (tas pats formāts kā Claude Code):
+Konfigurējiet serverus `~/.familiar-ai.json` (tas pats formāts kā Claude Code):
 
 ```json
 {
@@ -195,184 +210,185 @@ Konfigurē serverus `~/.familiar-ai.json` (tas pats formāts kā Claude Code):
 }
 ```
 
-Divas transporta tipu atbalsta:
-- **`stdio`**: palaiž lokālo apakšprocesu (`command` + `args`)
-- **`sse`**: savienojas ar HTTP+SSE serveri (`url`)
+Divi transporta veidi ir atbalstīti:
+- **`stdio`**: palaidiet lokālu apakšprocesu (`command` + `args`)
+- **`sse`**: pieslēgties HTTP+SSE serverim (`url`)
 
-Aizvieto konfigurācijas faila atrašanās vietu ar `MCP_CONFIG=/path/to/config.json`.
+Pārdefinējiet konfigurācijas faila atrašanās vietu ar `MCP_CONFIG=/path/to/config.json`.
 
 ---
 
-## Hardware
+## Aparatūra
 
-familiar-ai darbojas ar jebkuru aparatūru, kas tev ir — vai arī vispār nav.
+familiar-ai darbojas ar jebkuru aparatūru, kas jums ir — vai arī nevienu.
 
-| Daļa | Ko tā dara | Piemērs | Nepieciešams? |
-|------|------------|---------|---------------|
+| Daļa | Ko tā dara | Piemērs | Nepieciešama? |
+|------|-------------|---------|-----------|
 | Wi-Fi PTZ kamera | Acis + kakls | Tapo C220 (~$30) | **Ieteicams** |
 | USB webkamera | Acis (fiksētas) | Jebkura UVC kamera | **Ieteicams** |
-| Robotu putekļu sūcējs | Kājas | Jebkura Tuya saderīga modeļa | Nē |
-| PC / Raspberry Pi | Smadzenes | Jebkas, kas darbojas ar Python | **Jā** |
+| Robota sūknēšanas ierīce | Kājās | Jebkurš Tuya saderīgs modelis | Nē |
+| PC / Raspberry Pi | Smadzenes | Jebkas, kas var darbināt Python | **Jā** |
 
-> **Kamera ir ļoti ieteicama.** Bez tās familiar-ai var runāt — bet tas neredz pasauli, kas ir tā mērķis.
+> **Kamera ir stingri ieteicama.** Bez tās, familiar-ai var runāt — bet tas nevar redzēt pasauli, kas ir tāds kā viss jēga.
 
-### Minimālā iestatīšana (bez aparatūras)
+### Minimāla iestatīšana (nav aparatūras)
 
-Vienkārši gribi izmantot? Tev nepieciešama tikai API atslēga:
+Vienkārši vēlaties izmēģināt? Jums nepieciešama tikai API atslēga:
 
 ```env
 PLATFORM=kimi
 API_KEY=sk-...
 ```
 
-Palaid `./run.sh` un sāc sarunāties. Pievieno aparatūru pa ceļam.
+Palaižiet `./run.sh` (macOS/Linux/WSL2) vai `run.bat` (Windows) un sāciet sarunu. Pievienojiet aparatūru laikā.
 
 ### Wi-Fi PTZ kamera (Tapo C220)
 
-1. Tapo lietotnē: **Iestatījumi → Papildu → Kameras konts** — izveido vietējo kontu (ne TP-Link kontu)
-2. Atrodi kameras IP adresi savā maršrutētāja ierīču sarakstā
-3. Iestati `.env`:
+1. Tapo lietotnē: **Iestatījumi → Paplašinātie iestatījumi → Kameras konts** — izveidojiet vietējo kontu (nevis TP-Link kontu)
+2. Atrodiet kameras IP savā maršrutētāja ierīču sarakstā
+3. Iestatiet `.env`:
    ```env
    CAMERA_HOST=192.168.1.xxx
-   CAMERA_USER=your-local-user
-   CAMERA_PASS=your-local-pass
+   CAMERA_USER=jūsu-vietējais-lietotājs
+   CAMERA_PASS=jūsu-vietējā-parole
    ```
 
 ### Balss (ElevenLabs)
 
-1. Iegūsti API atslēgu no [elevenlabs.io](https://elevenlabs.io/)
-2. Iestati `.env`:
+1. Iegūstiet API atslēgu vietnē [elevenlabs.io](https://elevenlabs.io/)
+2. Iestatiet `.env`:
    ```env
    ELEVENLABS_API_KEY=sk_...
-   ELEVENLABS_VOICE_ID=...   # pēc izvēles, izmanto noklusējuma balsi, ja izlaidi
+   ELEVENLABS_VOICE_ID=...   # opcional, izmanto noklusējuma balsi, ja atstājāt izlaistu
    ```
 
 Ir divas atskaņošanas vietas, ko kontrolē `TTS_OUTPUT`:
 
 ```env
-TTS_OUTPUT=local    # datora skaļrunis (noklusējums)
-TTS_OUTPUT=remote   # tikai kameras skaļrunis
-TTS_OUTPUT=both     # kameras skaļrunis + datora skaļrunis vienlaicīgi
+TTS_OUTPUT=local    # PC skaļrunis (noklusējums)
+TTS_OUTPUT=remote   # tikai kamerā
+TTS_OUTPUT=both     # kamerā + PC skaļrunis vienlaikus
 ```
 
-#### A) Kamerdarbības skaļrunis (caur go2rtc)
+#### A) Kameras skaļrunis (caur go2rtc)
 
-Iestati `TTS_OUTPUT=remote` (vai `both`). Prasa [go2rtc](https://github.com/AlexxIT/go2rtc/releases):
+Iestatiet `TTS_OUTPUT=remote` (vai `both`). Prasa [go2rtc](https://github.com/AlexxIT/go2rtc/releases):
 
-1. Lejupielādē bināro failu no [atlaižu lapas](https://github.com/AlexxIT/go2rtc/releases):
+1. Lejupielādējiet bināro failu no [izlaidumu lapas](https://github.com/AlexxIT/go2rtc/releases):
    - Linux/macOS: `go2rtc_linux_amd64` / `go2rtc_darwin_amd64`
    - **Windows: `go2rtc_win64.exe`**
 
-2. Novieto un pārsauc to:
+2. Novietojiet un pārdēvējiet to:
    ```
    # Linux / macOS
-   ~/.cache/embodied-claude/go2rtc/go2rtc          # nepieciešams chmod +x
+   ~/.cache/embodied-claude/go2rtc/go2rtc          # nepieciešama chmod +x
 
    # Windows
    %USERPROFILE%\.cache\embodied-claude\go2rtc\go2rtc.exe
    ```
 
-3. Izveido `go2rtc.yaml` tādā pašā direktorijā:
+3. Veidojiet `go2rtc.yaml` tajā pašā direktorijā:
    ```yaml
    streams:
      tapo_cam:
        - rtsp://YOUR_CAM_USER:YOUR_CAM_PASS@YOUR_CAM_IP/stream1
    ```
-   Izmanto vietējo kameras konta akreditācijas datus (nevis savu TP-Link mākoņu kontu).
+   Izmantojiet vietējā konta kredenciālus (nevis TP-Link mākoņa kontu).
 
-4. familiar-ai automātiski sāk go2rtc palaišanu. Ja tava kamera atbalsta divvirzienu audio (atpakaļkanāls), balss tiks atskaņota no kameras skaļruņa.
+4. familiar-ai automātiski sāk go2rtc palaišanas laikā. Ja jūsu kamera atbalsta divvirzienu audio (atpakaļkanāls), balss tiek atskaņota no kameras skaļruņa.
 
-#### B) Vietējo datora skaļrunis
+#### B) Vietējais PC skaļrunis
 
-Noklusējuma iestatījums (`TTS_OUTPUT=local`). Mēģina atskaņotājus secībā: **paplay** → **mpv** → **ffplay**. Tiek izmantots arī kā rezerves variants, kad `TTS_OUTPUT=remote` un go2rtc nav pieejams.
+Noklusējums (`TTS_OUTPUT=local`). Mēģina atskaņotājprogrammas secībā: **paplay** → **mpv** → **ffplay**. Arī tiek izmantots kā rezervju variants, kad `TTS_OUTPUT=remote` un go2rtc nav pieejams.
 
-| OS | Instalācija |
-|----|---------|
+| OS | Instalējiet |
+|----|-------------|
 | macOS | `brew install mpv` |
 | Ubuntu / Debian | `sudo apt install mpv` (vai `paplay` caur `pulseaudio-utils`) |
-| WSL2 / WSLg | `sudo apt install pulseaudio-utils` — iestati `PULSE_SERVER=unix:/mnt/wslg/PulseServer` .env |
-| Windows | [mpv.io/installation](https://mpv.io/installation/) — lejupielādē un pievieno PATH, **vai** `winget install ffmpeg` |
+| WSL2 / WSLg | `sudo apt install pulseaudio-utils` — iestatiet `PULSE_SERVER=unix:/mnt/wslg/PulseServer` `.env` |
+| Windows | [mpv.io/installation](https://mpv.io/installation/) — lejupielādējiet un pievienojiet PATH, **vai** `winget install ffmpeg` |
 
-> Ja nav pieejams neviens audio atskaņotājs, runa joprojām tiek ģenerēta — tā vienkārši netiks atskaņota.
+> Ja nav pieejams nevienis audio atskaņotājs, runa joprojām tiek ģenerēta — tā vienkārši netiks atskaņota.
 
-### Balss ievade (Reāllaika STT)
+### Balss ievade (Realtime STT)
 
-Iestati `REALTIME_STT=true` savā `.env`, lai iegūtu vienmēr aktīvu, bezvadu balss ievadi:
+Iestatiet `REALTIME_STT=true` `.env`, lai aktivizētu vienmēr ieslēgtu, bezrokas balss ievadi:
 
 ```env
 REALTIME_STT=true
 ELEVENLABS_API_KEY=sk_...   # tā pati atslēga kā TTS
 ```
 
-familiar-ai straumē mikrofona audio uz ElevenLabs Scribe v2 un automātiski saglabā transkriptus, kad tu apstājas runāt. Nav nepieciešama pogas nospiešana. Labi coexistē ar push-to-talk režīmu (Ctrl+T).
+familiar-ai straumē mikrofonu audio uz ElevenLabs Scribe v2 un auto-iedod transkriptus, kad pārtraucat runāt. Nav nepieciešama pogas nospiešana. Labi sadzīvo ar nospied-pat-nogalināšanas režīmu (Ctrl+T).
 
 ---
 
 ## TUI
 
-familiar-ai ietver termināla UI, kas izstrādāts ar [Textual](https://textual.textualize.io/):
+familiar-ai ietver terminālā UI, kas būvēts ar [Textual](https://textual.textualize.io/):
 
-- Ritināms sarunu vēstures logs ar tiešsaistes tekstu
-- Tab-completion par `/quit`, `/clear`
-- Pārtraukšana aģentam pa vidu, rakstot, kamēr tas domā
+- Ritina sarunu vēsturi ar tiešraides tekstu
+- Tab-completion `/quit`, `/clear`
+- Pārtrauciet aģentu pa vidu, rakstot, kamēr tas domā
 - **Sarunu žurnāls** automātiski saglabāts `~/.cache/familiar-ai/chat.log`
 
-Lai sekotu žurnālam citā terminālā (noderīgi copy-paste):
+Lai sekotu žurnālam citā terminālī (noderīgi kopēšanai-ielīmēšanai):
 ```bash
 tail -f ~/.cache/familiar-ai/chat.log
 ```
 
 ---
 
-## Personība (ME.md)
+## Persona (ME.md)
 
-Tava paziņa personība dzīvo failā `ME.md`. Šī faila gitignored — tas ir tikai tavs.
+Jūsu familiar personība dzīvo `ME.md`. Šis fails ir gitignored — tas ir tikai jūsu.
 
-Skatīt [`persona-template/en.md`](./persona-template/en.md) kā piemēru, vai [`persona-template/ja.md`](./persona-template/ja.md) japāņu versijai.
+Skatiet [`persona-template/en.md`](./persona-template/en.md) kā piemēru, vai [`persona-template/ja.md`](./persona-template/ja.md) japāņu versijai.
 
 ---
 
 ## Biežāk uzdotie jautājumi
 
-**Q: Vai tas darbojas bez GPU?**
-Jā. Iesaiņojuma modelis (multilingual-e5-small) darbojas labi uz CPU. GPU to paātrina, bet nav obligāts.
+**Q: Vai tas strādā bez GPU?**
+Jā. Iemaldījumu modelis (multilingual-e5-small) darbojas labi uz CPU. GPU padara to ātrāku, bet nav obligāts.
 
-**Q: Vai varu izmantot kameru, kas nav Tapo?**
-Jebkura kamera, kas atbalsta ONVIF + RTSP, tam derētu. Tapo C220 ir tā, ko mēs pārbaudījām.
+**Q: Vai es varu izmantot citu kameru, nevis Tapo?**
+Jebkura kamera, kas atbalsta ONVIF + RTSP, vajadzētu darboties. Mēs pārbaudījām Tapo C220.
 
-**Q: Vai mani dati tiek nosūtīti kaut kur?**
-Attēli un teksts tiek nosūtīti uz izvēlēto LLM API apstrādei. Atmiņas tiek glabātas lokāli `~/.familiar_ai/`.
+**Q: Vai mana dati tiek nosūtīti kur?**
+Attēli un teksti tiek nosūtīti uz jūsu izvēlēto LLM API apstrādei. Atmiņas tiek uzglabātas lokāli `~/.familiar_ai/`.
 
-**Q: Kāpēc aģents raksta `（...）` vietā, lai runātu?**
-Pārliecinies, ka `ELEVENLABS_API_KEY` ir iestatīts. Bez tā balss ir atspējota un aģents atgriežas pie teksta.
+**Q: Kāpēc aģents raksta `（...）` nevis runā?**
+Pārliecinieties, ka ir iestatīta `ELEVENLABS_API_KEY`. Bez tā balss ir atslēgta, un aģents atgriežas pie teksta.
 
-## Tehniskā fonde
+## Tehniskais fons
 
-Interesē, kā tas darbojas? Skatīt [docs/technical.md](./docs/technical.md) par pētījumiem un dizaina lēmumiem aiz familiar-ai — ReAct, SayCan, Reflexion, Voyager, vēlēšanos sistēmu un daudz ko citu.
+Interesē, kā tas darbojas? Skatiet [docs/technical.md](./docs/technical.md) pētījumus un dizaina lēmumus, kas stāv aiz familiar-ai — ReAct, SayCan, Reflexion, Voyager, vēlmes sistēma un vēl daudz vairāk.
 
 ---
 
-## Ieteikumi
+## Iesaistīšanās
 
-familiar-ai ir atvērts eksperiments. Ja kāda no šīm lietām rezonē ar tevi — tehniski vai filozofiski — ieguldījumi ir ļoti gaidīti.
+familiar-ai ir atvērts eksperiments. Ja kāda no šīm tēmām rezonē ar jums — tehniski vai filozofiski — ieguldījumi ir ļoti laipni gaidīti.
 
-**Labi sākuma punkti:**
+**Labas vietas, kur sākt:**
 
-| Joma | Kas nepieciešams |
-|------|------------------|
-| Jauna aparatūra | Atbalsts vairākām kamerām (RTSP, IP Webcam), mikrofoniem, aktuatāriem |
+| Joma | Kas ir nepieciešams |
+|------|---------------------|
+| Jauna aparatūra | Atbalsts vairākām kamerām (RTSP, IP webkamera), mikrofoniem, aktuatatoriem |
 | Jauni rīki | Tīmekļa meklēšana, mājas automatizācija, kalendārs, jebkas caur MCP |
-| Jauni backend | Jebkurš LLM vai lokāls modelis, kas atbilst `stream_turn` interfeisam |
-| Personas šabloni | ME.md šabloni dažādām valodām un personībām |
-| Pētniecība | Labāki vēlēšanās modeļi, atmiņas izgūšana, prāta teorijas pieprasījumi |
-| Dokumentācija | Pamācības, ceļveidi, tulkojumi |
+| Jauni aizmugures | Jebkurš LLM vai vietējais modelis, kas atbilst `stream_turn` interfeisam |
+| Persona veidnes | ME.md veidnes dažādām valodām un personībām |
+| Pētniecība | Labāki vēlmes modeļi, atmiņas atgūšana, prāta teorijas pamudināšana |
+| Dokumentācija | Apmācības, gidi, tulkojumi |
 
-Skatīt [CONTRIBUTING.md](./CONTRIBUTING.md) par izstrādes iestatījumiem, koda stilu un PR vadlīnijām.
+Skatiet [CONTRIBUTING.md](./CONTRIBUTING.md) par izstrādātāja iestatīšanu, koda stilu un PR vadlīnijām.
 
-Ja neesi pārliecināts, ar ko sākt, [atver problēmu](https://github.com/lifemate-ai/familiar-ai/issues) — priecāšos norādīt pareizajā virzienā.
+Ja neesat droši, kur sākt, [atveriet problēmu](https://github.com/lifemate-ai/familiar-ai/issues) — prieks norādīt pareizajā virzienā.
 
 ---
 
-## Licence
+## Licenze
 
 [MIT](./LICENSE)
+```

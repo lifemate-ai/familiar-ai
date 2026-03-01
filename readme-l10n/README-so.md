@@ -1,64 +1,71 @@
 # familiar-ai 🐾
 
-**AI oo kula nool** — leh indho, cod, lugo, iyo xasuus.
+**Haddii AI oo la nool yahay agaa** — leh indho, cod, lugo, iyo xusuus.
 
 [![Lint](https://github.com/kmizu/familiar-ai/actions/workflows/lint.yml/badge.svg)](https://github.com/kmizu/familiar-ai/actions/workflows/lint.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](./LICENSE)
 [![Python 3.10+](https://img.shields.io/badge/python-3.10+-blue.svg)](https://www.python.org/)
 [![GitHub Sponsors](https://img.shields.io/github/sponsors/kmizu?style=flat&logo=github&color=ea4aaa)](https://github.com/sponsors/kmizu)
 
-[→ English README](../README.md)
+🌍 [Lagu helay 74 luqadood](./SUPPORTED_LANGUAGES.md)
 
 ---
 
 [![Demo video](https://img.youtube.com/vi/hiR9uWRnjt4/0.jpg)](https://youtube.com/shorts/hiR9uWRnjt4)
 
-familiar-ai waa laacib AI ah oo ku nool gurigaaga.
-Waa la dejin karaa daqiiqado gudahood. Koodh looma baahna.
+familiar-ai waa AI saaxiib ah oo ku nool gurigaaga.
+Dejiso daqiiqado gudahood. Koodh u baahan maahan.
 
-Waxay dareentaa adduunka dhabta ah adiga oo kaashanaya kamaradaha, waxay dhaqdhaqaaqdaa jidh robot, waxay si cad u hadashaa, waxayna xasuusataa waxa ay aragto. Siinamee magac, qor shakhsiyadda, ka dibna u oggolow inay kula noolaato.
+Waxay aragtaa adduunka dhabta ah iyadoo loo marayo kamaradaha, waxay ku dhaqaaqdaa jidhka robotka, waxay hadashaa, waxayna xasuusataa waxa ay aragto. Siiso magac, qor shakhsiyaddeeda, oo u ogolow inay kula noolaato.
 
-## Waxyaabaha ay qaban karto
+## Waxay sameyn karta
 
-- 👁 **Arag** — qabta sawirada ka socota kamarad Wi-Fi PTZ ama webcam USB
-- 🔄 **Eeg agagaarka** — xagjirka kamaradda si ay u sahmiso agagaarkeeda
-- 🦿 **Dhaqaaq** — ku wado vacuum robot si uu ugu furo qolka
-- 🗣 **Hadlaa** — ku hadlaa iyada oo loo marayo ElevenLabs TTS
-- 🎙 **Dhagaysi** — codka aan gacanta lagu isticmaalin iyada oo loo marayo ElevenLabs Realtime STT (ikhtiyaar)
-- 🧠 **Xasuus** — si firfircoon u kaydiyo oo dib u xasuusato xasuusta adiga oo adeegsanaya raadinta semantiga (SQLite + embeddings)
-- 🫀 **Fikradda Maskaxda** — waxay qaadataa aragtida qofka kale ka hor inta aysan ka jawaabin
-- 💭 **Rabitaan** — waxay leedahay dalabkeeda gudaha oo kicisa dabeecadda madax-bannaan
+- 👁 **Arag** — qabta sawirro ka socota kamarad Wi-Fi PTZ ama webcam USB
+- 🔄 **Eeg agagaarka** — wuxuu rogaa oo wuxuu leexin kaamarka si uu u baadho agagaarkeeda
+- 🦿 **Dhaqaaq** — wuxuu kaxeeyaa vacuum robot si uu u dhex socdo qolka
+- 🗣 **Hadlo** — wuxuu hadlaa iyada oo loo marayo ElevenLabs TTS
+- 🎙 **Dhageyso** — habka codka oo gacmo la'aan ah iyada oo loo marayo ElevenLabs Realtime STT (ikhtiyaari)
+- 🧠 **Xusuus** — si firfircoon ayuu u kaydiyaa oo u soo celinayaa xusuus leh raadinta macnaha (SQLite + embeds)
+- 🫀 **Fikradda Maskaxda** — waxay qaadanaysaa aragtida dadka kale ka hor inta aysan jawaabin
+- 💭 **Rabitaan** — waxay leedahay xoogag gudaha ah oo kicisa dabeecadaha madaxbannaan
 
 ## Sida ay u shaqeyso
 
-familiar-ai waxay maamushaa [ReAct](https://arxiv.org/abs/2210.03629) wareeg ku shaqeeya doorashadaada LLM. Waxay dareentaa adduunka iyadoo adeegsanaysa alaabta, waxay ka fikirtaa waxa xiga oo ay dhaqaaqdaa — sidii qof kale.
+familiar-ai waxay socotaa [ReAct](https://arxiv.org/abs/2210.03629) wareeg oo ay ku xiran tahay dookhaaga LLM. Waxay aragtaa adduunka iyadoo adeegsaneysa qalab, waxayna ka fikiraysaa waxa ay sameynayso xiga, kadibna waxay dhaqaaqdaa — sida qof kale.
 
 ```
 user input
   → think → act (camera / move / speak / remember) → observe → think → ...
 ```
 
-Marka aan waxba samayn, waxay ku dhaqaaqdaa rabitaankeeda: xiiso, doonista inay eegto bannaanka, iyo ilmada qofka ay la nool tahay.
+Marka ay raaxo leedahay, waxay ka jawaabtaa rabitaankeeda: welwel, rabitaannada in la eego banaanka, waxayna ka maqantaa qofka ay la nool tahay.
 
 ## Sida loo bilaabo
 
 ### 1. Ku rakib uv
 
+**macOS / Linux / WSL2:**
 ```bash
 curl -LsSf https://astral.sh/uv/install.sh | sh
 ```
 
+**Windows (PowerShell):**
+```powershell
+powershell -ExecutionPolicy ByPass -c "irm https://astral.sh/uv/install.ps1 | iex"
+```
+Ama: `winget install astral-sh.uv`
+
 ### 2. Ku rakib ffmpeg
 
-ffmpeg ayaa **lagama maarmaan** u ah qabashada sawirada kamaradda iyo ciyaaridda codka.
+ffmpeg waa **lagama maarmaan** si loo qabto sawirrada kamarada iyo dib u ciyaarista codka.
 
-| OS | Command |
+| OS | Amar |
 |----|---------|
 | macOS | `brew install ffmpeg` |
 | Ubuntu / Debian | `sudo apt install ffmpeg` |
 | Fedora / RHEL | `sudo dnf install ffmpeg` |
 | Arch Linux | `sudo pacman -S ffmpeg` |
-| Windows | `winget install ffmpeg` — ama ka soo deji [ffmpeg.org](https://ffmpeg.org/download.html) oo ku dar PATH |
+| Windows | `winget install ffmpeg` — ama soo degso [ffmpeg.org](https://ffmpeg.org/download.html) oo ku dar PATH |
 | Raspberry Pi | `sudo apt install ffmpeg` |
 
 Hubi: `ffmpeg -version`
@@ -71,113 +78,120 @@ cd familiar-ai
 uv sync
 ```
 
-### 4. Habee
+### 4. Deji
 
 ```bash
 cp .env.example .env
-# Edit .env with your settings
+# Tafatir .env adigoo adeegsanaya dejimahaaga
 ```
 
-**Ugu yaraan waxay u baahan tahay:**
+**U baahan yare:**
 
-| Variable | Description |
+| Variable | Sharaxaad |
 |----------|-------------|
 | `PLATFORM` | `anthropic` (default) \| `gemini` \| `openai` \| `kimi` \| `glm` |
-| `API_KEY` | Keygaaga API ee madal la doortay |
+| `API_KEY` | Furahaaga API ee madasha la doortay |
 
 **Ikhtiyaari:**
 
-| Variable | Description |
+| Variable | Sharaxaad |
 |----------|-------------|
-| `MODEL` | Magaca moodeelka (xulashooyin habboon oo ku xiran madal) |
-| `AGENT_NAME` | Magaca muujinta oo muuqda TUI (tusaale `Yukine`) |
-| `CAMERA_HOST` | Cinwaanka IP-ga kamaraddaada ONVIF/RTSP |
-| `CAMERA_USER` / `CAMERA_PASS` | Aqoonsiga kamaradda |
-| `ELEVENLABS_API_KEY` | Codka codka — [elevenlabs.io](https://elevenlabs.io/) |
-| `REALTIME_STT` | `true` si loo awoodsiiyo hadal-gacmeed had iyo jeer (waxaa loo baahan yahay `ELEVENLABS_API_KEY`) |
-| `TTS_OUTPUT` | Meesha lagu ciyaariyo codka: `local` (kuhadalka PC, default) \| `remote` (kuhadalka kamaradda) \| `both` |
+| `MODEL` | Magaca moodalka (tiro macquul ah oo ah midka xiliga madasha) |
+| `AGENT_NAME` | Magaca la muujiyo ee muuqaalka TUI (tusaale: `Yukine`) |
+| `CAMERA_HOST` | Cinwaanka IP ee kamarada ONVIF/RTSP-gaaga |
+| `CAMERA_USER` / `CAMERA_PASS` | Aqoonsiga kamarada |
+| `ELEVENLABS_API_KEY` | Si loogu soo saaro codka — [elevenlabs.io](https://elevenlabs.io/) |
+| `REALTIME_STT` | `true` si loo dhaqaajiyo codka oo had iyo jeer gacmo la'aan ah (waxaa looga baahan yahay `ELEVENLABS_API_KEY`) |
+| `TTS_OUTPUT` | Halka lagu ciyaarayo codka: `local` (maqalka PC, default) \| `remote` (maqalka kamarada) \| `both` |
 | `THINKING_MODE` | Kaliya Anthropic — `auto` (default) \| `adaptive` \| `extended` \| `disabled` |
-| `THINKING_EFFORT` | Dhiirigelinta fikirka firfircoon: `high` (default) \| `medium` \| `low` \| `max` (Kaliya Opus 4.6) |
+| `THINKING_EFFORT` | Dedaal fikirka oo la hagaajiyo: `high` (default) \| `medium` \| `low` \| `max` (Kaliya Opus 4.6) |
 
-### 5. Abuur laacibkaaga
+### 5. Samee familiar-kaaga
 
 ```bash
 cp persona-template/en.md ME.md
-# Edit ME.md — siin magac iyo shakhsiyadda
+# Tafatir ME.md — siiso magac iyo shakhsiyad
 ```
 
-### 6. Orod
+### 6. Socodsii
 
+**macOS / Linux / WSL2:**
 ```bash
-./run.sh             # TUI qoraal (la talinay)
+./run.sh             # TUI qoraal ah (la talinay)
 ./run.sh --no-tui    # REPL caadi ah
+```
+
+**Windows:**
+```bat
+run.bat              # TUI qoraal ah (la talinay)
+run.bat --no-tui     # REPL caadi ah
 ```
 
 ---
 
 ## Doorashada LLM
 
-> **La talinayo: Kimi K2.5** — waxqabadka ugu fiican oo la tijaabiyey ilaa hadda. Waxay ogaataa macnaha, weydii su'aalo dheeraad ah, oo waxay si madax-bannaan uga dhaqaaqdaa siyaabo kale oo moodeellada aan sameynin. Qiime la mid ah Claude Haiku.
+> **La tali: Kimi K2.5** — waxqabadka ugu wanaagsan ee la tijaabiyey ilaa iyo hadda. Wuxuu waeelaa macnaha, weydiiya su'aalo raac ah, wuxuuna si madaxbannaan ugu dhaqaaqaa siyaabo aan moodallo kale sameynin. Qiimihiisu waa mid la mid ah Claude Haiku.
 
-| Platform | `PLATFORM=` | Moodeelka default | Halka laga helayo furaha |
+| Platform | `PLATFORM=` | Moodal default | Halka laga helo furaha |
 |----------|------------|---------------|-----------------|
 | **Moonshot Kimi K2.5** | `kimi` | `kimi-k2.5` | [platform.moonshot.ai](https://platform.moonshot.ai) |
 | Z.AI GLM | `glm` | `glm-4.6v` | [api.z.ai](https://api.z.ai) |
 | Anthropic Claude | `anthropic` | `claude-haiku-4-5-20251001` | [console.anthropic.com](https://console.anthropic.com) |
 | Google Gemini | `gemini` | `gemini-2.5-flash` | [aistudio.google.com](https://aistudio.google.com) |
 | OpenAI | `openai` | `gpt-4o-mini` | [platform.openai.com](https://platform.openai.com) |
-| OpenAI-kaan ah (Ollama, vllm…) | `openai` + `BASE_URL=` | — | — |
-| OpenRouter.ai (bixiye-multi) | `openai` + `BASE_URL=https://openrouter.ai/api/v1` | — | [openrouter.ai](https://openrouter.ai) |
-| **CLI tool** (claude -p, ollama…) | `cli` | (amarka) | — |
+| OpenAI-compatible (Ollama, vllm…) | `openai` + `BASE_URL=` | — | — |
+| OpenRouter.ai (multi-provider) | `openai` + `BASE_URL=https://openrouter.ai/api/v1` | — | [openrouter.ai](https://openrouter.ai) |
+| **CLI tool** (claude -p, ollama…) | `cli` | (amar) | — |
 
-**Tusaale `.env` ah Kimi K2.5:**
+**Kimi K2.5 `.env` tusaale:**
 ```env
 PLATFORM=kimi
-API_KEY=sk-...   # ka socota platform.moonshot.ai
+API_KEY=sk-...   # laga soo qaaday platform.moonshot.ai
 AGENT_NAME=Yukine
 ```
 
-**Tusaale `.env` ah Z.AI GLM:**
+**Z.AI GLM `.env` tusaale:**
 ```env
 PLATFORM=glm
-API_KEY=...   # ka socota api.z.ai
-MODEL=glm-4.6v   # muuqaal leh; glm-4.7 / glm-5 = qoraal keliya
+API_KEY=...   # laga soo qaaday api.z.ai
+MODEL=glm-4.6v   # muuqaal leh; glm-4.7 / glm-5 = qoraal kaliya
 AGENT_NAME=Yukine
 ```
 
-**Tusaale `.env` ah Google Gemini:**
+**Google Gemini `.env` tusaale:**
 ```env
 PLATFORM=gemini
-API_KEY=AIza...   # ka socota aistudio.google.com
-MODEL=gemini-2.5-flash  # ama gemini-2.5-pro oo leh awood dheeri ah
+API_KEY=AIza...   # laga soo qaaday aistudio.google.com
+MODEL=gemini-2.5-flash  # ama gemini-2.5-pro si loo helo awood sare
 AGENT_NAME=Yukine
 ```
 
-**Tusaale `.env` ah OpenRouter.ai:**
+**OpenRouter.ai `.env` tusaale:**
 ```env
 PLATFORM=openai
 BASE_URL=https://openrouter.ai/api/v1
-API_KEY=sk-or-...   # ka socota openrouter.ai
-MODEL=mistralai/mistral-7b-instruct  # ikhtiyaar: qeex moodeel
+API_KEY=sk-or-...   # laga soo qaaday openrouter.ai
+MODEL=mistralai/mistral-7b-instruct  # ikhtiyaar: tilmaam moodal
 AGENT_NAME=Yukine
 ```
 
-> **Fiiro gaar ah:** Si aad u joojiso moodeellada maxalli/NVIDIA, si fudud ha u dejin `BASE_URL` iyo cinwaanka maxalliga ah sida `http://localhost:11434/v1`. Isticmaal bixiyeyaasha daruuraha halkii.
+> **Fiiro gaar ah:** Si looga joojiyo moodallo gudaha/NVIDIA ah, si fudud ha u dejin `BASE_URL` meel qodob ah sida `http://localhost:11434/v1`. Isticmaal adeegyo daruur ah halkii.
 
-**Tusaale `.env` ah CLI tool:**
+**CLI tool `.env` tusaale:**
 ```env
 PLATFORM=cli
-MODEL=llm -m gemma3 {}        # llm CLI (https://llm.datasette.io) — {} = arg-ka dalabka
-# MODEL=ollama run gemma3:27b  # Ollama — ma jiro {}, dalabku wuxuu u socdaa stdin
+MODEL=llm -m gemma3 {}        # llm CLI (https://llm.datasette.io) — {} = prompt arg
+# MODEL=ollama run gemma3:27b  # Ollama — ma jiraan {}, prompt wuxuu ku socda stdin
 ```
 
 ---
 
-## Servers MCP
+## MCP Servers
 
-familiar-ai waxay ku xiran kartaa xoriyad kasta [MCP (Model Context Protocol)](https://modelcontextprotocol.io) server. Tani waxay kuu oggolaanaysaa inaad ku xirto xasuus dibadda, gelin faylal, baaritaanka shabakadda, ama qalab kale.
+familiar-ai waxay ku xidhmi kartaa kasta [MCP (Model Context Protocol)](https://modelcontextprotocol.io) server. Tani waxay kuu ogolaaneysaa inaad geliso xusuus dibedda, helitaanka faylka nidaamka, raadin webka, ama qalab kale oo kasta.
 
-Dejinta servers gudaha `~/.familiar-ai.json` (qaab la mid ah Claude Code):
+Dejiso server-yada ee `~/.familiar-ai.json` (qaab isku mid ah sida Claude Code):
 
 ```json
 {
@@ -195,43 +209,43 @@ Dejinta servers gudaha `~/.familiar-ai.json` (qaab la mid ah Claude Code):
 }
 ```
 
-Laba nooc oo gaadiid ah ayaa la taageeraa:
-- **`stdio`**: kici subprocess maxalli ah (`command` + `args`)
-- **`sse`**: ku xirnaada server HTTP+SSE (`url`)
+Laba nooc oo gaadiid ah ayaa la taageeray:
+- **`stdio`**: bilaabi subprocess maxalli ah (`command` + `args`)
+- **`sse`**: ku xir HTTP+SSE server (`url`)
 
-Waxaad ka beddeli kartaa goobta faylka qaabeynta `MCP_CONFIG=/path/to/config.json`.
+Beddel meesha faylka la keydiyo adiga oo adeegsanaya `MCP_CONFIG=/path/to/config.json`.
 
 ---
 
 ## Qalabka
 
-familiar-ai waxay la shaqayn kartaa qalab kasta oo aad haysato — ama waxba.
+familiar-ai waxay la shaqeyn kartaa qalab kasta oo aad haysato — ama waxba.
 
-| Qeyb | Waxa ay qabato | Tusaale | Lagama maarmaan? |
+| Qayb | Waxa ay sameyneyso | Tusaale | U baahan? |
 |------|-------------|---------|-----------|
-| Wi-Fi PTZ camera | Indho + qanjir | Tapo C220 (~$30) | **La talinaya** |
-| USB webcam | Indho (xiran) | Kamarad UVC oo kasta | **La talinaya** |
-| Robot vacuum | Lug | Nooc kasta oo ku habboon Tuya | Maya |
-| PC / Raspberry Pi | Maskax | Wax kasta oo Python ku ordi kara | **Haa** |
+| Kamarada Wi-Fi PTZ | Indhaha + qoorta | Tapo C220 (~$30) | **La talinay** |
+| Webcam USB | Indho (deggan) | Kamarad kasta oo UVC ah | **La talinay** |
+| Vacuum robot | Lugaha | Moodal kasta oo la jaanqaadaya Tuya | Maya |
+| PC / Raspberry Pi | Maskaxda | Wax kasta oo Python ku shaqeeya | **Haa** |
 
-> **Kamarad ayaa si xoog leh loogu talinayaa.** Iyadoo aan midna, familiar-ai si fiican ayey hadli kartaa — laakiin ma arki karto adduunka, taasoo ah waxa muhiimka ah.
+> **Kamarad waa la talinayaa.** Iyadoo mid la'aan ah, familiar-ai wali waxay hadli kartaa — laakiin ma arki karto adduunka, taas oo ah sababta asaasiga ah.
 
-### Dejin ugu yar (birlaaw)
+### Dejinta yar (wax qalab ah maahan)
 
-Ma dooneysaa inaad tijaabiso? Kaliya waxaad u baahan tahay API key:
+Kaliya ma rabtaa inaad tijaabiso? Waxaad kaliya u baahan tahay furaha API:
 
 ```env
 PLATFORM=kimi
 API_KEY=sk-...
 ```
 
-Orod `./run.sh` oo bilow sheekada. Ku dar qalab sida aad u socoto.
+Socodsii `./run.sh` (macOS/Linux/WSL2) ama `run.bat` (Windows) oo bilaaw wada hadalka. Qalab ku dar sidii aad u socoto.
 
-### Wi-Fi PTZ camera (Tapo C220)
+### Kamarada Wi-Fi PTZ (Tapo C220)
 
-1. Wax ka beddel Tapo app: **Settings → Advanced → Camera Account** — samee akoon maxalli ah (maahan akoon TP-Link)
-2. Hel cinwaanka IP ee kamaradda liiska qalabkaaga routerka
-3. Ku deje `.env`:
+1. App-ka Tapo: **Settings → Advanced → Camera Account** — samee akoon maxalli ah (ma aha akoon TP-Link)
+2. Hel IP-ga kamaradaada liiska qalabka ee router-kaaga
+3. dejin `.`env`:
    ```env
    CAMERA_HOST=192.168.1.xxx
    CAMERA_USER=your-local-user
@@ -240,139 +254,108 @@ Orod `./run.sh` oo bilow sheekada. Ku dar qalab sida aad u socoto.
 
 ### Cod (ElevenLabs)
 
-1. Hel API key [elevenlabs.io](https://elevenlabs.io/)
-2. Ku deje `.env`:
+1. Hel furaha API ee [elevenlabs.io](https://elevenlabs.io/)
+2. Dejiso `.`env`:
    ```env
    ELEVENLABS_API_KEY=sk_...
-   ELEVENLABS_VOICE_ID=...   # ikhtiyaar, waxay isticmaashaa codka default haddii aan la sheegin
+   ELEVENLABS_VOICE_ID=...   # ikhtiyaar, waxay isticmaashaa codka default haddii la seego
    ```
 
-Waxaa jira laba meelood oo ciyaarid, oo lagu maamulo `TTS_OUTPUT`:
+Waxaa jira laba goobo ciyaar ah, oo lagu xakameynayo `TTS_OUTPUT`:
 
 ```env
-TTS_OUTPUT=local    # kuhadalka PC (default)
-TTS_OUTPUT=remote   # kuhadalka kamaradda oo kaliya
-TTS_OUTPUT=both     # kuhadalka kamaradda + kuhadalka PC isku mar
+TTS_OUTPUT=local    # maqalka PC (default)
+TTS_OUTPUT=remote   # maqalka kamarada oo kaliya
+TTS_OUTPUT=both     # maqalka kamarada + maqalka PC isla mar
 ```
 
-#### A) Kamaradda codka (iyadoo loo marayo go2rtc)
+#### A) Maqalka kamarada (iyadoo loo marayo go2rtc)
 
-Deji `TTS_OUTPUT=remote` (ama `both`). Waxay u baahan tahay [go2rtc](https://github.com/AlexxIT/go2rtc/releases):
+Dejiso `TTS_OUTPUT=remote` (ama `both`). Waxay u baahan tahay [go2rtc](https://github.com/AlexxIT/go2rtc/releases):
 
-1. Soo deji binary-ga bogga [releases](https://github.com/AlexxIT/go2rtc/releases):
+1. Soo degso binary kaaga bogga [release-yada](https://github.com/AlexxIT/go2rtc/releases):
    - Linux/macOS: `go2rtc_linux_amd64` / `go2rtc_darwin_amd64`
    - **Windows: `go2rtc_win64.exe`**
 
-2. Meel dhig oo magac beddel:
+2. Meel dhig oo magac u baddal:
    ```
    # Linux / macOS
-   ~/.cache/embodied-claude/go2rtc/go2rtc          # chmod +x ayaa loo baahan yahay
+   ~/.cache/embodied-claude/go2rtc/go2rtc          # chmod +x waa lagama maarmaan
 
    # Windows
    %USERPROFILE%\.cache\embodied-claude\go2rtc\go2rtc.exe
    ```
 
-3. Abuur `go2rtc.yaml` isla galkaas:
+3. Samee `go2rtc.yaml` isla galkaas:
    ```yaml
    streams:
      tapo_cam:
        - rtsp://YOUR_CAM_USER:YOUR_CAM_PASS@YOUR_CAM_IP/stream1
    ```
-   Isticmaal aqoonsiga akoonada kamaradda maxalliga ah (maahan akoonka daruuriga ee TP-Link).
+   Isticmaal aqoonsiga kamarada maxalliga ah (ma aha akoonka TP-Link cloud).
 
-4. familiar-ai waxay go2rtc si otomaatig ah u bilaabaysaa markii la furo. Haddii kamaraddaadu taageerto cod-laba geesood ah (backchannel), codka wuu ka ciyaari doonaa kuhadalka kamaradda.
+4. familiar-ai waxay si otomaatig ah u bilaabaysaa go2rtc markii la bilaabayo. Haddii kamaradaadu taageerto cod wadaag ah (backchannel), codka wuxuu ka ciyaaraysaa maqalka kamarada.
 
-#### B) Ku hadlaha PC maxalli ah
+#### B) Maqalka PC-ga maxalliga ah
 
-Default-ka (`TTS_OUTPUT=local`). Waxay isku dayeysaa ciyaartoyda kala horreeya: **paplay** → **mpv** → **ffplay**. Sidoo kale waxaa loo isticmaalaa sida ka-beddelka marka `TTS_OUTPUT=remote` iyo go2rtc uusan diyaar ahayn.
+Tusaale ahaan (`TTS_OUTPUT=local`). Waxay isku dayaysaa ciyaartoyda si ay u dooratid: **paplay** → **mpv** → **ffplay**. Sidoo kale loo isticmaali doonaa sida ka dib marka `TTS_OUTPUT=remote` oo go2rtc aan la heli karin.
 
 | OS | Rakib |
 |----|---------|
 | macOS | `brew install mpv` |
-| Ubuntu / Debian | `sudo apt install mpv` (ama `paplay` iyadoo loo marayo `pulseaudio-utils`) |
-| WSL2 / WSLg | `sudo apt install pulseaudio-utils` — deji `PULSE_SERVER=unix:/mnt/wslg/PulseServer` gudaha `.env` |
-| Windows | [mpv.io/installation](https://mpv.io/installation/) — soo deji oo ku dar PATH, **ama** `winget install ffmpeg` |
+| Ubuntu / Debian | `sudo apt install mpv` (ama `paplay` iyada oo loo marayo `pulseaudio-utils`) |
+| WSL2 / WSLg | `sudo apt install pulseaudio-utils` — deji `PULSE_SERVER=unix:/mnt/wslg/PulseServer` ee `.`env` |
+| Windows | [mpv.io/installation](https://mpv.io/installation/) — download oo ku dar PATH, **ama** `winget install ffmpeg` |
 
-> Haddii ciyaartoy codka ah aan la heli karin, hadalka wali waa la abuuri doonaa — waxa kaliya ee ma dhici doonaan inay ciyaaraan.
+> Haddii ciyaartoy cod aan la heli karin, hadalka wali waa la sameeyaa — kaliya ma ciyaari doono.
 
-### Input cod (Realtime STT)
+### Codka galinta (Realtime STT)
 
-Deji `REALTIME_STT=true` gudaha `.env` si aad had iyo jeer ugu haboonaato codka aan gacanta lagu isticmaalin:
+Dejiso `REALTIME_STT=true` ee `.`env` si loogu soo dhajiyo codka, had iyo jeer gacmo la'aan:
 
 ```env
 REALTIME_STT=true
-ELEVENLABS_API_KEY=sk_...   # isla furaha Labaad TTS
+ELEVENLABS_API_KEY=sk_...   # isla furaha sida TTS
 ```
 
-familiar-ai waxay qulqulaynaysaa codka mikrofoonka si ElevenLabs Scribe v2 oo si otomaatig ah u kaydisa qoraal-xusuusaha marka aad joojiso hadalka. Uma baahnid inaad riixdo badhanka. Waxay la co-exist kartaa habka riix-in-qar oo (Ctrl+T).
+familiar-ai waxay qaybisaa codka makarafoonka ilaa ElevenLabs Scribe v2 oo auto-ku dejiya qoralka markaad joojiso hadalka. Ma jirto badhan la riixo oo loo baahan yahay. Waxay si wada jir ah ula noolaan kartaa habka riix-ta-hadal (Ctrl+T).
 
 ---
 
 ## TUI
 
-familiar-ai waxaa ku jira UI terminiyaal ah oo la dhisay [Textual](https://textual.textualize.io/):
+familiar-ai waxay ka kooban tahay UI terminal oo la dhisay iyadoo la adeegsanayo [Textual](https://textual.textualize.io/):
 
-- Taariikh sheeko oo la daabacan karo leh qoraal toos ah
-- Tab-gudbiye loogu talagalay `/quit`, `/clear`
-- Joojinta wakhtiga agent-ka adiga oo qoraya inta ay ka fikirayso
-- **Taariikhda sheekada** si otomaatig ah ayaa loogu keydiyey `~/.cache/familiar-ai/chat.log`
+- Taariikhda wada hadalka ee la rogi karo oo leh qoraal toos ah oo baxaya
+- Dhammaystirka tabka ee `/quit`, `/clear`
+- Joojiya wakiilka bartamaha xilliga fikirka adiga oo qorin intay ka fikirayso
+- **Diiwaanka wada hadalka** oo si otomaatig ah loogu kaydiyo `~/.cache/familiar-ai/chat.log`
 
-Si aad ula socoto taariikhda terminal kale (waxay waxtar leedahay marka la caddeeyo):
+Si aad ugu raacdo diiwaanka terminal kale (useful for copy-paste):
 ```bash
 tail -f ~/.cache/familiar-ai/chat.log
 ```
 
 ---
 
-## Shakhsiyadda (ME.md)
+## Persona (ME.md)
 
-Shakhsiyadda laacibkaaga waxay ku jirtaa `ME.md`. Faylkaan waxaa laga ilaaliya git — adiga kaliya.
+Shakhsiyadda familiar-kaaga waxay ku taallaa `ME.md`. Faylkan waa gitignored — adiga kaliya ayaa haysta.
 
-Eeg [`persona-template/en.md`](./persona-template/en.md) tusaale ahaan, ama [`persona-template/ja.md`](./persona-template/ja.md) nooca Japan.
-
----
-
-## Su'aalaha Inta Badan La Isweydiiyo
-
-**Q: Ma shaqeyn kartaa iyada oo aan GPU laga helin?**
-Haa. Moodeelka embedding (multilingual-e5-small) waxay si fiican ugu shaqeysaa CPU. GPU waxa uu ka dhigayaa inuu si dhaqso ah u shaqeeyo laakiin lagama maarmaan maaha.
-
-**Q: Ma isticmaali karaa kamarad ka duwan Tapo?**
-Kamarad kasta oo taageerta ONVIF + RTSP waa inay shaqeysaa. Tapo C220 ayaa ah mid aan tijaabinay.
-
-**Q: Ma xogtayda la diraa meel kale?**
-Sawirada iyo qoraallada waa la diraa si ay u shaqeeyaan API-gaaga LLM. Xasuusku waa lagu kaydiyaa maxalli ah `~/.familiar_ai/`.
-
-**Q: Maxaa yeelay agent-ka wuxuu qoraa `（...）` halkii uu ka hadli lahaa?**
-Hubi in `ELEVENLABS_API_KEY` la dejiyo. Haddii aan la dejin, codka waa la baabi'inayaa oo agent-ka wuxuu ku dhawaaji doonaa qoraal.
-
-## Asalka Farsamada
-
-Xiiso badan ma leedahay sida ay u shaqeyso? Eeg [docs/technical.md](./docs/technical.md) si aad u aragto cilmi-baarista iyo go'aannada naqshadeynta ee ku saabsan familiar-ai — ReAct, SayCan, Reflexion, Voyager, nidaamka rabitaanka, iyo in ka badan.
+Eeg [`persona-template/en.md`](./persona-template/en.md) tusaale ahaan, ama [`persona-template/ja.md`](./persona-template/ja.md) nooca Japanese.
 
 ---
 
-## Ka Qaybqaadashada
+## FAQ
 
-familiar-ai waa tijaabo furan. Haddii mid ka mid ah tan ay la xiriirto adiga — farsamo ahaan ama falsafad ahaan — qeybqaadashada waa si weyn loo soo dhoweyaa.
+**Su'aal: Ma shaqaynaysaa iyadoo aan GPU la isticmaalin?**
+Haa. Moodalka embedding (multilingual-e5-small) si fiican ayuu ugu shaqeeyaa CPU. GPU wuxuu ka dhigayaa mid degdeg ah laakiin lagama maarmaan maaha.
 
-**Meelo wanaagsan oo laga bilaabi karo:**
+**Su'aal: Ma isticmaali karaa kamarad ka duwan Tapo?**
+Kamarad kasta oo taageerta ONVIF + RTSP waa inay shaqeysaa. Tapo C220 waa inta aan tijaabinnay.
 
-| Area | Wax lagama maarmaan ah |
-|------|---------------|
-| Qalab cusub | Taageero kamarado badan (RTSP, IP Webcam), mikrofoonada, hawlgallada |
-| Qalab cusub | Baaritaanka shabakadda, otomaatiga guriga, jadwalka, wax kasta oo MCP ku dhex jira |
-| Dhex-dhexaadiye cusub | Wax kasta oo LLM ah ama moodeel maxalli ah oo ku habboon `stream_turn` interface |
-| Template Shakhsiyadda | Template-yada ME.md ee luqado iyo shakhsiyado kala duwan |
-| Cilmi-baaris | Moodeelada rabitaanka wanaagsan, soo kabashada xasuusta, dhiirrigelinta fikradda-maskaxda |
-| Dukumentiga | Tababaro, guddiga, tarjumo |
+**Su'aal: Ma xogtaydu meelo kale ayaa la dirayaa?**
+Sawirrada iyo qoraallada waxaa loo diraa API-ga LLM-gaaga ee la doortay si loo farsameeyo. Xusuusta waxaa lagu kaydiyaa maxalliga ah ee `~/.familiar_ai/`.
 
-Eeg [CONTRIBUTING.md](./CONTRIBUTING.md) si aad u hesho deeqda horumarinta, qaabka koodhka, iyo tilmaamaha PR.
-
-Haddii aadan hubin halka aad ku bilaabi karto, [furo arrin](https://github.com/lifemate-ai/familiar-ai/issues) — waxaan ku faraxsanahay inaan ku tilmaamo jidka saxda ah.
-
----
-
-## Ruqsad
-
-[MIT](./LICENSE)
+**Su'aal: Maxaa yeelay wakiilka wuxuu qoraa `（...）` halkii uu ka hadli lahaa?**
+Hubi in `ELEVENLABS_API_KEY` la dejiyay. Haddii aan la dejin, codka ayaa la wyროგ მადებაʻotaამაშ======кжы--[jك  th ղb salt hagati]]. Munaasaba@endsection]",
