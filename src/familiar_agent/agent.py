@@ -247,6 +247,17 @@ Message: {text}
 Reply with the label only (one English word)."""
 
 
+# Compaction summary prompt — condense old messages into a short recap
+_COMPACT_PROMPT = """\
+Summarize the following conversation into a short paragraph (3-6 sentences).
+Capture: what was discussed, any decisions or discoveries, and the emotional tone.
+Write in third person. Be concise.
+
+{history}
+
+Write just the summary paragraph."""
+
+
 def _interoception(started_at: float, turn_count: int, companion_mood: str = "engaged") -> str:
     """Generate a felt-sense of internal state from objective signals.
 
@@ -318,6 +329,8 @@ class EmbodiedAgent:
         self._turn_count = 0
         self._session_input_tokens: int = 0
         self._session_output_tokens: int = 0
+        self._last_context_tokens: int = 0
+        self._post_compact: bool = False
 
         self._camera: CameraTool | None = None
         self._mobility: MobilityTool | None = None
@@ -573,6 +586,53 @@ class EmbodiedAgent:
             logger.warning("Curiosity extraction failed: %s", e)
         return None
 
+    def _should_compact(self, threshold_tokens: int = 60_000) -> bool:
+        """Return True when context is large enough to warrant compaction.
+
+        A threshold of 0 acts as a disabled sentinel — never compact.
+        In normal use _last_context_tokens is 0 until after the first turn,
+        so an empty conversation naturally returns False.
+        """
+        return threshold_tokens > 0 and self._last_context_tokens > threshold_tokens
+
+    async def _compact_messages(self, keep_last: int = 6) -> None:
+        """Summarise old messages and trim the history.
+
+        Keeps the last `keep_last` messages verbatim, replaces the rest with a
+        single summary marker, and sets `_post_compact = True` so the next
+        `run()` call does a boosted memory recall to compensate.
+        """
+        if len(self.messages) <= keep_last:
+            return
+
+        to_summarise = self.messages[:-keep_last]
+        recent = self.messages[-keep_last:]
+
+        # Build a plain-text transcript for the summary LLM call
+        lines = []
+        for msg in to_summarise:
+            role = msg.get("role", "?")
+            content = msg.get("content", "")
+            if isinstance(content, list):
+                content = " ".join(
+                    p.get("text", "")
+                    for p in content
+                    if isinstance(p, dict) and p.get("type") == "text"
+                )
+            lines.append(f"{role}: {content[:300]}")
+        history_text = "\n".join(lines)
+
+        summary = await self.backend.complete(
+            _COMPACT_PROMPT.format(history=history_text),
+            max_tokens=200,
+        )
+        summary_marker = self.backend.make_user_message(
+            f"[Conversation summary — earlier turns compacted]\n{summary}"
+        )
+
+        self.messages = [summary_marker] + list(recent)
+        self._post_compact = True
+
     async def close(self) -> None:
         """Clean up resources (MCP connections, etc.). Call on shutdown."""
         if self._mcp:
@@ -604,10 +664,16 @@ class EmbodiedAgent:
 
         is_desire_turn = inner_voice and not user_input
 
+        # Compact context if it has grown too large (GC-like: compress old turns)
+        if self._should_compact():
+            await self._compact_messages()
+
         # Inject relevant past memories + emotional context (skip for desire-driven turns)
+        recall_n = 5 if self._post_compact else 3
+        self._post_compact = False  # consume the flag regardless
         if not is_desire_turn:
             memories, feelings, companion_mood = await asyncio.gather(
-                self._memory.recall_async(user_input, n=3),
+                self._memory.recall_async(user_input, n=recall_n),
                 self._memory.recent_feelings_async(n=4),
                 self._infer_companion_mood(user_input),
             )
@@ -660,6 +726,7 @@ class EmbodiedAgent:
                 max_tokens=self.config.max_tokens,
                 on_text=on_text,
             )
+            self._last_context_tokens = result.input_tokens
             self._session_input_tokens += result.input_tokens
             self._session_output_tokens += result.output_tokens
 

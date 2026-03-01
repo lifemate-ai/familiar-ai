@@ -8,6 +8,7 @@ import re
 import time
 from datetime import datetime
 from pathlib import Path
+from collections.abc import Callable
 from typing import TYPE_CHECKING
 
 from textual.app import App, ComposeResult
@@ -64,6 +65,25 @@ _SPINNER_FRAMES = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇"
 # CC-style interrupt message constants
 INTERRUPT_MSG = "[Request interrupted by user]"
 INTERRUPT_TOOL_MSG = "[Request interrupted by user for tool use]"
+
+
+def _format_elapsed(seconds: float) -> str:
+    """Human-readable elapsed time: '45s' or '7m 43s'."""
+    total = int(seconds)
+    if total < 60:
+        return f"{total}s"
+    m, s = divmod(total, 60)
+    return f"{m}m {s:02d}s"
+
+
+def _format_tokens(n: int) -> str:
+    """Compact token count: '' for zero, '500' under 1k, '6.5k' above."""
+    if n == 0:
+        return ""
+    if n < 1000:
+        return str(n)
+    return f"{n / 1000:.1f}k"
+
 
 # Slash commands shown in the autocomplete dropdown
 _SLASH_COMMANDS: list[tuple[str, str]] = [
@@ -281,14 +301,29 @@ class FamiliarApp(App):
                 break
             await self._run_agent(text)
 
-    async def _spinner_loop(self, stream: Static, name_tag: str, stop: asyncio.Event) -> None:
-        """Animate the stream widget with a spinner until stop is set."""
+    async def _spinner_loop(
+        self,
+        stream: Static,
+        name_tag: str,
+        stop: asyncio.Event,
+        start_time: float,
+        get_tokens: Callable[[], int] | None = None,
+    ) -> None:
+        """Animate the stream widget with a live status line.
+
+        Shows:  ⠋ 23s · ↓ 6.5k
+        The token count reflects _last_context_tokens, updated after each
+        stream_turn() call in the agent loop.
+        """
         stream.add_class("thinking")
         for i in range(10_000):
             if stop.is_set():
                 break
             frame = _SPINNER_FRAMES[i % len(_SPINNER_FRAMES)]
-            stream.update(f"{name_tag} {frame}")
+            elapsed_str = _format_elapsed(time.time() - start_time)
+            tokens = get_tokens() if get_tokens else 0
+            tok_str = f" · ↓ {_format_tokens(tokens)}" if tokens else ""
+            stream.update(f"{name_tag} {frame} [dim]{elapsed_str}{tok_str}[/dim]")
             await asyncio.sleep(0.08)
         stream.remove_class("thinking")
 
@@ -306,9 +341,10 @@ class FamiliarApp(App):
         name_tag = f"[bold magenta]{self._agent_name} ▶[/bold magenta]"
 
         # Spinner state — restarted after each tool call
+        get_tokens = lambda: self.agent._last_context_tokens  # noqa: E731
         stop_spinner = asyncio.Event()
         spinner_task: asyncio.Task = asyncio.create_task(
-            self._spinner_loop(stream, name_tag, stop_spinner)
+            self._spinner_loop(stream, name_tag, stop_spinner, start_time, get_tokens)
         )
 
         def _stop_spinner() -> None:
@@ -318,7 +354,9 @@ class FamiliarApp(App):
             nonlocal spinner_task, stop_spinner
             stop_spinner.set()
             stop_spinner = asyncio.Event()
-            spinner_task = asyncio.create_task(self._spinner_loop(stream, name_tag, stop_spinner))
+            spinner_task = asyncio.create_task(
+                self._spinner_loop(stream, name_tag, stop_spinner, start_time, get_tokens)
+            )
 
         def _flush_stream() -> None:
             """Commit streamed text to the log and clear the stream widget."""
