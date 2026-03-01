@@ -321,8 +321,9 @@ def _make_banner(include_commands: bool = True) -> str:
     """Build a startup banner. CJK/emoji go outside the ASCII box to avoid width issues."""
     subtitle = _t("banner_subtitle")
     lines = [
+        "🦉  Familiar AI",
         "╔══════════════════════════════════════╗",
-        f"║          Familiar AI  {_VERSION:<15}║",
+        f"║  version {_VERSION:<29}║",
         "╚══════════════════════════════════════╝",
         f"  {subtitle}",
     ]
