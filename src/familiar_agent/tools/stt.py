@@ -166,6 +166,7 @@ class STTTool:
             content_type="audio/wav",
         )
         form.add_field("model_id", "scribe_v1")
+        form.add_field("tag_audio_events", "false")
         if self._language:
             form.add_field("language_code", self._language)
 
