@@ -346,6 +346,7 @@ class AnthropicBackend:
     async def complete(self, prompt: str, max_tokens: int) -> str:
         """Simple completion (no tools, no streaming) for utility calls."""
         try:
+            logger.debug("complete() calling %s with %d chars", self.model, len(prompt))
             resp = await self.client.messages.create(
                 model=self.model,
                 max_tokens=max_tokens,
@@ -354,7 +355,13 @@ class AnthropicBackend:
             from anthropic.types import TextBlock
 
             first = resp.content[0] if resp.content else None
-            return first.text.strip() if isinstance(first, TextBlock) else ""
+            result = first.text.strip() if isinstance(first, TextBlock) else ""
+            if not result:
+                logger.warning(
+                    "complete() empty response from %s: content=%s, stop=%s",
+                    self.model, resp.content, resp.stop_reason,
+                )
+            return result
         except Exception as e:
             logger.warning("complete() failed: %s", e)
             return ""
@@ -1357,3 +1364,45 @@ def create_backend(
         thinking_budget=config.thinking_budget,
         thinking_effort=config.thinking_effort,
     )
+
+
+def create_utility_backend(
+    config: "AgentConfig",
+) -> AnthropicBackend | OpenAICompatibleBackend | KimiBackend | GLMBackend | GeminiBackend | None:
+    """Create a separate backend for utility LLM calls (summaries, emotion, etc.).
+
+    Returns None if UTILITY_PLATFORM is not configured — caller should
+    fall back to the main conversation backend.
+    """
+    if not config.utility_platform or not config.utility_api_key:
+        return None
+
+    platform = config.utility_platform
+    api_key = config.utility_api_key
+    model = config.utility_model
+
+    if platform == "anthropic":
+        model = model or "claude-haiku-4-5-20251001"
+        logger.info("Using Anthropic utility backend: %s", model)
+        return AnthropicBackend(api_key=api_key, model=model, thinking_mode="disabled")
+    if platform == "gemini":
+        model = model or "gemini-2.5-flash"
+        logger.info("Using Gemini utility backend: %s", model)
+        return GeminiBackend(api_key=api_key, model=model)
+    if platform == "kimi":
+        model = model or "kimi-k2.5"
+        logger.info("Using Kimi utility backend: %s", model)
+        return KimiBackend(api_key=api_key, model=model)
+    if platform == "glm":
+        model = model or "glm-4.6v"
+        logger.info("Using GLM utility backend: %s", model)
+        return GLMBackend(api_key=api_key, model=model)
+    if platform == "openai":
+        model = model or "gpt-4o-mini"
+        logger.info("Using OpenAI utility backend: %s", model)
+        return OpenAICompatibleBackend(
+            api_key=api_key, model=model, base_url="https://api.openai.com/v1"
+        )
+
+    logger.warning("Unknown UTILITY_PLATFORM: %s, falling back to main backend", platform)
+    return None

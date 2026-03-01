@@ -8,7 +8,7 @@ import time
 from collections.abc import Callable
 from datetime import datetime
 
-from .backend import create_backend
+from .backend import create_backend, create_utility_backend
 from .config import AgentConfig
 from .desires import detect_worry_signal
 from .exploration import ExplorationTracker
@@ -248,6 +248,27 @@ Message: {text}
 Reply with the label only (one English word)."""
 
 
+# Day summary prompt — condense a day's observations into a diary-like entry
+_DAY_SUMMARY_PROMPT = """\
+You are writing a diary entry about this day from your own first-person memory.
+Recall the flow of the day: what happened in the morning, then afternoon, then evening.
+Capture how your feelings changed as events unfolded — what made you happy, 
+what frustrated you, what surprised you, what lingered in your mind.
+
+Rules:
+- Write in first person, as someone remembering their own lived day
+- Follow the chronological arc: morning → afternoon → evening
+- Include specific details: what you saw, who you talked to, what was said
+- Show emotional shifts: how one event changed how you felt about the next
+- Do NOT list events — weave them into a flowing narrative
+- Do NOT include titles, headers, or markdown formatting
+- Start directly with the first sentence of the entry
+- 5-8 sentences. Write in {lang}.
+
+{observations}
+
+Write just the diary entry."""
+
 # Compaction summary prompt — condense old messages into a short recap
 _COMPACT_PROMPT = """\
 Summarize the following conversation into a short paragraph (3-6 sentences).
@@ -325,6 +346,7 @@ class EmbodiedAgent:
     def __init__(self, config: AgentConfig):
         self.config = config
         self.backend = create_backend(config)
+        self._utility_backend = create_utility_backend(config) or self.backend
         self.messages: list = []
         self._started_at = time.time()
         self._turn_count = 0
@@ -502,7 +524,7 @@ class EmbodiedAgent:
 
     async def _infer_emotion(self, text: str) -> str:
         """Ask the LLM to label the emotion of a response. Returns label string."""
-        label = await self.backend.complete(_EMOTION_PROMPT.format(text=text[:400]), max_tokens=10)
+        label = await self._utility_backend.complete(_EMOTION_PROMPT.format(text=text[:400]), max_tokens=10)
         label = label.lower()
         valid = {"happy", "sad", "curious", "excited", "moved", "neutral"}
         return label if label in valid else "neutral"
@@ -511,7 +533,7 @@ class EmbodiedAgent:
         """Classify companion's emotional state from their message. Returns mood label."""
         if not text or len(text.strip()) < 3:
             return "absent"
-        label = await self.backend.complete(
+        label = await self._utility_backend.complete(
             _COMPANION_MOOD_PROMPT.format(text=text[:300]), max_tokens=10
         )
         label = label.strip().lower()
@@ -520,7 +542,7 @@ class EmbodiedAgent:
 
     async def _summarize_exchange(self, user_input: str, agent_response: str) -> str:
         """Distill an exchange into one sentence for memory storage."""
-        result = await self.backend.complete(
+        result = await self._utility_backend.complete(
             _SUMMARY_PROMPT.format(
                 lang=_t("summary_lang"),
                 user=user_input[:200],
@@ -536,17 +558,32 @@ class EmbodiedAgent:
         Damasio's autobiographical self coming online: reading the past
         to know who we are now. Called only on the first turn of a session.
         """
-        self_model, curiosities, feelings = await asyncio.gather(
+        logger.info("Morning reconstruction started")
+        self_model, curiosities, feelings, day_summaries = await asyncio.gather(
             self._memory.recall_self_model_async(n=5),
             self._memory.recall_curiosities_async(n=3),
             self._memory.recent_feelings_async(n=3),
+            self._memory.recall_day_summaries_async(n=5),
         )
+        logger.info(
+            "Morning data: self_model=%d, curiosities=%d, feelings=%d, day_summaries=%d",
+            len(self_model), len(curiosities), len(feelings), len(day_summaries),
+        )
+
+        # Generate day summaries for past dates that don't have one yet
+        await self._backfill_day_summaries()
+
+        # Re-fetch if backfill created new summaries
+        if not day_summaries:
+            day_summaries = await self._memory.recall_day_summaries_async(n=5)
 
         # Surface the most recent curiosity into the desire system
         if desires is not None and curiosities and desires.curiosity_target is None:
             desires.curiosity_target = curiosities[0]["summary"]
 
         parts = []
+        if day_summaries:
+            parts.append(self._memory.format_day_summaries_for_context(day_summaries))
         if self_model:
             parts.append(self._memory.format_self_model_for_context(self_model))
         if curiosities:
@@ -561,6 +598,72 @@ class EmbodiedAgent:
         header = _t("morning_header")
         return header + "\n\n" + "\n\n".join(parts)
 
+    async def _backfill_day_summaries(self) -> None:
+        """Generate day summaries for past dates that don't have one yet.
+
+        Skips today (summary is generated at shutdown). Only processes
+        the most recent 5 days to keep startup time reasonable.
+        """
+        try:
+            today = datetime.now().strftime("%Y-%m-%d")
+            all_dates = await asyncio.to_thread(self._memory.get_dates_with_observations, 7)
+            existing = await asyncio.to_thread(self._memory.get_dates_with_summaries)
+            logger.info(
+                "Backfill check: today=%s, all_dates=%s, existing=%s",
+                today, all_dates, existing,
+            )
+
+            missing = [d for d in all_dates if d != today and d not in existing][:5]
+            if missing:
+                logger.info("Backfill: generating day summaries for %s", missing)
+            else:
+                logger.info("Backfill: no missing day summaries")
+            for date in missing:
+                await self._generate_day_summary(date)
+        except Exception as e:
+            logger.warning("Day summary backfill failed: %s", e)
+
+    async def _generate_day_summary(self, date: str) -> None:
+        """Generate and save a day summary for the given date."""
+        try:
+            observations = await asyncio.to_thread(
+                self._memory.get_observations_for_date, date, 50
+            )
+            if not observations:
+                logger.info("No observations for %s, skipping day summary", date)
+                return
+
+            # Build a concise transcript for the LLM — keep it short
+            lines = []
+            for obs in observations:
+                emotion = f" [{obs['emotion']}]" if obs["emotion"] != "neutral" else ""
+                lines.append(f"  {obs['time']} ({obs['kind']}){emotion}: {obs['content'][:150]}")
+            transcript = "\n".join(lines)
+            logger.info("Generating day summary for %s (%d observations)", date, len(observations))
+
+            summary = await asyncio.wait_for(
+                self._utility_backend.complete(
+                    _DAY_SUMMARY_PROMPT.format(
+                        lang=_t("summary_lang"),
+                        observations=transcript,
+                    ),
+                    max_tokens=400,
+                ),
+                timeout=30.0,
+            )
+            if summary:
+                await self._memory.save_async(
+                    summary, direction="記憶", kind="day_summary", emotion="neutral",
+                    override_date=date,
+                )
+                logger.info("Day summary generated for %s: %s", date, summary[:80])
+            else:
+                logger.warning("Day summary for %s: LLM returned empty response", date)
+        except asyncio.TimeoutError:
+            logger.warning("Day summary for %s timed out (30s)", date)
+        except Exception as e:
+            logger.warning("Failed to generate day summary for %s: %s", date, e)
+
     async def _update_self_model(self, final_text: str, emotion: str) -> None:
         """Extract a self-insight and store it as self_model memory.
 
@@ -570,7 +673,7 @@ class EmbodiedAgent:
         if emotion == "neutral":
             return
         try:
-            insight = await self.backend.complete(
+            insight = await self._utility_backend.complete(
                 _SELF_MODEL_PROMPT.format(text=final_text[:400]),
                 max_tokens=80,
             )
@@ -586,7 +689,7 @@ class EmbodiedAgent:
         """Ask the LLM what was most curious/interesting in the exploration."""
         try:
             none_word = _t("curiosity_none")
-            text = await self.backend.complete(
+            text = await self._utility_backend.complete(
                 f"Read this exploration report and answer in one sentence what you found most "
                 f"curious or interesting. Write in {_t('summary_lang')}. "
                 f'If nothing caught your attention, reply with just "{none_word}". '
@@ -638,7 +741,7 @@ class EmbodiedAgent:
             lines.append(f"{role}: {content[:300]}")
         history_text = "\n".join(lines)
 
-        summary = await self.backend.complete(
+        summary = await self._utility_backend.complete(
             _COMPACT_PROMPT.format(history=history_text),
             max_tokens=200,
         )
@@ -651,6 +754,16 @@ class EmbodiedAgent:
 
     async def close(self) -> None:
         """Clean up resources (MCP connections, etc.). Call on shutdown."""
+        # Generate (or refresh) today's day summary before shutting down.
+        # Today's summary is always regenerated because new observations may
+        # have been added since the last shutdown.
+        try:
+            today = datetime.now().strftime("%Y-%m-%d")
+            await asyncio.to_thread(self._memory.delete_day_summaries_for_date, today)
+            await self._generate_day_summary(today)
+        except Exception as e:
+            logger.warning("Failed to generate today's day summary on shutdown: %s", e)
+
         if self._mcp:
             await self._mcp.stop()
 

@@ -163,6 +163,7 @@ class ObservationMemory:
         kind: str = "observation",
         emotion: str = "neutral",
         image_path: str | None = None,
+        override_date: str | None = None,
     ) -> bool:
         """Save memory with embedding synchronously.
 
@@ -172,11 +173,22 @@ class ObservationMemory:
             kind: 'observation' | 'feeling' | 'conversation'
             emotion: 'neutral' | 'happy' | 'sad' | 'curious' | 'excited' | 'moved'
             image_path: Optional path to image file (thumbnail stored as base64).
+            override_date: If set, use this date (YYYY-MM-DD) instead of now.
+                           Useful for backfilling day summaries for past dates.
         """
         try:
             db = self._ensure_connected()
             now = datetime.now()
             obs_id = str(uuid.uuid4())
+
+            if override_date:
+                save_date = override_date
+                save_time = "23:59"
+                save_timestamp = f"{override_date}T23:59:59"
+            else:
+                save_date = now.strftime("%Y-%m-%d")
+                save_time = now.strftime("%H:%M")
+                save_timestamp = now.isoformat()
 
             image_data = _encode_image(image_path) if image_path else None
 
@@ -190,9 +202,9 @@ class ObservationMemory:
                 (
                     obs_id,
                     content,
-                    now.isoformat(),
-                    now.strftime("%Y-%m-%d"),
-                    now.strftime("%H:%M"),
+                    save_timestamp,
+                    save_date,
+                    save_time,
                     direction,
                     kind,
                     emotion,
@@ -419,8 +431,11 @@ class ObservationMemory:
         kind: str = "observation",
         emotion: str = "neutral",
         image_path: str | None = None,
+        override_date: str | None = None,
     ) -> bool:
-        return await asyncio.to_thread(self.save, content, direction, kind, emotion, image_path)
+        return await asyncio.to_thread(
+            self.save, content, direction, kind, emotion, image_path, override_date
+        )
 
     async def recall_async(self, query: str, n: int = 3, kind: str | None = None) -> list[dict]:
         return await asyncio.to_thread(self.recall, query, n, kind)
@@ -433,6 +448,111 @@ class ObservationMemory:
 
     async def recall_curiosities_async(self, n: int = 5) -> list[dict]:
         return await asyncio.to_thread(self.recall_curiosities, n)
+
+    # ── Day summary support ────────────────────────────────────────
+
+    def recall_day_summaries(self, n: int = 5) -> list[dict]:
+        """Return the most recent day summaries."""
+        try:
+            db = self._ensure_connected()
+            rows = db.execute(
+                "SELECT content, date, time, emotion FROM observations "
+                "WHERE kind = 'day_summary' "
+                "ORDER BY timestamp DESC LIMIT ?",
+                (n,),
+            ).fetchall()
+            return [
+                {
+                    "summary": r["content"],
+                    "date": r["date"],
+                    "time": r["time"],
+                    "emotion": r["emotion"],
+                }
+                for r in rows
+            ]
+        except Exception as e:
+            logger.warning("Failed to fetch day summaries: %s", e)
+            return []
+
+    async def recall_day_summaries_async(self, n: int = 5) -> list[dict]:
+        return await asyncio.to_thread(self.recall_day_summaries, n)
+
+    def get_dates_with_observations(self, limit: int = 7) -> list[str]:
+        """Return distinct dates that have observations, most recent first."""
+        try:
+            db = self._ensure_connected()
+            rows = db.execute(
+                "SELECT DISTINCT date FROM observations "
+                "WHERE kind IN ('observation', 'conversation') "
+                "ORDER BY date DESC LIMIT ?",
+                (limit,),
+            ).fetchall()
+            return [r["date"] for r in rows]
+        except Exception as e:
+            logger.warning("Failed to fetch observation dates: %s", e)
+            return []
+
+    def delete_day_summaries_for_date(self, date: str) -> int:
+        """Delete all day_summary records for the given date. Returns count deleted."""
+        try:
+            db = self._ensure_connected()
+            cursor = db.execute(
+                "DELETE FROM observations WHERE kind = 'day_summary' AND date = ?",
+                (date,),
+            )
+            db.commit()
+            count = cursor.rowcount
+            if count:
+                logger.info("Deleted %d day summary(s) for %s", count, date)
+            return count
+        except Exception as e:
+            logger.warning("Failed to delete day summaries for %s: %s", date, e)
+            return 0
+
+    def get_dates_with_summaries(self) -> set[str]:
+        """Return set of dates that already have a day_summary."""
+        try:
+            db = self._ensure_connected()
+            rows = db.execute(
+                "SELECT DISTINCT date FROM observations WHERE kind = 'day_summary'"
+            ).fetchall()
+            return {r["date"] for r in rows}
+        except Exception as e:
+            logger.warning("Failed to fetch summary dates: %s", e)
+            return set()
+
+    def get_observations_for_date(self, date: str, limit: int = 50) -> list[dict]:
+        """Return observations and conversations for a specific date."""
+        try:
+            db = self._ensure_connected()
+            rows = db.execute(
+                "SELECT content, time, kind, emotion FROM observations "
+                "WHERE date = ? AND kind IN ('observation', 'conversation') "
+                "ORDER BY timestamp ASC LIMIT ?",
+                (date, limit),
+            ).fetchall()
+            return [
+                {
+                    "content": r["content"],
+                    "time": r["time"],
+                    "kind": r["kind"],
+                    "emotion": r["emotion"],
+                }
+                for r in rows
+            ]
+        except Exception as e:
+            logger.warning("Failed to fetch observations for %s: %s", date, e)
+            return []
+
+    def format_day_summaries_for_context(self, summaries: list[dict]) -> str:
+        if not summaries:
+            return ""
+        lines = [
+            "[私が覚えていること — 過去の日々に私が見たもの、感じたこと]:"
+        ]
+        for s in summaries:
+            lines.append(f"- {s['date']}: {s['summary'][:200]}")
+        return "\n".join(lines)
 
 
 class MemoryTool:
