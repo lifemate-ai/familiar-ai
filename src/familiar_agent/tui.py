@@ -200,6 +200,7 @@ class FamiliarApp(App):
         self._log_path = self._open_log_file()
         self._recording = False
         self._stop_recording: asyncio.Event = asyncio.Event()
+        self._last_toggle_listen: float = 0.0  # debounce Ctrl+T key-repeat
         # ESC cancel support
         self._cancel_event: asyncio.Event = asyncio.Event()
         self._agent_task: asyncio.Task | None = None
@@ -476,6 +477,11 @@ class FamiliarApp(App):
         if not self.agent.stt:
             self._log_system("STT not configured (set ELEVENLABS_API_KEY)")
             return
+        # Debounce: ignore key-repeat events within 0.5 s of the last toggle
+        now = time.time()
+        if now - self._last_toggle_listen < 0.5:
+            return
+        self._last_toggle_listen = now
 
         stream = self.query_one("#stream", Static)
 
