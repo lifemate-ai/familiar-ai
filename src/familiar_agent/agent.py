@@ -237,8 +237,17 @@ Response:
 
 Write just the sentence. If nothing meaningful is revealed, write "nothing"."""
 
+# Companion mood prompt — classify companion's emotional state from their message
+_COMPANION_MOOD_PROMPT = """\
+Read this message and pick the single best label for the sender's mood:
+engaged / tired / frustrated / absent / happy
 
-def _interoception(started_at: float, turn_count: int) -> str:
+Message: {text}
+
+Reply with the label only (one English word)."""
+
+
+def _interoception(started_at: float, turn_count: int, companion_mood: str = "engaged") -> str:
     """Generate a felt-sense of internal state from objective signals.
 
     Like human interoception — raw signals become a felt quality, not a report.
@@ -280,11 +289,21 @@ def _interoception(started_at: float, turn_count: int) -> str:
     else:
         social_feel = "We've been talking a lot. That feels nice."
 
+    mood_feel_map = {
+        "engaged": "They're here with me.",
+        "tired": "They seem tired tonight.",
+        "frustrated": "Something's bothering them.",
+        "absent": "It's quiet. Not sure if they're really here.",
+        "happy": "They're in a good mood today.",
+    }
+    companion_feel = mood_feel_map.get(companion_mood, "They're here with me.")
+
     return (
         f"(interoception :private true\n"
         f'  (time-of-day :feel "{time_feel}")\n'
         f'  (uptime      :feel "{uptime_feel}")\n'
-        f'  (social      :feel "{social_feel}"))'
+        f'  (social      :feel "{social_feel}")\n'
+        f'  (companion   :feel "{companion_feel}"))'
     )
 
 
@@ -417,6 +436,7 @@ class EmbodiedAgent:
         morning_ctx: str = "",
         inner_voice: str = "",
         plan_ctx: str = "",
+        companion_mood: str = "engaged",
     ) -> tuple[str, str]:
         """Return (stable, variable) system prompt parts for prompt caching.
 
@@ -428,7 +448,7 @@ class EmbodiedAgent:
         stable_parts = [p for p in [self._me_md, base] if p]
         stable = "\n\n---\n\n".join(stable_parts)
 
-        intero = _interoception(self._started_at, self._turn_count)
+        intero = _interoception(self._started_at, self._turn_count, companion_mood)
         variable_parts: list[str] = [intero]
         # Morning reconstruction takes precedence on first turn; otherwise use feelings
         if morning_ctx:
@@ -457,6 +477,17 @@ class EmbodiedAgent:
         label = label.lower()
         valid = {"happy", "sad", "curious", "excited", "moved", "neutral"}
         return label if label in valid else "neutral"
+
+    async def _infer_companion_mood(self, text: str) -> str:
+        """Classify companion's emotional state from their message. Returns mood label."""
+        if not text or len(text.strip()) < 3:
+            return "absent"
+        label = await self.backend.complete(
+            _COMPANION_MOOD_PROMPT.format(text=text[:300]), max_tokens=10
+        )
+        label = label.strip().lower()
+        valid = {"engaged", "tired", "frustrated", "absent", "happy"}
+        return label if label in valid else "engaged"
 
     async def _summarize_exchange(self, user_input: str, agent_response: str) -> str:
         """Distill an exchange into one sentence for memory storage."""
@@ -575,9 +606,10 @@ class EmbodiedAgent:
 
         # Inject relevant past memories + emotional context (skip for desire-driven turns)
         if not is_desire_turn:
-            memories, feelings = await asyncio.gather(
+            memories, feelings, companion_mood = await asyncio.gather(
                 self._memory.recall_async(user_input, n=3),
                 self._memory.recent_feelings_async(n=4),
+                self._infer_companion_mood(user_input),
             )
             memory_parts = []
             if memories:
@@ -593,6 +625,7 @@ class EmbodiedAgent:
             # Desire turn: no user context needed; feelings injected via interoception
             feelings = []
             feelings_ctx = ""
+            companion_mood = "engaged"
             user_input_with_ctx = _t("desire_turn_marker")
 
         self.messages.append(self.backend.make_user_message(user_input_with_ctx))
@@ -620,6 +653,7 @@ class EmbodiedAgent:
                     morning_ctx,
                     inner_voice=inner_voice,
                     plan_ctx=plan_ctx,
+                    companion_mood=companion_mood,
                 ),
                 messages=self.messages,
                 tools=self._all_tool_defs,
@@ -667,6 +701,10 @@ class EmbodiedAgent:
                                 "Worry signal detected (%.2f): boosting worry_companion",
                                 worry_boost,
                             )
+                        # Companion mood: frustrated → boost worry_companion (LLM-based check)
+                        if companion_mood == "frustrated":
+                            desires.boost("worry_companion", 0.3)
+                            logger.debug("Companion mood frustrated: boosting worry_companion")
 
                 # Extract curiosity target only when camera was actually used
                 if desires is not None and final_text and camera_used:

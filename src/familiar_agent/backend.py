@@ -222,6 +222,45 @@ class AnthropicBackend:
         return flat
 
     @staticmethod
+    def compact_images(messages: list[dict], keep_last: int = 3) -> list[dict]:
+        """Strip base64 image data from old tool results, keeping the last `keep_last`.
+
+        Human-like forgetting: the text description of what was seen is preserved;
+        only the raw pixel data (base64) is dropped from older turns.
+
+        Inspired by Claude Code's Dk() microcompact (KEEP_LAST=3).
+        """
+        import copy
+
+        # Collect (msg_idx, tool_result_idx, sub_idx) for every image sub-item
+        positions: list[tuple[int, int, int]] = []
+        for i, msg in enumerate(messages):
+            if not isinstance(msg, dict) or msg.get("role") != "user":
+                continue
+            content = msg.get("content", [])
+            if not isinstance(content, list):
+                continue
+            for j, item in enumerate(content):
+                if not isinstance(item, dict) or item.get("type") != "tool_result":
+                    continue
+                for k, sub in enumerate(item.get("content", [])):
+                    if isinstance(sub, dict) and sub.get("type") == "image":
+                        positions.append((i, j, k))
+
+        n_clear = max(0, len(positions) - keep_last)
+        to_clear = positions[:n_clear]
+        if not to_clear:
+            return messages
+
+        messages = copy.deepcopy(messages)
+        for msg_i, item_j, sub_k in to_clear:
+            messages[msg_i]["content"][item_j]["content"][sub_k] = {
+                "type": "text",
+                "text": "[image cleared]",
+            }
+        return messages
+
+    @staticmethod
     def _build_system_param(system: str | tuple[str, str]) -> str | list[dict]:
         """Convert system prompt to Anthropic API format, adding cache_control when possible.
 
@@ -270,8 +309,17 @@ class AnthropicBackend:
             stream_kwargs["extra_headers"] = {"anthropic-beta": ",".join(betas)}
         if "thinking" in thinking_params:
             stream_kwargs["thinking"] = thinking_params["thinking"]
+            # When thinking is enabled, ask the server to strip old ThinkingBlocks from the
+            # message history — keeps context clean in long sessions.
+            # Source: Claude Code RE (context_management / tengu_marble_anvil pattern).
+            stream_kwargs["context_management"] = {
+                "edits": [{"type": "clear_thinking_20251015", "keep": "all"}]
+            }
         if "output_config" in thinking_params:
             stream_kwargs["output_config"] = thinking_params["output_config"]
+        flat_messages = self._flatten_messages(messages)
+        flat_messages = self.compact_images(flat_messages)
+        stream_kwargs["messages"] = cast(list[MessageParam], flat_messages)
         async with self.client.messages.stream(**stream_kwargs) as stream:  # type: ignore[arg-type]
             async for chunk in stream.text_stream:
                 if on_text:
