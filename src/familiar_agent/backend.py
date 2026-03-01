@@ -822,13 +822,14 @@ class KimiBackend:
 class GLMBackend:
     """Backend for Z.AI GLM API (https://api.z.ai).
 
-    GLM uses a standard OpenAI-compatible API with native function calling.
-    No special round-trip fields (unlike Kimi's reasoning_content).
+    GLM-4.7 and similar models produce a ``reasoning_content`` (thinking) field
+    before the actual response, similar to Kimi K2.5.  That field must be
+    round-tripped in subsequent turns to keep the conversation valid.
 
     Configuration::
 
         PLATFORM=glm
-        ZAI_API_KEY=<your-key>          # or API_KEY
+        API_KEY=<your-key>              # from bigmodel.cn / api.z.ai
         MODEL=glm-4.7                   # default
     """
 
@@ -917,6 +918,7 @@ class GLMBackend:
         stream = await self.client.chat.completions.create(**kwargs)
 
         text_chunks: list[str] = []
+        reasoning_chunks: list[str] = []
         raw_tcs: dict[int, dict] = {}
         finish_reason: str | None = None
 
@@ -924,6 +926,11 @@ class GLMBackend:
             choice = chunk.choices[0]
             delta = choice.delta
             finish_reason = choice.finish_reason or finish_reason
+
+            # Capture reasoning_content (thinking tokens) — must be round-tripped
+            rc = getattr(delta, "reasoning_content", None)
+            if rc:
+                reasoning_chunks.append(rc)
 
             if delta.content:
                 text_chunks.append(delta.content)
@@ -954,7 +961,10 @@ class GLMBackend:
 
         stop = "tool_use" if finish_reason == "tool_calls" else "end_turn"
 
+        # Build raw_assistant — include reasoning_content so GLM accepts it next turn
         raw_assistant: dict[str, Any] = {"role": "assistant", "content": text or ""}
+        if reasoning_chunks:
+            raw_assistant["reasoning_content"] = "".join(reasoning_chunks)
         if tool_calls:
             raw_assistant["tool_calls"] = [
                 {
