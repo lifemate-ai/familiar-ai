@@ -359,7 +359,9 @@ class AnthropicBackend:
             if not result:
                 logger.warning(
                     "complete() empty response from %s: content=%s, stop=%s",
-                    self.model, resp.content, resp.stop_reason,
+                    self.model,
+                    resp.content,
+                    resp.stop_reason,
                 )
             return result
         except Exception as e:

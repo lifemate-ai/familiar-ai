@@ -595,9 +595,7 @@ class ObservationMemory:
     def format_day_summaries_for_context(self, summaries: list[dict]) -> str:
         if not summaries:
             return ""
-        lines = [
-            "[私が覚えていること — 過去の日々に私が見たもの、感じたこと]:"
-        ]
+        lines = ["[私が覚えていること — 過去の日々に私が見たもの、感じたこと]:"]
         for s in summaries:
             lines.append(f"- {s['date']}: {s['summary'][:200]}")
         return "\n".join(lines)

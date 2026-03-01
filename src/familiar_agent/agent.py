@@ -524,7 +524,9 @@ class EmbodiedAgent:
 
     async def _infer_emotion(self, text: str) -> str:
         """Ask the LLM to label the emotion of a response. Returns label string."""
-        label = await self._utility_backend.complete(_EMOTION_PROMPT.format(text=text[:400]), max_tokens=10)
+        label = await self._utility_backend.complete(
+            _EMOTION_PROMPT.format(text=text[:400]), max_tokens=10
+        )
         label = label.lower()
         valid = {"happy", "sad", "curious", "excited", "moved", "neutral"}
         return label if label in valid else "neutral"
@@ -567,7 +569,10 @@ class EmbodiedAgent:
         )
         logger.info(
             "Morning data: self_model=%d, curiosities=%d, feelings=%d, day_summaries=%d",
-            len(self_model), len(curiosities), len(feelings), len(day_summaries),
+            len(self_model),
+            len(curiosities),
+            len(feelings),
+            len(day_summaries),
         )
 
         # Generate day summaries for past dates that don't have one yet
@@ -610,7 +615,9 @@ class EmbodiedAgent:
             existing = await asyncio.to_thread(self._memory.get_dates_with_summaries)
             logger.info(
                 "Backfill check: today=%s, all_dates=%s, existing=%s",
-                today, all_dates, existing,
+                today,
+                all_dates,
+                existing,
             )
 
             missing = [d for d in all_dates if d != today and d not in existing][:5]
@@ -626,9 +633,7 @@ class EmbodiedAgent:
     async def _generate_day_summary(self, date: str) -> None:
         """Generate and save a day summary for the given date."""
         try:
-            observations = await asyncio.to_thread(
-                self._memory.get_observations_for_date, date, 50
-            )
+            observations = await asyncio.to_thread(self._memory.get_observations_for_date, date, 50)
             if not observations:
                 logger.info("No observations for %s, skipping day summary", date)
                 return
@@ -653,7 +658,10 @@ class EmbodiedAgent:
             )
             if summary:
                 await self._memory.save_async(
-                    summary, direction="記憶", kind="day_summary", emotion="neutral",
+                    summary,
+                    direction="記憶",
+                    kind="day_summary",
+                    emotion="neutral",
                     override_date=date,
                 )
                 logger.info("Day summary generated for %s: %s", date, summary[:80])
