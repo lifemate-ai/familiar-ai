@@ -125,11 +125,17 @@ class STTTool:
         duration = asyncio.get_event_loop().time() - start
         logger.info("STT: RTSP recording stopped after %.1fs", duration)
 
-        proc.terminate()
+        try:
+            proc.terminate()
+        except ProcessLookupError:
+            pass  # ffmpeg already exited on its own
         try:
             await asyncio.wait_for(proc.communicate(), timeout=5.0)
         except asyncio.TimeoutError:
-            proc.kill()
+            try:
+                proc.kill()
+            except ProcessLookupError:
+                pass
 
         try:
             data = tmp.read_bytes()
