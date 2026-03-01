@@ -1,7 +1,7 @@
-"""Tests for context_management / thinking token cleanup in AnthropicBackend.
+"""Tests for thinking parameter handling in AnthropicBackend.
 
-Feature: When thinking is enabled, stream_turn adds context_management to the API request
-so the server removes old ThinkingBlocks from the message history (like CC's tengu_marble_anvil).
+Feature: When thinking is enabled, stream_turn adds the appropriate thinking
+parameters to the API request.
 """
 
 from __future__ import annotations
@@ -47,15 +47,15 @@ async def _async_iter(items):
         yield item
 
 
-# ── Feature 1: context_management ────────────────────────────────────────────
+# ── Thinking parameter tests ──────────────────────────────────────────────────
 
 
-class TestContextManagementAdded:
-    """context_management is added to API call when thinking is enabled."""
+class TestThinkingParams:
+    """thinking parameter is added to API call when thinking is enabled."""
 
     @pytest.mark.asyncio
-    async def test_adaptive_mode_adds_context_management(self):
-        """adaptive thinking → context_management added."""
+    async def test_adaptive_mode_adds_thinking(self):
+        """adaptive thinking → thinking param added."""
         backend = _make_backend(thinking_mode="adaptive")
         captured: dict = {}
 
@@ -73,15 +73,11 @@ class TestContextManagementAdded:
             on_text=None,
         )
 
-        assert "extra_body" in captured
-        assert "context_management" in captured["extra_body"]
-        assert captured["extra_body"]["context_management"] == {
-            "edits": [{"type": "clear_thinking_20251015", "keep": "all"}]
-        }
+        assert "thinking" in captured
 
     @pytest.mark.asyncio
-    async def test_extended_mode_adds_context_management(self):
-        """extended thinking → context_management added."""
+    async def test_extended_mode_adds_thinking(self):
+        """extended thinking → thinking param added."""
         backend = _make_backend(thinking_mode="extended")
         captured: dict = {}
 
@@ -99,16 +95,11 @@ class TestContextManagementAdded:
             on_text=None,
         )
 
-        assert "extra_body" in captured
-        assert "context_management" in captured["extra_body"]
-        assert (
-            captured["extra_body"]["context_management"]["edits"][0]["type"]
-            == "clear_thinking_20251015"
-        )
+        assert "thinking" in captured
 
     @pytest.mark.asyncio
-    async def test_disabled_mode_no_context_management(self):
-        """thinking disabled → context_management NOT added."""
+    async def test_disabled_mode_no_thinking(self):
+        """thinking disabled → thinking param NOT added."""
         backend = _make_backend(thinking_mode="disabled")
         captured: dict = {}
 
@@ -126,11 +117,11 @@ class TestContextManagementAdded:
             on_text=None,
         )
 
-        assert "context_management" not in captured.get("extra_body", {})
+        assert "thinking" not in captured
 
     @pytest.mark.asyncio
-    async def test_auto_mode_sonnet4_adds_context_management(self):
-        """auto + sonnet-4 → adaptive → context_management added."""
+    async def test_auto_mode_sonnet4_adds_thinking(self):
+        """auto + sonnet-4 → adaptive → thinking added."""
         backend = _make_backend(thinking_mode="auto", model="claude-sonnet-4-6")
         captured: dict = {}
 
@@ -148,12 +139,11 @@ class TestContextManagementAdded:
             on_text=None,
         )
 
-        assert "extra_body" in captured
-        assert "context_management" in captured["extra_body"]
+        assert "thinking" in captured
 
     @pytest.mark.asyncio
-    async def test_auto_mode_haiku_no_context_management(self):
-        """auto + haiku → disabled → context_management NOT added."""
+    async def test_auto_mode_haiku_no_thinking(self):
+        """auto + haiku → disabled → thinking NOT added."""
         backend = _make_backend(thinking_mode="auto", model="claude-haiku-4-5-20251001")
         captured: dict = {}
 
@@ -171,11 +161,11 @@ class TestContextManagementAdded:
             on_text=None,
         )
 
-        assert "context_management" not in captured.get("extra_body", {})
+        assert "thinking" not in captured
 
     @pytest.mark.asyncio
-    async def test_context_management_edit_keep_all(self):
-        """The edit has keep='all' (preserve latest thinking per turn)."""
+    async def test_no_extra_body_added(self):
+        """No extra_body is injected (context_management not yet public)."""
         backend = _make_backend(thinking_mode="adaptive")
         captured: dict = {}
 
@@ -193,5 +183,4 @@ class TestContextManagementAdded:
             on_text=None,
         )
 
-        edit = captured["extra_body"]["context_management"]["edits"][0]
-        assert edit["keep"] == "all"
+        assert "extra_body" not in captured
