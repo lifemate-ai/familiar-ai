@@ -28,6 +28,7 @@ It perceives the real world through cameras, moves around on a robot body, speak
 - 🔄 **Look around** — pans and tilts the camera to explore its surroundings
 - 🦿 **Move** — drives a robot vacuum to roam the room
 - 🗣 **Speak** — talks via ElevenLabs TTS
+- 🎙 **Listen** — hands-free voice input via ElevenLabs Realtime STT (opt-in)
 - 🧠 **Remember** — actively stores and recalls memories with semantic search (SQLite + embeddings)
 - 🫀 **Theory of Mind** — takes the other person's perspective before responding
 - 💭 **Desire** — has its own internal drives that trigger autonomous behavior
@@ -85,7 +86,7 @@ cp .env.example .env
 
 | Variable | Description |
 |----------|-------------|
-| `PLATFORM` | `anthropic` (default) \| `gemini` \| `openai` \| `kimi` |
+| `PLATFORM` | `anthropic` (default) \| `gemini` \| `openai` \| `kimi` \| `glm` |
 | `API_KEY` | Your API key for the chosen platform |
 
 **Optional:**
@@ -97,6 +98,7 @@ cp .env.example .env
 | `CAMERA_HOST` | IP address of your ONVIF/RTSP camera |
 | `CAMERA_USER` / `CAMERA_PASS` | Camera credentials |
 | `ELEVENLABS_API_KEY` | For voice output — [elevenlabs.io](https://elevenlabs.io/) |
+| `REALTIME_STT` | `true` to enable always-on hands-free voice input (requires `ELEVENLABS_API_KEY`) |
 | `TTS_OUTPUT` | Where to play audio: `local` (PC speaker, default) \| `remote` (camera speaker) \| `both` |
 | `THINKING_MODE` | Anthropic only — `auto` (default) \| `adaptive` \| `extended` \| `disabled` |
 | `THINKING_EFFORT` | Adaptive thinking effort: `high` (default) \| `medium` \| `low` \| `max` (Opus 4.6 only) |
@@ -124,6 +126,7 @@ cp persona-template/en.md ME.md
 | Platform | `PLATFORM=` | Default model | Where to get key |
 |----------|------------|---------------|-----------------|
 | **Moonshot Kimi K2.5** | `kimi` | `kimi-k2.5` | [platform.moonshot.ai](https://platform.moonshot.ai) |
+| Z.AI GLM | `glm` | `glm-4.6v` | [api.z.ai](https://api.z.ai) |
 | Anthropic Claude | `anthropic` | `claude-haiku-4-5-20251001` | [console.anthropic.com](https://console.anthropic.com) |
 | Google Gemini | `gemini` | `gemini-2.5-flash` | [aistudio.google.com](https://aistudio.google.com) |
 | OpenAI | `openai` | `gpt-4o-mini` | [platform.openai.com](https://platform.openai.com) |
@@ -135,6 +138,14 @@ cp persona-template/en.md ME.md
 ```env
 PLATFORM=kimi
 API_KEY=sk-...   # from platform.moonshot.ai
+AGENT_NAME=Yukine
+```
+
+**Z.AI GLM `.env` example:**
+```env
+PLATFORM=glm
+API_KEY=...   # from api.z.ai
+MODEL=glm-4.6v   # vision-enabled; glm-4.7 / glm-5 = text-only
 AGENT_NAME=Yukine
 ```
 
@@ -287,6 +298,17 @@ The default (`TTS_OUTPUT=local`). Tries players in order: **paplay** → **mpv**
 | Windows | [mpv.io/installation](https://mpv.io/installation/) — download and add to PATH, **or** `winget install ffmpeg` |
 
 > If no audio player is available, speech is still generated — it just won't play.
+
+### Voice input (Realtime STT)
+
+Set `REALTIME_STT=true` in `.env` for always-on, hands-free voice input:
+
+```env
+REALTIME_STT=true
+ELEVENLABS_API_KEY=sk_...   # same key as TTS
+```
+
+familiar-ai streams microphone audio to ElevenLabs Scribe v2 and auto-commits transcripts when you pause speaking. No button press required. Coexists with the push-to-talk mode (Ctrl+T).
 
 ---
 

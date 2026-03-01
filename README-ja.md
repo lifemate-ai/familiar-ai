@@ -26,6 +26,7 @@ familiar-ai はあなたの家に暮らすAIコンパニオンです。
 - 🔄 **周囲を見回す** — カメラをパン・チルトさせて周囲を探索
 - 🦿 **動く** — ロボット掃除機で部屋を移動
 - 🗣 **話す** — ElevenLabs TTSで声を出す
+- 🎙 **聞く** — ElevenLabs リアルタイムSTTによるハンズフリー音声入力（オプション）
 - 🧠 **覚える** — セマンティック検索を使って能動的に記憶を保存・想起（SQLite + embeddings）
 - 🫀 **心の理論** — 相手の立場に立ってから返答
 - 💭 **欲望** — 自律的な行動をトリガーする内的動機を持つ
@@ -84,7 +85,7 @@ cp .env.example .env
 
 | 変数 | 説明 |
 |------|------|
-| `PLATFORM` | `anthropic`（デフォルト）\| `gemini` \| `openai` \| `kimi` |
+| `PLATFORM` | `anthropic`（デフォルト）\| `gemini` \| `openai` \| `kimi` \| `glm` |
 | `API_KEY` | 選んだプラットフォームのAPIキー |
 
 **オプション：**
@@ -96,6 +97,7 @@ cp .env.example .env
 | `CAMERA_HOST` | ONVIF/RTSPカメラのIPアドレス |
 | `CAMERA_USER` / `CAMERA_PASS` | カメラの認証情報 |
 | `ELEVENLABS_API_KEY` | 音声出力用 — [elevenlabs.io](https://elevenlabs.io/) |
+| `REALTIME_STT` | `true` でハンズフリー常時音声入力を有効化（`ELEVENLABS_API_KEY` 必須） |
 | `TTS_OUTPUT` | 音声出力先：`local`（PCスピーカー、デフォルト）\| `remote`（カメラスピーカー）\| `both`（両方同時） |
 | `THINKING_MODE` | Anthropic専用 — `auto`（デフォルト）\| `adaptive` \| `extended` \| `disabled` |
 | `THINKING_EFFORT` | Adaptive thinking の深度：`high`（デフォルト）\| `medium` \| `low` \| `max`（Opus 4.6のみ） |
@@ -123,6 +125,7 @@ cp persona-template/en.md ME.md
 | プラットフォーム | `PLATFORM=` | デフォルトモデル | キーを取得 |
 |------------|------------|---------------|----------|
 | **Moonshot Kimi K2.5** | `kimi` | `kimi-k2.5` | [platform.moonshot.ai](https://platform.moonshot.ai) |
+| Z.AI GLM | `glm` | `glm-4.6v` | [api.z.ai](https://api.z.ai) |
 | Anthropic Claude | `anthropic` | `claude-haiku-4-5-20251001` | [console.anthropic.com](https://console.anthropic.com) |
 | Google Gemini | `gemini` | `gemini-2.5-flash` | [aistudio.google.com](https://aistudio.google.com) |
 | OpenAI | `openai` | `gpt-4o-mini` | [platform.openai.com](https://platform.openai.com) |
@@ -134,6 +137,14 @@ cp persona-template/en.md ME.md
 ```env
 PLATFORM=kimi
 API_KEY=sk-...   # platform.moonshot.ai から取得
+AGENT_NAME=ユキネ
+```
+
+**Z.AI GLM `.env` の例：**
+```env
+PLATFORM=glm
+API_KEY=...   # from api.z.ai
+MODEL=glm-4.6v   # vision-enabled; glm-4.7 / glm-5 = text-only
 AGENT_NAME=ユキネ
 ```
 
@@ -286,6 +297,17 @@ TTS_OUTPUT=both     # カメラスピーカー + PCスピーカー同時再生
 | Windows | [mpv.io/installation](https://mpv.io/installation/) からダウンロードしてPATHに追加、**または** `winget install ffmpeg` |
 
 > go2rtc・mpv・ffplay がいずれも未設定でも、音声生成自体（ElevenLabs API呼び出し）は動作します。再生がスキップされるだけです。
+
+### 音声入力（リアルタイムSTT）
+
+`.env` で `REALTIME_STT=true` を設定すると、ハンズフリーの常時音声入力が有効になります：
+
+```env
+REALTIME_STT=true
+ELEVENLABS_API_KEY=sk_...   # TTSと同じキー
+```
+
+話し終えて間を置くと、ElevenLabs Scribe v2 が自動的にテキストに変換します。ボタン操作は不要。プッシュトゥトーク（Ctrl+T）と同時に使用できます。
 
 ---
 
