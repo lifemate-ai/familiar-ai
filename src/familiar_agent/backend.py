@@ -117,6 +117,8 @@ class TurnResult:
     stop_reason: str  # "end_turn" | "tool_use"
     text: str
     tool_calls: list[ToolCall] = field(default_factory=list)
+    input_tokens: int = 0
+    output_tokens: int = 0
 
 
 class AnthropicBackend:
@@ -332,9 +334,20 @@ class AnthropicBackend:
             if b.type == "tool_use"
         ]
         stop = "end_turn" if response.stop_reason == "end_turn" else "tool_use"
+        in_tok = getattr(response.usage, "input_tokens", 0) if response.usage else 0
+        out_tok = getattr(response.usage, "output_tokens", 0) if response.usage else 0
         # Return response.content (including ThinkingBlocks) so interleaved thinking
         # tokens are round-tripped correctly in multi-turn conversations.
-        return TurnResult(stop_reason=stop, text=text, tool_calls=tool_calls), response.content
+        return (
+            TurnResult(
+                stop_reason=stop,
+                text=text,
+                tool_calls=tool_calls,
+                input_tokens=in_tok,
+                output_tokens=out_tok,
+            ),
+            response.content,
+        )
 
     async def complete(self, prompt: str, max_tokens: int) -> str:
         """Simple completion (no tools, no streaming) for utility calls."""

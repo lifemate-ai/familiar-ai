@@ -58,7 +58,7 @@ def test_slash_transcribe_prefix_filters() -> None:
 
 
 def test_slash_clear_prefix_filters() -> None:
-    items = _slash_candidates(_state("/c"))
+    items = _slash_candidates(_state("/cl"))
     assert len(items) == 1
     assert items[0].value == "/clear"
 
