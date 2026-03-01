@@ -179,6 +179,14 @@ _T: dict[str, dict[str, str]] = {
         "de": "💬 spricht...",
         "en": "💬 speaking...",
     },
+    "action_remember": {
+        "ja": "💾 記憶してる...",
+        "zh": "💾 记忆中...",
+        "zh-tw": "💾 記憶中...",
+        "fr": "💾 mémorise...",
+        "de": "💾 merkt sich...",
+        "en": "💾 remembering...",
+    },
     "look_left": {
         "ja": "左を向いた",
         "zh": "向左看",
