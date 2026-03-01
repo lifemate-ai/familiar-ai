@@ -40,6 +40,10 @@ def _make_agent():
     agent._memory.format_feelings_for_context = MagicMock(return_value="")
     agent._me_md = ""
 
+    from familiar_agent.exploration import ExplorationTracker
+
+    agent._exploration = ExplorationTracker()
+
     return agent
 
 
