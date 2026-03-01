@@ -61,12 +61,55 @@ CSS = """
 
 _SPINNER_FRAMES = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"]
 
+# CC-style interrupt message constants
+INTERRUPT_MSG = "[Request interrupted by user]"
+INTERRUPT_TOOL_MSG = "[Request interrupted by user for tool use]"
+
 # Slash commands shown in the autocomplete dropdown
 _SLASH_COMMANDS: list[tuple[str, str]] = [
+    ("/btw", "💬  Quick one-shot question (no memory / tools)"),
     ("/transcribe", "🎙  Start / stop voice input (STT)"),
+    ("/cost", "💰  Show token usage and cost for this session"),
     ("/clear", "🗑   Clear conversation history"),
     ("/quit", "✕   Quit"),
 ]
+
+
+def _parse_btw(text: str) -> str:
+    """Extract the question from '/btw <question>'."""
+    after = text[len("/btw") :].strip()
+    return after
+
+
+async def handle_btw_command(question: str, backend) -> str:
+    """Run a single lightweight LLM completion — no tools, no memory.
+
+    Like CC's /btw: a quick side-question that doesn't pollute conversation history.
+    """
+    question = question.strip()
+    if not question:
+        return ""
+    return await backend.complete(question, max_tokens=300)
+
+
+def _format_cost(
+    input_tokens: int,
+    output_tokens: int,
+    *,
+    input_price_per_m: float = 3.0,
+    output_price_per_m: float = 15.0,
+) -> str:
+    """Format token usage and estimated USD cost for display.
+
+    Default prices match Sonnet 4.6 ($/1M tokens).
+    """
+    input_cost = input_tokens / 1_000_000 * input_price_per_m
+    output_cost = output_tokens / 1_000_000 * output_price_per_m
+    total = input_cost + output_cost
+    return (
+        f"📊 Tokens — in: {input_tokens:,}  out: {output_tokens:,}\n"
+        f"💰 Cost   — ${total:.4f} (in ${input_cost:.4f} + out ${output_cost:.4f})"
+    )
 
 
 def _slash_candidates(state: TargetState) -> list[DropdownItem]:
@@ -114,6 +157,8 @@ class FamiliarApp(App):
         Binding("ctrl+c", "quit", _t("quit_label"), show=True),
         Binding("ctrl+l", "clear_history", _t("clear_label"), show=True),
         Binding("ctrl+t", "toggle_listen", "🎙 Voice", show=True),
+        Binding("escape", "cancel_turn", "🛑 Cancel", show=False),
+        Binding("space", "start_ptt", "🎙 PTT", show=False),
     ]
 
     def __init__(self, agent: "EmbodiedAgent", desires: "DesireSystem") -> None:
@@ -129,6 +174,11 @@ class FamiliarApp(App):
         self._log_path = self._open_log_file()
         self._recording = False
         self._stop_recording: asyncio.Event = asyncio.Event()
+        # ESC cancel support
+        self._cancel_event: asyncio.Event = asyncio.Event()
+        self._agent_task: asyncio.Task | None = None
+        # Push-to-Talk state
+        self._ptt_active: bool = False
 
     def _open_log_file(self) -> Path:
         log_dir = Path.home() / ".cache" / "familiar-ai"
@@ -202,6 +252,20 @@ class FamiliarApp(App):
         if text == "/transcribe":
             await self.action_toggle_listen()
             return
+        if text == "/cost":
+            in_tok = getattr(self.agent, "_session_input_tokens", 0)
+            out_tok = getattr(self.agent, "_session_output_tokens", 0)
+            self._log_system(_format_cost(in_tok, out_tok))
+            return
+        if text.startswith("/btw"):
+            question = _parse_btw(text)
+            if not question:
+                self._log_system("Usage: /btw <question>")
+                return
+            answer = await handle_btw_command(question, self.agent.backend)
+            name_tag = f"[bold magenta]{self._agent_name} ▶[/bold magenta]"
+            self._write_log(f"{name_tag} {answer}")
+            return
 
         self._log_user(text)
         self._last_interaction = time.time()
@@ -230,6 +294,7 @@ class FamiliarApp(App):
 
     async def _run_agent(self, user_input: str, inner_voice: str = "") -> None:
         self._agent_running = True
+        self._cancel_event.clear()
         self._current_text_buf = ""
         start_time = time.time()
 
@@ -289,20 +354,34 @@ class FamiliarApp(App):
             text_buf.append(chunk)
             stream.update(f"{name_tag} {''.join(text_buf)}")
 
+        async def _cancel_watcher() -> None:
+            await self._cancel_event.wait()
+            if self._agent_task and not self._agent_task.done():
+                self._agent_task.cancel()
+
+        watcher = asyncio.create_task(_cancel_watcher())
         try:
-            await self.agent.run(
-                user_input,
-                on_action=on_action,
-                on_text=on_text,
-                desires=self.desires,
-                inner_voice=inner_voice,
-                interrupt_queue=self._input_queue,
+            self._agent_task = asyncio.create_task(
+                self.agent.run(
+                    user_input,
+                    on_action=on_action,
+                    on_text=on_text,
+                    desires=self.desires,
+                    inner_voice=inner_voice,
+                    interrupt_queue=self._input_queue,
+                )
             )
+            await self._agent_task
             _flush_stream()
             _log_turn_summary()
+        except asyncio.CancelledError:
+            _flush_stream()
+            self._write_log(f"[dim]{INTERRUPT_TOOL_MSG}[/dim]")
         except Exception as e:
             self._write_log(f"[red]エラー: {e}[/red]")
         finally:
+            watcher.cancel()
+            self._agent_task = None
             _stop_spinner()
             stream.update("")
             self._agent_running = False
@@ -393,6 +472,34 @@ class FamiliarApp(App):
     def action_clear_history(self) -> None:
         self.agent.clear_history()
         self._log_system(_t("history_cleared"))
+
+    def action_cancel_turn(self) -> None:
+        """ESC — cancel the running agent turn."""
+        if not self._agent_running:
+            return
+        self._cancel_event.set()
+        self._log_system(f"[dim]{INTERRUPT_MSG}[/dim]")
+
+    def action_start_ptt(self) -> None:
+        """Space — start Push-to-Talk recording (if STT configured)."""
+        if not self.agent.stt:
+            return
+        if self._recording or self._ptt_active:
+            return
+        self._ptt_active = True
+        self._recording = True
+        self._stop_recording.clear()
+        stream = self.query_one("#stream", Static)
+        stream.add_class("recording")
+        stream.update("🎙 PTT… (release Space to send)")
+        self.run_worker(self._do_record(), exclusive=False)
+
+    def action_stop_ptt(self) -> None:
+        """Space released — stop Push-to-Talk recording."""
+        if not self._ptt_active:
+            return
+        self._ptt_active = False
+        self._stop_recording.set()
 
     async def action_quit(self) -> None:
         await self.agent.close()

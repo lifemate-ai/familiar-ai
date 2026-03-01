@@ -297,6 +297,8 @@ class EmbodiedAgent:
         self.messages: list = []
         self._started_at = time.time()
         self._turn_count = 0
+        self._session_input_tokens: int = 0
+        self._session_output_tokens: int = 0
 
         self._camera: CameraTool | None = None
         self._mobility: MobilityTool | None = None
@@ -614,13 +616,18 @@ class EmbodiedAgent:
 
             result, raw_content = await self.backend.stream_turn(
                 system=self._system_prompt(
-                    feelings_ctx, morning_ctx, inner_voice=inner_voice, plan_ctx=plan_ctx
+                    feelings_ctx,
+                    morning_ctx,
+                    inner_voice=inner_voice,
+                    plan_ctx=plan_ctx,
                 ),
                 messages=self.messages,
                 tools=self._all_tool_defs,
                 max_tokens=self.config.max_tokens,
                 on_text=on_text,
             )
+            self._session_input_tokens += result.input_tokens
+            self._session_output_tokens += result.output_tokens
 
             if result.stop_reason == "end_turn":
                 self.messages.append(self.backend.make_assistant_message(result, raw_content))
