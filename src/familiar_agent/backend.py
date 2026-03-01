@@ -1330,11 +1330,9 @@ def create_backend(
         return KimiBackend(api_key=config.api_key, model=model)
     if config.platform == "glm":
         # Z.AI GLM — OpenAI-compatible, native tool calling
-        # API key: ZAI_API_KEY (falls back to API_KEY)
-        api_key = os.environ.get("ZAI_API_KEY") or config.api_key
         model = config.model or "glm-4.7"
         logger.info("Using GLM backend: %s", model)
-        return GLMBackend(api_key=api_key, model=model)
+        return GLMBackend(api_key=config.api_key, model=model)
     if config.platform == "cli":
         raw_cmd = config.model.strip() if config.model else "claude -p {}"
         cmd = shlex.split(raw_cmd)
