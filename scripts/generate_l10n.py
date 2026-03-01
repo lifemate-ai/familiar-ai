@@ -280,6 +280,10 @@ async def _translate_readme(
     prompt = _README_PROMPT.format(language_name=language_name, readme=readme_en)
     try:
         raw = await _complete(client, api, prompt, 8192)
+        raw = raw.strip()
+        # Strip markdown code fences if present (e.g. ```markdown ... ```)
+        raw = re.sub(r"^```(?:markdown)?\s*\n?", "", raw)
+        raw = re.sub(r"\n?```\s*$", "", raw)
         return raw.strip()
     except Exception as e:
         print(f"  [README ERROR {code}] {e}", file=sys.stderr)
