@@ -312,8 +312,10 @@ class AnthropicBackend:
             # When thinking is enabled, ask the server to strip old ThinkingBlocks from the
             # message history — keeps context clean in long sessions.
             # Source: Claude Code RE (context_management / tengu_marble_anvil pattern).
-            stream_kwargs["context_management"] = {
-                "edits": [{"type": "clear_thinking_20251015", "keep": "all"}]
+            stream_kwargs["extra_body"] = {
+                "context_management": {
+                    "edits": [{"type": "clear_thinking_20251015", "keep": "all"}]
+                }
             }
         if "output_config" in thinking_params:
             stream_kwargs["output_config"] = thinking_params["output_config"]
