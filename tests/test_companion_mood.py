@@ -116,6 +116,10 @@ class TestInferCompanionMood:
         agent._tom_tool = MagicMock(spec=ToMTool)
         agent._coding = MagicMock(spec=CodingTool)
 
+        from familiar_agent.exploration import ExplorationTracker
+
+        agent._exploration = ExplorationTracker()
+
         mock_backend = MagicMock()
         mock_backend.complete = AsyncMock(return_value=complete_return)
         agent.backend = mock_backend
@@ -258,6 +262,10 @@ class TestFrustratedBoostsDesire:
         agent._tom_tool.get_tool_definitions = MagicMock(return_value=[])
         agent._coding = MagicMock(spec=CodingTool)
         agent._coding.get_tool_definitions = MagicMock(return_value=[])
+
+        from familiar_agent.exploration import ExplorationTracker
+
+        agent._exploration = ExplorationTracker()
 
         desires = MagicMock(spec=DesireSystem)
         desires.curiosity_target = None
