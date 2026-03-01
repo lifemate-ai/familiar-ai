@@ -81,7 +81,8 @@ class STTTool:
                 dtype="float32",
             ) as stream:
                 logger.info("STT: recording from local mic at %dHz...", sample_rate)
-                while not stop_event.is_set():
+                start = time.time()
+                while not stop_event.is_set() and time.time() - start < 60:
                     chunk, _ = stream.read(1024)
                     chunks.append(chunk)
                     time.sleep(0.01)  # yield slightly; this is already in a thread
@@ -166,11 +167,13 @@ class STTTool:
             content_type="audio/wav",
         )
         form.add_field("model_id", "scribe_v1")
+        form.add_field("tag_audio_events", "false")
         if self._language:
             form.add_field("language_code", self._language)
 
         try:
-            async with aiohttp.ClientSession() as session:
+            timeout = aiohttp.ClientTimeout(total=60)
+            async with aiohttp.ClientSession(timeout=timeout) as session:
                 async with session.post(_ELEVENLABS_STT_URL, headers=headers, data=form) as resp:
                     if resp.status != 200:
                         body = await resp.text()
