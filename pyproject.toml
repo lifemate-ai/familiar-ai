@@ -1,6 +1,6 @@
 [project]
 name = "familiar-ai"
-version = "0.1.0"
+version = "0.2.0"
 description = "AI that lives alongside you — with eyes, voice, and memory"
 requires-python = ">=3.10"
 dependencies = [
