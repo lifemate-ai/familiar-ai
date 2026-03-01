@@ -132,6 +132,14 @@ class AgentConfig:
     # "max" is Opus 4.6 only. Ignored unless THINKING_MODE=adaptive (or auto on supported models).
     thinking_effort: str = field(default_factory=lambda: os.environ.get("THINKING_EFFORT", "high"))
 
+    # ── Utility backend (optional) ─────────────────────────────────────
+    # Separate backend for non-conversation LLM calls (day summaries, emotion
+    # inference, self-model updates, etc.).  Falls back to the main backend
+    # when not configured.
+    utility_platform: str = field(default_factory=lambda: os.environ.get("UTILITY_PLATFORM", ""))
+    utility_api_key: str = field(default_factory=lambda: os.environ.get("UTILITY_API_KEY", ""))
+    utility_model: str = field(default_factory=lambda: os.environ.get("UTILITY_MODEL", ""))
+
     max_tokens: int = 4096
     camera: CameraConfig = field(default_factory=CameraConfig)
     mobility: MobilityConfig = field(default_factory=MobilityConfig)
