@@ -649,16 +649,29 @@ class EmbodiedAgent:
         self.messages = [summary_marker] + list(recent)
         self._post_compact = True
 
+    @property
+    def is_embedding_ready(self) -> bool:
+        """Return True once the embedding model has finished loading."""
+        return self._memory.is_embedding_ready()
+
     async def close(self) -> None:
-        """Clean up resources (MCP connections, etc.). Call on shutdown."""
+        """Clean up resources. Bounded by timeouts to avoid hanging on exit."""
         if self._mcp:
-            await self._mcp.stop()
+            try:
+                await asyncio.wait_for(self._mcp.stop(), timeout=2.0)
+            except (asyncio.TimeoutError, Exception):
+                pass
+        try:
+            await asyncio.wait_for(asyncio.to_thread(self._memory.close), timeout=1.0)
+        except (asyncio.TimeoutError, Exception):
+            pass
 
     async def run(
         self,
         user_input: str,
         on_action: Callable[[str, dict], None] | None = None,
         on_text: Callable[[str], None] | None = None,
+        on_image: Callable[[str], None] | None = None,
         desires=None,
         inner_voice: str = "",
         interrupt_queue=None,
@@ -856,6 +869,8 @@ class EmbodiedAgent:
                             logger.info("TAPE replan: %s", replan[:80])
 
                     logger.info("Tool result: %s", text[:100])
+                    if image and on_image is not None:
+                        on_image(image)
                     collected.append((text, image))
 
                 # Append assistant + tool results atomically: never leave tool_calls unresolved

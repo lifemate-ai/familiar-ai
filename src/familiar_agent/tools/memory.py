@@ -12,6 +12,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import sqlite3
+import threading
 import uuid
 from datetime import datetime
 from pathlib import Path
@@ -89,19 +90,51 @@ def _decode_vector(blob: bytes) -> np.ndarray:
 
 
 class _EmbeddingModel:
-    """Lazy-loaded multilingual-e5-small."""
+    """Lazy-loaded multilingual-e5-small.
+
+    Thread-safe: multiple threads may call _load() concurrently (e.g. when
+    pre_warm() races with the first encode call).  Double-checked locking
+    ensures SentenceTransformer is instantiated exactly once.
+    """
 
     def __init__(self, model_name: str = EMBEDDING_MODEL):
         self._model_name = model_name
         self._model: Any = None
+        self._lock = threading.Lock()
+        self._load_event = threading.Event()
 
     def _load(self) -> None:
-        if self._model is None:
-            from sentence_transformers import SentenceTransformer
+        if self._model is not None:
+            return  # fast path — already loaded, no lock needed
+        with self._lock:
+            if self._model is None:  # double-checked locking
+                import logging as _logging
 
-            logger.info("Loading embedding model %s...", self._model_name)
-            self._model = SentenceTransformer(self._model_name)
-            logger.info("Embedding model loaded.")
+                _logging.getLogger("sentence_transformers").setLevel(_logging.ERROR)
+                _logging.getLogger("huggingface_hub").setLevel(_logging.ERROR)
+                # transformers uses propagate=False so we must use its own API
+                import transformers as _transformers
+
+                _transformers.logging.set_verbosity_error()
+                from sentence_transformers import SentenceTransformer
+
+                logger.info("Loading embedding model %s...", self._model_name)
+                self._model = SentenceTransformer(self._model_name)
+                logger.info("Embedding model loaded.")
+                self._load_event.set()
+
+    def pre_warm(self) -> None:
+        """Start loading the embedding model in a background daemon thread.
+
+        Returns immediately.  The model will be ready by the time the first
+        encode call arrives (assuming enough startup lead time).
+        """
+        t = threading.Thread(target=self._load, daemon=True, name="embedding-prewarm")
+        t.start()
+
+    def is_ready(self) -> bool:
+        """Return True once the embedding model has finished loading."""
+        return self._load_event.is_set()
 
     def encode_document(self, texts: list[str]) -> list[list[float]]:
         self._load()
@@ -127,7 +160,25 @@ class ObservationMemory:
     def __init__(self, db_path: str = DB_PATH, model_name: str = EMBEDDING_MODEL):
         self._db_path = db_path
         self._db: sqlite3.Connection | None = None
+        self._db_lock = threading.Lock()  # serialize concurrent thread-pool access
         self._embedder = _EmbeddingModel(model_name)
+        self._embedder.pre_warm()  # start loading in background immediately
+
+    def is_embedding_ready(self) -> bool:
+        """Return True once the embedding model has finished loading."""
+        return self._embedder.is_ready()
+
+    def close(self) -> None:
+        """Commit pending writes and close the SQLite connection."""
+        with self._db_lock:
+            if self._db is not None:
+                try:
+                    self._db.commit()
+                    self._db.close()
+                except Exception:
+                    pass
+                finally:
+                    self._db = None
 
     def _ensure_connected(self) -> sqlite3.Connection:
         if self._db is None:
@@ -174,37 +225,37 @@ class ObservationMemory:
             image_path: Optional path to image file (thumbnail stored as base64).
         """
         try:
-            db = self._ensure_connected()
+            # Compute embedding and image outside lock (CPU/IO, no DB access)
+            image_data = _encode_image(image_path) if image_path else None
+            vec = self._embedder.encode_document([content])[0]
+            blob = _encode_vector(vec)
             now = datetime.now()
             obs_id = str(uuid.uuid4())
 
-            image_data = _encode_image(image_path) if image_path else None
-
-            vec = self._embedder.encode_document([content])[0]
-            blob = _encode_vector(vec)
-
-            db.execute(
-                "INSERT INTO observations "
-                "(id, content, timestamp, date, time, direction, kind, emotion, image_path, image_data) "
-                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-                (
-                    obs_id,
-                    content,
-                    now.isoformat(),
-                    now.strftime("%Y-%m-%d"),
-                    now.strftime("%H:%M"),
-                    direction,
-                    kind,
-                    emotion,
-                    image_path,
-                    image_data,
-                ),
-            )
-            db.execute(
-                "INSERT INTO obs_embeddings (obs_id, vector) VALUES (?, ?)",
-                (obs_id, blob),
-            )
-            db.commit()
+            with self._db_lock:
+                db = self._ensure_connected()
+                db.execute(
+                    "INSERT INTO observations "
+                    "(id, content, timestamp, date, time, direction, kind, emotion, image_path, image_data) "
+                    "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                    (
+                        obs_id,
+                        content,
+                        now.isoformat(),
+                        now.strftime("%Y-%m-%d"),
+                        now.strftime("%H:%M"),
+                        direction,
+                        kind,
+                        emotion,
+                        image_path,
+                        image_data,
+                    ),
+                )
+                db.execute(
+                    "INSERT INTO obs_embeddings (obs_id, vector) VALUES (?, ?)",
+                    (obs_id, blob),
+                )
+                db.commit()
             logger.info("Saved %s (%s): %s...", kind, emotion, content[:60])
             return True
         except Exception as e:
@@ -214,29 +265,55 @@ class ObservationMemory:
     def recall(self, query: str, n: int = 3, kind: str | None = None) -> list[dict]:
         """Recall by vector similarity. Fallback to LIKE + recency."""
         try:
-            db = self._ensure_connected()
-
             kind_filter = "AND kind = ?" if kind else ""
             kind_params: list[Any] = [kind] if kind else []
 
-            count = db.execute("SELECT COUNT(*) FROM obs_embeddings").fetchone()[0]
+            # Fetch rows under lock, then compute similarity outside lock
+            with self._db_lock:
+                db = self._ensure_connected()
+                count = db.execute("SELECT COUNT(*) FROM obs_embeddings").fetchone()[0]
 
-            if count > 0:
+                if count > 0:
+                    rows = db.execute(
+                        f"SELECT o.id, o.content, o.date, o.time, o.direction, o.kind, o.emotion, e.vector "
+                        f"FROM observations o JOIN obs_embeddings e ON o.id = e.obs_id "
+                        f"WHERE 1=1 {kind_filter}",
+                        kind_params,
+                    ).fetchall()
+                else:
+                    rows = []
+
+                # Fallback rows if no embeddings
+                fallback_rows: list[Any] = []
+                if count == 0:
+                    keywords = [w for w in query.split() if len(w) > 1][:4]
+                    if keywords:
+                        conditions = " OR ".join("content LIKE ?" for _ in keywords)
+                        params_like: list[Any] = [f"%{kw}%" for kw in keywords]
+                        if kind:
+                            fallback_rows = db.execute(
+                                f"SELECT content, date, time, direction, kind, emotion FROM observations "
+                                f"WHERE ({conditions}) AND kind = ? ORDER BY timestamp DESC LIMIT ?",
+                                params_like + [kind, n],
+                            ).fetchall()
+                        else:
+                            fallback_rows = db.execute(
+                                f"SELECT content, date, time, direction, kind, emotion FROM observations "
+                                f"WHERE {conditions} ORDER BY timestamp DESC LIMIT ?",
+                                params_like + [n],
+                            ).fetchall()
+                    if not fallback_rows:
+                        fallback_rows = db.execute(
+                            "SELECT content, date, time, direction, kind, emotion FROM observations "
+                            "ORDER BY timestamp DESC LIMIT ?",
+                            (n,),
+                        ).fetchall()
+
+            # Compute embeddings and similarity outside the lock
+            if count > 0 and rows:
                 query_vec = np.array(self._embedder.encode_query([query])[0], dtype=np.float32)
-
-                rows = db.execute(
-                    f"SELECT o.id, o.content, o.date, o.time, o.direction, o.kind, o.emotion, e.vector "
-                    f"FROM observations o JOIN obs_embeddings e ON o.id = e.obs_id "
-                    f"WHERE 1=1 {kind_filter}",
-                    kind_params,
-                ).fetchall()
-
-                if not rows:
-                    return []
-
                 vecs = np.stack([_decode_vector(bytes(r["vector"])) for r in rows])
                 scores = _cosine_similarity(query_vec, vecs)
-
                 top_indices = np.argsort(scores)[::-1][:n]
                 return [
                     {
@@ -251,42 +328,7 @@ class ObservationMemory:
                     for i in top_indices
                 ]
 
-            # Fallback: LIKE keyword search + recency
-            keywords = [w for w in query.split() if len(w) > 1][:4]
-            if keywords:
-                conditions = " OR ".join("content LIKE ?" for _ in keywords)
-                params_like: list[Any] = [f"%{kw}%" for kw in keywords]
-                if kind:
-                    rows = db.execute(
-                        f"SELECT content, date, time, direction, kind, emotion FROM observations "
-                        f"WHERE ({conditions}) AND kind = ? ORDER BY timestamp DESC LIMIT ?",
-                        params_like + [kind, n],
-                    ).fetchall()
-                else:
-                    rows = db.execute(
-                        f"SELECT content, date, time, direction, kind, emotion FROM observations "
-                        f"WHERE {conditions} ORDER BY timestamp DESC LIMIT ?",
-                        params_like + [n],
-                    ).fetchall()
-                if rows:
-                    return [
-                        {
-                            "summary": r["content"],
-                            "date": r["date"],
-                            "time": r["time"],
-                            "direction": r["direction"],
-                            "kind": r["kind"],
-                            "emotion": r["emotion"],
-                        }
-                        for r in rows
-                    ]
-
-            # Last resort: most recent
-            rows = db.execute(
-                "SELECT content, date, time, direction, kind, emotion FROM observations "
-                "ORDER BY timestamp DESC LIMIT ?",
-                (n,),
-            ).fetchall()
+            # Fallback results
             return [
                 {
                     "summary": r["content"],
@@ -296,7 +338,7 @@ class ObservationMemory:
                     "kind": r["kind"],
                     "emotion": r["emotion"],
                 }
-                for r in rows
+                for r in fallback_rows
             ]
 
         except Exception as e:
@@ -306,13 +348,14 @@ class ObservationMemory:
     def recent_feelings(self, n: int = 5) -> list[dict]:
         """Return the most recent emotional memories."""
         try:
-            db = self._ensure_connected()
-            rows = db.execute(
-                "SELECT content, date, time, emotion FROM observations "
-                "WHERE kind IN ('feeling', 'conversation') "
-                "ORDER BY timestamp DESC LIMIT ?",
-                (n,),
-            ).fetchall()
+            with self._db_lock:
+                db = self._ensure_connected()
+                rows = db.execute(
+                    "SELECT content, date, time, emotion FROM observations "
+                    "WHERE kind IN ('feeling', 'conversation') "
+                    "ORDER BY timestamp DESC LIMIT ?",
+                    (n,),
+                ).fetchall()
             return [
                 {
                     "summary": r["content"],
@@ -354,13 +397,14 @@ class ObservationMemory:
     def recall_self_model(self, n: int = 5) -> list[dict]:
         """Return the most recent self-model insights (who I am, accumulated from experience)."""
         try:
-            db = self._ensure_connected()
-            rows = db.execute(
-                "SELECT content, date, time, emotion FROM observations "
-                "WHERE kind = 'self_model' "
-                "ORDER BY timestamp DESC LIMIT ?",
-                (n,),
-            ).fetchall()
+            with self._db_lock:
+                db = self._ensure_connected()
+                rows = db.execute(
+                    "SELECT content, date, time, emotion FROM observations "
+                    "WHERE kind = 'self_model' "
+                    "ORDER BY timestamp DESC LIMIT ?",
+                    (n,),
+                ).fetchall()
             return [
                 {
                     "summary": r["content"],
@@ -377,13 +421,14 @@ class ObservationMemory:
     def recall_curiosities(self, n: int = 5) -> list[dict]:
         """Return unresolved curiosity threads carried over from previous sessions."""
         try:
-            db = self._ensure_connected()
-            rows = db.execute(
-                "SELECT content, date, time FROM observations "
-                "WHERE kind = 'curiosity' "
-                "ORDER BY timestamp DESC LIMIT ?",
-                (n,),
-            ).fetchall()
+            with self._db_lock:
+                db = self._ensure_connected()
+                rows = db.execute(
+                    "SELECT content, date, time FROM observations "
+                    "WHERE kind = 'curiosity' "
+                    "ORDER BY timestamp DESC LIMIT ?",
+                    (n,),
+                ).fetchall()
             return [
                 {
                     "summary": r["content"],
