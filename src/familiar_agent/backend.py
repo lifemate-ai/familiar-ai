@@ -830,7 +830,7 @@ class GLMBackend:
 
         PLATFORM=glm
         API_KEY=<your-key>              # from bigmodel.cn / api.z.ai
-        MODEL=glm-4.7                   # default
+        MODEL=glm-4.6v                  # default (vision-enabled)
     """
 
     _BASE_URL = "https://api.z.ai/api/paas/v4"
@@ -1340,7 +1340,7 @@ def create_backend(
         return KimiBackend(api_key=config.api_key, model=model)
     if config.platform == "glm":
         # Z.AI GLM — OpenAI-compatible, native tool calling
-        model = config.model or "glm-4.7"
+        model = config.model or "glm-4.6v"
         logger.info("Using GLM backend: %s", model)
         return GLMBackend(api_key=config.api_key, model=model)
     if config.platform == "cli":
