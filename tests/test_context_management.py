@@ -73,8 +73,9 @@ class TestContextManagementAdded:
             on_text=None,
         )
 
-        assert "context_management" in captured
-        assert captured["context_management"] == {
+        assert "extra_body" in captured
+        assert "context_management" in captured["extra_body"]
+        assert captured["extra_body"]["context_management"] == {
             "edits": [{"type": "clear_thinking_20251015", "keep": "all"}]
         }
 
@@ -98,8 +99,12 @@ class TestContextManagementAdded:
             on_text=None,
         )
 
-        assert "context_management" in captured
-        assert captured["context_management"]["edits"][0]["type"] == "clear_thinking_20251015"
+        assert "extra_body" in captured
+        assert "context_management" in captured["extra_body"]
+        assert (
+            captured["extra_body"]["context_management"]["edits"][0]["type"]
+            == "clear_thinking_20251015"
+        )
 
     @pytest.mark.asyncio
     async def test_disabled_mode_no_context_management(self):
@@ -121,7 +126,7 @@ class TestContextManagementAdded:
             on_text=None,
         )
 
-        assert "context_management" not in captured
+        assert "context_management" not in captured.get("extra_body", {})
 
     @pytest.mark.asyncio
     async def test_auto_mode_sonnet4_adds_context_management(self):
@@ -143,7 +148,8 @@ class TestContextManagementAdded:
             on_text=None,
         )
 
-        assert "context_management" in captured
+        assert "extra_body" in captured
+        assert "context_management" in captured["extra_body"]
 
     @pytest.mark.asyncio
     async def test_auto_mode_haiku_no_context_management(self):
@@ -165,7 +171,7 @@ class TestContextManagementAdded:
             on_text=None,
         )
 
-        assert "context_management" not in captured
+        assert "context_management" not in captured.get("extra_body", {})
 
     @pytest.mark.asyncio
     async def test_context_management_edit_keep_all(self):
@@ -187,5 +193,5 @@ class TestContextManagementAdded:
             on_text=None,
         )
 
-        edit = captured["context_management"]["edits"][0]
+        edit = captured["extra_body"]["context_management"]["edits"][0]
         assert edit["keep"] == "all"
