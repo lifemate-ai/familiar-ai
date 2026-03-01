@@ -157,10 +157,11 @@ ACTION_ICONS = {
     "walk": "🚶",
     "say": "🗣️",
     "remember": "💾",
+    "recall": "💭",
 }
 
 # Tool names that have dedicated i18n labels (key: "action_{name}")
-_I18N_ACTION_NAMES = {"see", "look", "walk", "say", "remember"}
+_I18N_ACTION_NAMES = {"see", "look", "walk", "say", "remember", "recall"}
 
 
 def _format_action(name: str, tool_input: dict) -> str:
