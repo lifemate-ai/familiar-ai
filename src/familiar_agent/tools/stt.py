@@ -24,7 +24,6 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
-_SAMPLE_RATE = 16000  # Hz — ElevenLabs Scribe works well at 16kHz
 _CHANNELS = 1  # mono
 _ELEVENLABS_STT_URL = "https://api.elevenlabs.io/v1/speech-to-text"
 
@@ -72,12 +71,16 @@ class STTTool:
         chunks: list = []
 
         try:
+            # Use the device's native sample rate to avoid paInvalidSampleRate errors
+            device_info = sd.query_devices(kind="input")
+            sample_rate = int(device_info["default_samplerate"])
+
             with sd.InputStream(
-                samplerate=_SAMPLE_RATE,
+                samplerate=sample_rate,
                 channels=_CHANNELS,
                 dtype="float32",
             ) as stream:
-                logger.info("STT: recording from local mic...")
+                logger.info("STT: recording from local mic at %dHz...", sample_rate)
                 while not stop_event.is_set():
                     chunk, _ = stream.read(1024)
                     chunks.append(chunk)
@@ -91,7 +94,7 @@ class STTTool:
 
         audio = np.concatenate(chunks, axis=0)
         buf = io.BytesIO()
-        sf.write(buf, audio, _SAMPLE_RATE, format="WAV", subtype="PCM_16")
+        sf.write(buf, audio, sample_rate, format="WAV", subtype="PCM_16")
         return buf.getvalue()
 
     async def _record_rtsp(self, stop_event: asyncio.Event) -> bytes:
@@ -109,7 +112,7 @@ class STTTool:
             "-i",
             self._rtsp_url,
             "-ar",
-            str(_SAMPLE_RATE),
+            "16000",
             "-ac",
             str(_CHANNELS),
             "-y",
