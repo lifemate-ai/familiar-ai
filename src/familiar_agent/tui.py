@@ -233,8 +233,8 @@ class FamiliarApp(App):
             _signal.signal(_signal.SIGINT, lambda *_: os._exit(0))
             _signal.signal(_signal.SIGQUIT, lambda *_: os._exit(0))  # Ctrl+\
             _signal.signal(_signal.SIGTSTP, _signal.SIG_IGN)  # Ctrl+Z (ignore suspend)
-        except (OSError, ValueError):
-            pass  # Not in main thread (shouldn't happen, but guard anyway)
+        except (OSError, ValueError, AttributeError):
+            pass  # Not in main thread or signal not available on this OS (e.g. Windows)
 
         self.query_one("#input-bar", Input).focus()
         # Show startup banner
