@@ -102,6 +102,10 @@ class TestInferCompanionMood:
         agent._tts = None
         agent._stt = None
         agent._mcp = None
+        agent._session_input_tokens = 0
+        agent._session_output_tokens = 0
+        agent._last_context_tokens = 0
+        agent._post_compact = False
 
         from familiar_agent.tools.memory import ObservationMemory, MemoryTool
         from familiar_agent.tools.tom import ToMTool
@@ -239,6 +243,10 @@ class TestFrustratedBoostsDesire:
         agent._tts = None
         agent._stt = None
         agent._mcp = None
+        agent._session_input_tokens = 0
+        agent._session_output_tokens = 0
+        agent._last_context_tokens = 0
+        agent._post_compact = False
 
         from familiar_agent.tools.memory import MemoryTool
         from familiar_agent.tools.tom import ToMTool
