@@ -154,7 +154,7 @@ ACTION_ICONS = {
     "look_down": "🔽",
     "look_around": "🔄",
     "walk": "🚶",
-    "say": "💬",
+    "say": "🗣️",
     "remember": "💾",
 }
 
