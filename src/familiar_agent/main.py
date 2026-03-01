@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import os
 import sys
 import time
 from pathlib import Path
@@ -13,9 +14,12 @@ from .config import AgentConfig
 from .desires import DesireSystem
 from .realtime_stt_session import create_realtime_stt_session
 from ._i18n import BANNER, _t
-
-IDLE_CHECK_INTERVAL = 10.0  # seconds between desire checks when idle
-DESIRE_COOLDOWN = 90.0  # seconds after last user interaction before desires can fire
+from ._ui_helpers import (
+    DESIRE_COOLDOWN,
+    IDLE_CHECK_INTERVAL,
+    desire_tick_prompt,
+    format_action as _format_action,
+)
 
 
 def setup_logging(debug: bool = False) -> None:
@@ -37,39 +41,28 @@ def setup_logging(debug: bool = False) -> None:
     logging.getLogger("anthropic").setLevel(logging.WARNING)
     logging.getLogger("openai").setLevel(logging.WARNING)
     logging.getLogger("google.genai").setLevel(logging.WARNING)
+    logging.getLogger("sentence_transformers").setLevel(logging.ERROR)
+    logging.getLogger("huggingface_hub").setLevel(logging.ERROR)
+    try:
+        import transformers as _transformers
+
+        _transformers.logging.set_verbosity_error()
+    except ImportError:
+        pass
 
     logging.info("Logging initialized. Level: %s, File: %s", logging.getLevelName(level), log_file)
 
 
-def _format_action(name: str, tool_input: dict) -> str:
-    """Format a tool call for display."""
-    if name == "look":
-        direction = tool_input.get("direction", "")
-        key = {
-            "left": "look_left",
-            "right": "look_right",
-            "up": "look_up",
-            "down": "look_down",
-        }.get(direction, "look_around")
-        return f"↩️  {_t(key)}..."
-    if name == "walk":
-        direction = tool_input.get("direction", "?")
-        duration = tool_input.get("duration")
-        if duration:
-            return f"🚶 {_t('walk_timed', direction=direction, duration=str(duration))}"
-        return f"🚶 {_t('walk_dir', direction=direction)}"
-    if name == "say":
-        text = tool_input.get("text", "")[:40]
-        return f"💬 「{text}...」"
-    action_key = f"action_{name}"
-    try:
-        return _t(action_key)
-    except KeyError:
-        return f"⚙  {name}..."
-
-
 async def repl(agent: EmbodiedAgent, desires: DesireSystem, debug: bool = False) -> None:
     print(BANNER)
+
+    if not agent.is_embedding_ready:
+        start_init = time.time()
+        while not agent.is_embedding_ready:
+            elapsed = int(time.time() - start_init)
+            print(f"\r  {_t('initializing')}... ({elapsed}s)", end="", flush=True)
+            await asyncio.sleep(0.5)
+        print(f"\r  {_t('initializing_done')} ({int(time.time() - start_init)}s)          ")
 
     loop = asyncio.get_event_loop()
 
@@ -145,36 +138,24 @@ async def repl(agent: EmbodiedAgent, desires: DesireSystem, debug: bool = False)
                 if time.time() - last_interaction_time < DESIRE_COOLDOWN:
                     continue  # Still in post-conversation cooldown
 
-                prompt = desires.dominant_as_prompt()
-                if prompt:
-                    dominant = desires.get_dominant()
-                    if dominant is None:
-                        continue
-                    desire_name, _ = dominant
-                    murmur = {
-                        "look_around": _t("desire_look_around"),
-                        "explore": _t("desire_explore"),
-                        "greet_companion": _t("desire_greet_companion"),
-                        "rest": _t("desire_rest"),
-                    }.get(desire_name, _t("desire_default"))
-                    print(f"\n{murmur}")
+                # Peek at any pending input before firing desire
+                pending_items: list[str] = []
+                if not input_queue.empty():
+                    item = input_queue.get_nowait()
+                    if item is None:
+                        break
+                    if item:
+                        pending_items.append(item)
 
-                    # Check once more — user may have typed while we were deciding.
-                    # If they did, weave their words INTO the desire prompt so the agent
-                    # knows who they're talking to (e.g. "コウタだよ" while being watched).
-                    pending_note: str | None = None
-                    if not input_queue.empty():
-                        item = input_queue.get_nowait()
-                        if item is None:
-                            break
-                        if item:
-                            pending_note = item
+                tick = desire_tick_prompt(desires, pending_items)
+                if tick:
+                    desire_name, prompt, _pending = tick
+                    try:
+                        murmur = _t(f"desire_{desire_name}")
+                    except KeyError:
+                        murmur = _t("desire_default")
+                    print(f"\n{murmur}\n")
 
-                    if pending_note:
-                        # Fold the user's note into the desire prompt instead of a separate turn
-                        prompt = f"（{pending_note}と言ってた）{prompt}"
-
-                    print()
                     await agent.run(
                         "",
                         on_action=on_action,
@@ -185,6 +166,13 @@ async def repl(agent: EmbodiedAgent, desires: DesireSystem, debug: bool = False)
                     )
                     desires.satisfy(desire_name)
                     desires.curiosity_target = None
+                elif pending_items:
+                    # Had pending input but no desire — process it as user message
+                    for msg in pending_items:
+                        await _handle_user(
+                            msg, agent, desires, on_action, on_text, debug, input_queue
+                        )
+                    continue
 
                     # Flush any input that arrived during agent.run()
                     buffered: list[str] = []
@@ -210,9 +198,18 @@ async def repl(agent: EmbodiedAgent, desires: DesireSystem, debug: bool = False)
     finally:
         stdin_task.cancel()
         if stt_session:
-            await stt_session.stop()
-        await agent.close()
+            try:
+                await asyncio.wait_for(stt_session.stop(), timeout=3.0)
+            except (asyncio.TimeoutError, Exception):
+                pass
+        try:
+            await asyncio.wait_for(agent.close(), timeout=5.0)
+        except (asyncio.TimeoutError, Exception):
+            pass
         print(f"\n{_t('repl_goodbye')}")
+        # sys.stdin.readline runs in a non-daemon thread that cannot be
+        # cancelled. Force exit so it doesn't prevent process termination.
+        os._exit(0)
 
 
 async def _handle_user(
@@ -320,6 +317,11 @@ def _mcp_command(args: list[str]) -> None:
 
 
 def main() -> None:
+    # Suppress noisy HuggingFace Hub / transformers output before any imports
+    os.environ.setdefault("TRANSFORMERS_VERBOSITY", "error")
+    os.environ.setdefault("HF_HUB_DISABLE_PROGRESS_BARS", "1")
+    os.environ.setdefault("TOKENIZERS_PARALLELISM", "false")
+
     # Use uvloop for faster I/O throughput when available (Linux / WSL2)
     try:
         import uvloop
@@ -333,7 +335,8 @@ def main() -> None:
         return
 
     debug = "--debug" in sys.argv
-    use_tui = "--no-tui" not in sys.argv
+    use_gui = "--gui" in sys.argv
+    use_tui = "--no-tui" not in sys.argv and not use_gui
 
     setup_logging(debug=debug)
 
@@ -346,7 +349,11 @@ def main() -> None:
     agent = EmbodiedAgent(config)
     desires = DesireSystem()
 
-    if use_tui:
+    if use_gui:
+        from .gui import run_gui
+
+        run_gui(agent, desires)
+    elif use_tui:
         from .tui import FamiliarApp
 
         app = FamiliarApp(agent, desires)

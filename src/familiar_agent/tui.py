@@ -4,7 +4,9 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import os
 import re
+import sys
 import time
 from datetime import datetime
 from pathlib import Path
@@ -17,6 +19,13 @@ from textual.widgets import Footer, Input, RichLog, Static
 from textual_autocomplete import AutoComplete, DropdownItem, TargetState
 
 from ._i18n import _make_banner, _t
+from ._ui_helpers import (
+    ACTION_ICONS,
+    DESIRE_COOLDOWN as _DESIRE_COOLDOWN,
+    IDLE_CHECK_INTERVAL as _IDLE_CHECK_INTERVAL,
+    desire_tick_prompt,
+    format_action as _format_action,
+)
 from .realtime_stt_session import create_realtime_stt_session, RealtimeSttSession
 
 if TYPE_CHECKING:
@@ -25,8 +34,8 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
-IDLE_CHECK_INTERVAL = 10.0
-DESIRE_COOLDOWN = 90.0
+IDLE_CHECK_INTERVAL = _IDLE_CHECK_INTERVAL
+DESIRE_COOLDOWN = _DESIRE_COOLDOWN
 
 _RICH_TAG_RE = re.compile(r"\[/?[^\[\]]*\]")
 
@@ -147,42 +156,10 @@ def _slash_candidates(state: TargetState) -> list[DropdownItem]:
     return [DropdownItem(main=cmd) for cmd, _desc in _SLASH_COMMANDS if cmd.startswith(text)]
 
 
-ACTION_ICONS = {
-    "see": "👀",
-    "look_left": "◀️",
-    "look_right": "▶️",
-    "look_up": "🔼",
-    "look_down": "🔽",
-    "look_around": "🔄",
-    "walk": "🚶",
-    "say": "🗣️",
-    "remember": "💾",
-    "recall": "💭",
-}
-
-# Tool names that have dedicated i18n labels (key: "action_{name}")
-_I18N_ACTION_NAMES = {"see", "look", "walk", "say", "remember", "recall"}
-
-
-def _format_action(name: str, tool_input: dict) -> str:
-    icon = ACTION_ICONS.get(name, "⚙")
-    if name in ("look_left", "look_right", "look_up", "look_down"):
-        deg = tool_input.get("degrees", "")
-        return f"{icon} {name}({deg}°)"
-    if name == "say":
-        text = tool_input.get("text", "")[:50]
-        return f"{icon} 「{text}…」"
-    if name == "walk":
-        return f"{icon} {tool_input.get('direction', '')} {tool_input.get('duration', '')}s"
-    if name in _I18N_ACTION_NAMES:
-        return _t(f"action_{name}")
-    return f"{icon} {name}"
-
-
 class FamiliarApp(App):
     CSS = CSS
     BINDINGS = [
-        Binding("ctrl+c", "quit", _t("quit_label"), show=True),
+        Binding("ctrl+c", "quit", _t("quit_label"), show=True, priority=True),
         Binding("ctrl+l", "clear_history", _t("clear_label"), show=True),
         Binding("ctrl+t", "toggle_listen", "🎙 Voice", show=True),
         Binding("escape", "cancel_turn", "🛑 Cancel", show=False),
@@ -236,6 +213,29 @@ class FamiliarApp(App):
         yield Footer()
 
     def on_mount(self) -> None:
+        import signal as _signal
+
+        # Re-enable ISIG so Ctrl+C generates SIGINT, independent of Textual's event loop.
+        # Textual disables ISIG in raw mode, making Ctrl+C send 0x03 through Textual's key
+        # dispatch. If the event loop or key dispatch is stuck, Ctrl+C is silently dropped.
+        # Re-enabling ISIG ensures Ctrl+C → SIGINT → os._exit(0) unconditionally.
+        try:
+            import termios
+
+            fd = sys.stdin.fileno()
+            attrs = termios.tcgetattr(fd)
+            attrs[3] |= termios.ISIG  # re-enable signal generation (VINTR/VQUIT/VSUSP)
+            termios.tcsetattr(fd, termios.TCSANOW, attrs)
+        except Exception:
+            pass
+
+        try:
+            _signal.signal(_signal.SIGINT, lambda *_: os._exit(0))
+            _signal.signal(_signal.SIGQUIT, lambda *_: os._exit(0))  # Ctrl+\
+            _signal.signal(_signal.SIGTSTP, _signal.SIG_IGN)  # Ctrl+Z (ignore suspend)
+        except (OSError, ValueError):
+            pass  # Not in main thread (shouldn't happen, but guard anyway)
+
         self.query_one("#input-bar", Input).focus()
         # Show startup banner
         log = self.query_one("#log", RichLog)
@@ -247,6 +247,24 @@ class FamiliarApp(App):
         # Start realtime STT if configured
         if self._realtime_stt:
             self.run_worker(self._start_realtime_stt(), exclusive=False)
+        # Show initializing status until embedding model is ready
+        if not self.agent.is_embedding_ready:
+            asyncio.create_task(self._embedding_ready_watcher())
+
+    async def _embedding_ready_watcher(self) -> None:
+        """Show initializing status in #stream until embedding model is ready."""
+        if self.agent.is_embedding_ready:
+            return
+        start = time.time()
+        stream: Static = self.query_one("#stream", Static)
+        while not self.agent.is_embedding_ready:
+            elapsed = int(time.time() - start)
+            stream.update(f"[dim]{_t('initializing')}... ({elapsed}s)[/dim]")
+            await asyncio.sleep(0.5)
+        elapsed = int(time.time() - start)
+        stream.update(f"[dim]{_t('initializing_done')} ({elapsed}s)[/dim]")
+        await asyncio.sleep(2.0)
+        stream.update("")
 
     # ── logging helpers ────────────────────────────────────────────
 
@@ -447,34 +465,26 @@ class FamiliarApp(App):
         if time.time() - self._last_interaction < DESIRE_COOLDOWN:
             return
 
-        prompt = self.desires.dominant_as_prompt()
-        if not prompt:
-            return
-
-        dominant = self.desires.get_dominant()
-        if dominant is None:
-            return
-        desire_name, _ = dominant
-        murmur = {
-            "look_around": _t("desire_look_around"),
-            "explore": _t("desire_explore"),
-            "greet_companion": _t("desire_greet_companion"),
-            "rest": _t("desire_rest"),
-        }.get(desire_name, _t("desire_default"))
-
-        self._log_system(murmur)
-
-        # Check for pending user note
-        pending: str | None = None
+        # Peek at pending input without removing it from the queue
+        pending_items: list[str] = []
         if not self._input_queue.empty():
             item = self._input_queue.get_nowait()
             if item:
-                pending = item
-                prompt = f"（{pending}と言ってた）{prompt}"
+                pending_items.append(item)
 
-        self._last_interaction = (
-            time.time()
-        )  # reset cooldown so desire doesn't fire again immediately
+        tick = desire_tick_prompt(self.desires, pending_items)
+        if tick is None:
+            return
+
+        desire_name, prompt, _pending = tick
+
+        try:
+            murmur = _t(f"desire_{desire_name}")
+        except KeyError:
+            murmur = _t("desire_default")
+        self._log_system(murmur)
+
+        self._last_interaction = time.time()  # reset cooldown
         await self._run_agent("", inner_voice=prompt)
         self.desires.satisfy(desire_name)
         self.desires.curiosity_target = None
@@ -598,7 +608,28 @@ class FamiliarApp(App):
         self._stop_recording.set()
 
     async def action_quit(self) -> None:
-        if self._realtime_stt:
-            await self._realtime_stt.stop()
-        await self.agent.close()
-        self.exit()
+        try:
+            self._input_queue.put_nowait(None)
+            # Cancel the running agent task first (mirrors action_cancel_turn logic).
+            # Without this, agent.run() keeps holding _db_lock while agent.close() waits.
+            self._cancel_event.set()
+            if self._agent_task and not self._agent_task.done():
+                self._agent_task.cancel()
+                try:
+                    await asyncio.wait_for(asyncio.shield(self._agent_task), timeout=1.0)
+                except (asyncio.TimeoutError, asyncio.CancelledError, Exception):
+                    pass
+            if self._realtime_stt:
+                try:
+                    await asyncio.wait_for(self._realtime_stt.stop(), timeout=2.0)
+                except (asyncio.TimeoutError, Exception):
+                    pass
+            try:
+                await asyncio.wait_for(self.agent.close(), timeout=2.0)
+            except (asyncio.TimeoutError, Exception):
+                pass
+            self.exit()
+        except BaseException:
+            pass
+        finally:
+            os._exit(0)
