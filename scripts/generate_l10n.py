@@ -119,6 +119,17 @@ English strings to translate:
 {json_keys}
 """
 
+_ADD_KEY_PROMPT = """\
+Translate this single UI string from English to {language_name} (language code: {code}).
+
+Rules:
+- Return ONLY the translated string — no JSON wrapper, no quotes, no explanation
+- Preserve emoji characters exactly
+- Use casual, friendly tone (present progressive if it's a status label)
+
+English string: {english_value}
+"""
+
 _README_PROMPT = """\
 Translate this README.md from English to {language_name}.
 
@@ -312,6 +323,81 @@ async def _process_lang(
         return code, i18n_result, readme_result
 
 
+async def _translate_single_key(
+    client: object,
+    api: str,
+    key: str,
+    english_value: str,
+    code: str,
+    language_name: str,
+) -> tuple[str, str] | None:
+    """Translate a single i18n key for one language. Returns (code, translated_value)."""
+    prompt = _ADD_KEY_PROMPT.format(
+        language_name=language_name, code=code, english_value=english_value
+    )
+    try:
+        raw = await _complete(client, api, prompt, 128)
+        return code, raw.strip().strip('"').strip("'")
+    except Exception as e:
+        print(f"  [ADD_KEY ERROR {code}] {e}", file=sys.stderr)
+        return None
+
+
+async def main_async_add_key(
+    key: str,
+    english_value: str,
+    api: str,
+) -> None:
+    """Add a single new key to _i18n.py across all 74 languages."""
+    # All languages: existing 6 + 68 new (en is the source, skip it)
+    existing_non_en = [
+        ("ja", "Japanese"),
+        ("zh", "Chinese (Simplified)"),
+        ("zh-tw", "Chinese (Traditional)"),
+        ("fr", "French"),
+        ("de", "German"),
+    ]
+    all_langs = existing_non_en + NEW_LANGS
+
+    if api == "openai":
+        from openai import AsyncOpenAI  # noqa: PLC0415
+
+        client: object = AsyncOpenAI(api_key=os.environ["OPENAI_API_KEY"])
+    elif api == "gemini":
+        from openai import AsyncOpenAI  # noqa: PLC0415
+
+        client = AsyncOpenAI(
+            api_key=os.environ["GEMINI_API_KEY"],
+            base_url="https://generativelanguage.googleapis.com/v1beta/openai/",
+        )
+    else:
+        import anthropic as _ant  # noqa: PLC0415
+
+        client = _ant.AsyncAnthropic(api_key=os.environ["ANTHROPIC_API_KEY"])
+
+    sem = asyncio.Semaphore(5)
+    print(f"Translating key '{key}' = '{english_value}' into {len(all_langs)} languages...")
+
+    async def _bounded(code: str, lang_name: str) -> tuple[str, str] | None:
+        async with sem:
+            return await _translate_single_key(client, api, key, english_value, code, lang_name)
+
+    results = await asyncio.gather(*[_bounded(c, ln) for c, ln in all_langs])
+
+    current = _read_current_translations()
+    translations: dict[str, str] = {"en": english_value}
+    for r in results:
+        if r:
+            translations[r[0]] = r[1]
+
+    current[key] = translations
+    _write_i18n_file(current)
+    print(f"  ✓ Added '{key}' with {len(translations)} language entries to _i18n.py")
+
+    if hasattr(client, "close"):
+        await client.close()
+
+
 async def main_async(
     target_langs: list[tuple[str, str]],
     only_readme: bool,
@@ -399,7 +485,7 @@ def main() -> None:
     parser.add_argument(
         "--lang",
         nargs="+",
-        help="Language codes to process (default: all 44 new languages)",
+        help="Language codes to process (default: all 68 new languages)",
     )
     parser.add_argument(
         "--only-readme",
@@ -412,12 +498,26 @@ def main() -> None:
         help="Only update _i18n.py, skip README generation",
     )
     parser.add_argument(
+        "--add-key",
+        metavar="KEY=english_value",
+        help="Add a single new i18n key across all 74 languages (e.g. --add-key action_recall='💭 recalling...')",
+    )
+    parser.add_argument(
         "--api",
         choices=["anthropic", "openai", "gemini"],
         default="anthropic",
         help="LLM backend to use for translation (default: anthropic)",
     )
     args = parser.parse_args()
+
+    if args.add_key:
+        if "=" not in args.add_key:
+            print("Error: --add-key requires KEY=value format", file=sys.stderr)
+            sys.exit(1)
+        key, english_value = args.add_key.split("=", 1)
+        asyncio.run(main_async_add_key(key.strip(), english_value.strip(), args.api))
+        print("Done!")
+        return
 
     lang_map = dict(NEW_LANGS)
     if args.lang:
