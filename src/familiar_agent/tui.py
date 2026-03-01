@@ -17,6 +17,7 @@ from textual.widgets import Footer, Input, RichLog, Static
 from textual_autocomplete import AutoComplete, DropdownItem, TargetState
 
 from ._i18n import _make_banner, _t
+from .realtime_stt_session import create_realtime_stt_session, RealtimeSttSession
 
 if TYPE_CHECKING:
     from .agent import EmbodiedAgent
@@ -206,6 +207,8 @@ class FamiliarApp(App):
         self._agent_task: asyncio.Task | None = None
         # Push-to-Talk state
         self._ptt_active: bool = False
+        # Realtime STT (hands-free, always-on)
+        self._realtime_stt: RealtimeSttSession | None = create_realtime_stt_session()
 
     def _open_log_file(self) -> Path:
         log_dir = Path.home() / ".cache" / "familiar-ai"
@@ -240,6 +243,9 @@ class FamiliarApp(App):
         self._log_system(_t("startup", log_path=str(self._log_path)))
         self.set_interval(IDLE_CHECK_INTERVAL, self._desire_tick)
         self.run_worker(self._process_queue(), exclusive=False)
+        # Start realtime STT if configured
+        if self._realtime_stt:
+            self.run_worker(self._start_realtime_stt(), exclusive=False)
 
     # ── logging helpers ────────────────────────────────────────────
 
@@ -472,6 +478,41 @@ class FamiliarApp(App):
         self.desires.satisfy(desire_name)
         self.desires.curiosity_target = None
 
+    # ── Realtime STT (hands-free, always-on) ────────────────────
+
+    async def _start_realtime_stt(self) -> None:
+        """Initialize and run realtime STT in the background."""
+        assert self._realtime_stt is not None
+        try:
+            loop = asyncio.get_event_loop()
+
+            def _on_partial(text: str) -> None:
+                try:
+                    stream = self.query_one("#stream", Static)
+                    stream.update(f"[dim]\U0001f3a4 {text}[/dim]")
+                except Exception:
+                    pass
+
+            def _on_committed(text: str) -> None:
+                try:
+                    self._write_log(
+                        f"[bold cyan]\U0001f3a4 {self._companion_name}[/bold cyan] {text}"
+                    )
+                    self._last_interaction = time.time()
+                    stream = self.query_one("#stream", Static)
+                    stream.update("")
+                except Exception:
+                    pass
+
+            self._realtime_stt.on_partial = _on_partial
+            self._realtime_stt.on_committed = _on_committed
+            await self._realtime_stt.start(loop, self._input_queue)
+            self._log_system("\U0001f3a4 Realtime STT ON (ElevenLabs)")
+        except Exception as e:
+            logger.warning("Realtime STT init failed: %s", e)
+            self._log_system(f"\u26a0 Realtime STT init failed: {e}")
+            self._realtime_stt = None
+
     async def action_toggle_listen(self) -> None:
         """Toggle microphone recording for voice input."""
         if not self.agent.stt:
@@ -556,5 +597,7 @@ class FamiliarApp(App):
         self._stop_recording.set()
 
     async def action_quit(self) -> None:
+        if self._realtime_stt:
+            await self._realtime_stt.stop()
         await self.agent.close()
         self.exit()

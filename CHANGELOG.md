@@ -6,7 +6,14 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 This project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
+
 ### Added
+- Realtime STT via ElevenLabs Scribe v2 Realtime WebSocket API
+  - Always-on, hands-free voice input with VAD auto-commit
+  - Works in both REPL (`--no-tui`) and TUI modes
+  - Filler word filtering and deduplication
+  - Opt-in via `REALTIME_STT=true` in `.env`
+  - Coexists with existing batch STT (Ctrl+T / Space PTT)
 - Support for full RTSP URLs in `CAMERA_HOST` (enables ATOMCam and other non-standard RTSP paths)
 
 ## [0.1.0] - 2026-02-22
