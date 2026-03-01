@@ -620,7 +620,7 @@ dependencies = [
     { name = "textual" },
     { name = "textual-autocomplete" },
     { name = "tinytuya" },
-    { name = "uvloop" },
+    { name = "uvloop", marker = "sys_platform != 'win32'" },
 ]
 
 [package.dev-dependencies]
@@ -649,7 +649,7 @@ requires-dist = [
     { name = "textual", specifier = ">=8.0.0" },
     { name = "textual-autocomplete", specifier = ">=4.0.6" },
     { name = "tinytuya", specifier = ">=1.15.0" },
-    { name = "uvloop", specifier = ">=0.22.1" },
+    { name = "uvloop", marker = "sys_platform != 'win32'", specifier = ">=0.22.1" },
 ]
 
 [package.metadata.requires-dev]
