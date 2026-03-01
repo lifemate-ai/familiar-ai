@@ -154,8 +154,12 @@ ACTION_ICONS = {
     "look_down": "🔽",
     "look_around": "🔄",
     "walk": "🚶",
-    "say": "💬",
+    "say": "🗣️",
+    "remember": "💾",
 }
+
+# Tool names that have dedicated i18n labels (key: "action_{name}")
+_I18N_ACTION_NAMES = {"see", "look", "walk", "say", "remember"}
 
 
 def _format_action(name: str, tool_input: dict) -> str:
@@ -168,6 +172,8 @@ def _format_action(name: str, tool_input: dict) -> str:
         return f"{icon} 「{text}…」"
     if name == "walk":
         return f"{icon} {tool_input.get('direction', '')} {tool_input.get('duration', '')}s"
+    if name in _I18N_ACTION_NAMES:
+        return _t(f"action_{name}")
     return f"{icon} {name}"
 
 
