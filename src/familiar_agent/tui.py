@@ -483,7 +483,7 @@ class FamiliarApp(App):
             self._recording = True
             self._stop_recording.clear()
             stream.add_class("recording")
-            stream.update("🎙 Recording… (Ctrl+M to stop)")
+            stream.update("🎙 Recording… (Ctrl+T to stop)")
             self.run_worker(self._do_record(), exclusive=False)
         else:
             self._stop_recording.set()
