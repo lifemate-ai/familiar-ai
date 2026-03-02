@@ -1,4 +1,4 @@
-"""PySide6 GUI for familiar-ai — Midnight Iris theme.
+"""PySide6 GUI for familiar-ai — Airy Pastel theme.
 
 Provides a native desktop window with:
 - Scrollable conversation log with styled HTML-like bubbles (ChatLog)
@@ -25,7 +25,8 @@ from typing import TYPE_CHECKING
 
 import qasync
 from PySide6.QtCore import QEasingCurve, QPropertyAnimation, QSize, Qt, QTimer
-from PySide6.QtGui import QImage, QPixmap
+from PySide6.QtGui import QIcon, QImage, QPixmap
+from PySide6.QtSvg import QSvgRenderer
 from PySide6.QtWidgets import (
     QApplication,
     QComboBox,
@@ -54,6 +55,7 @@ from ._ui_helpers import (
     desire_tick_prompt,
     format_action,
 )
+from .realtime_stt_session import RealtimeSttSession, create_realtime_stt_session
 
 if TYPE_CHECKING:
     from familiar_agent.agent import EmbodiedAgent
@@ -63,32 +65,68 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 # ---------------------------------------------------------------------------
+# Gear icon (SVG)
+# ---------------------------------------------------------------------------
+
+_GEAR_SVG = (
+    '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none"'
+    ' stroke="{color}" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">'
+    '<circle cx="12" cy="12" r="3"/>'
+    '<path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06'
+    "a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09"
+    "A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83"
+    "l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09"
+    "A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83"
+    "l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09"
+    "a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83"
+    "l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09"
+    'a1.65 1.65 0 0 0-1.51 1z"/>'
+    "</svg>"
+)
+
+
+def _gear_icon(color: str, size: int = 24) -> QIcon:
+    """Render the gear SVG at *size*px with the given stroke *color*."""
+    from PySide6.QtCore import QByteArray  # noqa: PLC0415
+    from PySide6.QtGui import QPainter  # noqa: PLC0415
+
+    svg_bytes = QByteArray(_GEAR_SVG.format(color=color).encode())
+    renderer = QSvgRenderer(svg_bytes)
+    img = QImage(size, size, QImage.Format.Format_ARGB32_Premultiplied)
+    img.fill(0)
+    painter = QPainter(img)
+    renderer.render(painter)
+    painter.end()
+    return QIcon(QPixmap.fromImage(img))
+
+
+# ---------------------------------------------------------------------------
 # Color palette
 # ---------------------------------------------------------------------------
 
-_BG_BASE = "#0e0f16"
-_BG_SURFACE = "#13141e"
-_BG_CARD = "#1a1b2a"
-_BG_ELEVATED = "#1a1b2a"
-_BG_HOVER = "rgba(255,255,255,0.06)"
-_ACCENT = "#818cf8"
-_ACCENT_DEEP = "#4f46e5"
-_ACCENT_DIM = "#3730a3"
-_TEXT_PRIMARY = "#eaebf8"
-_TEXT_SECONDARY = "#6b6f8f"
-_BORDER = "rgba(255,255,255,0.07)"
-_BUBBLE_USER_BG = "rgba(129,140,248,0.18)"
-_BUBBLE_AGENT_BG = "rgba(255,255,255,0.04)"
-_BUBBLE_TOOL_BG = "rgba(0,0,0,0.30)"
+_BG_BASE = "#F8F7FF"
+_BG_SURFACE = "#F0EEFA"
+_BG_CARD = "#EDE9FE"
+_BG_ELEVATED = "#E8E3FC"
+_BG_HOVER = "rgba(124,58,237,0.06)"
+_ACCENT = "#7C3AED"
+_ACCENT_DEEP = "#6D28D9"
+_ACCENT_DIM = "#8B5CF6"
+_TEXT_PRIMARY = "#1E1B3A"
+_TEXT_SECONDARY = "#7C7A94"
+_BORDER = "rgba(124,58,237,0.12)"
+_BUBBLE_USER_BG = "rgba(124,58,237,0.10)"
+_BUBBLE_AGENT_BG = "#FFFFFF"
+_BUBBLE_TOOL_BG = "rgba(124,58,237,0.05)"
 
 _DESIRE_COLORS: dict[str, str] = {
-    "look_around": "#4cc9f0",
-    "look_outside": "#4361ee",
-    "miss_companion": "#f72585",
-    "browse_curiosity": "#7209b7",
-    "explore": "#3a0ca3",
-    "greet_companion": "#f4a261",
-    "worry_companion": "#e63946",
+    "look_around": "#0891B2",
+    "look_outside": "#2563EB",
+    "miss_companion": "#DB2777",
+    "browse_curiosity": "#7C3AED",
+    "explore": "#4F46E5",
+    "greet_companion": "#D97706",
+    "worry_companion": "#DC2626",
 }
 
 # Flush streamed text at most this often (ms)
@@ -106,51 +144,54 @@ if not _ENV_PATH.exists():
 
 
 def _apply_global_style(app: QApplication) -> None:
-    """Apply the Midnight Iris stylesheet to the whole application."""
+    """Apply the Airy Pastel stylesheet to the whole application."""
     app.setStyleSheet(
         f"""
         QMainWindow {{ background: {_BG_BASE}; }}
         QDialog {{ background: {_BG_SURFACE}; }}
 
-        /* Scrollbar — ultra thin, ghost */
+        /* Scrollbar — slim pastel */
         QScrollBar:vertical {{
             background: transparent; width: 6px; border-radius: 3px;
         }}
         QScrollBar::handle:vertical {{
-            background: rgba(255,255,255,0.12); border-radius: 3px; min-height: 24px;
+            background: rgba(124,58,237,0.15); border-radius: 3px; min-height: 24px;
         }}
-        QScrollBar::handle:vertical:hover {{ background: rgba(129,140,248,0.35); }}
+        QScrollBar::handle:vertical:hover {{ background: rgba(124,58,237,0.30); }}
         QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical {{ height: 0; }}
 
-        /* Inputs — translucent glass */
+        /* Inputs */
         QLineEdit {{
-            background: rgba(255,255,255,0.05); color: {_TEXT_PRIMARY};
-            border: 1px solid {_BORDER}; border-radius: 10px; padding: 7px 12px;
+            background: #FFFFFF; color: {_TEXT_PRIMARY};
+            border: 1px solid {_BORDER}; border-radius: 10px; padding: 8px 14px;
+            font-size: 14px;
             selection-background-color: {_ACCENT_DIM};
         }}
-        QLineEdit:focus {{ border-color: {_ACCENT}; }}
+        QLineEdit:focus {{ border-color: {_ACCENT}; background: #FDFCFF; }}
 
-        /* Buttons — ghost surface */
+        /* Buttons */
         QPushButton {{
-            background: rgba(255,255,255,0.05); color: {_TEXT_PRIMARY};
-            border: 1px solid {_BORDER}; border-radius: 8px; padding: 6px 16px;
+            background: {_BG_CARD}; color: {_TEXT_PRIMARY};
+            border: 1px solid {_BORDER}; border-radius: 8px; padding: 7px 18px;
+            font-size: 14px;
         }}
-        QPushButton:hover {{ background: rgba(255,255,255,0.09); border-color: rgba(129,140,248,0.3); }}
-        QPushButton:pressed {{ background: rgba(255,255,255,0.03); }}
+        QPushButton:hover {{ background: {_BG_ELEVATED}; border-color: {_ACCENT_DIM}; }}
+        QPushButton:pressed {{ background: {_BG_SURFACE}; }}
         QPushButton:disabled {{
-            background: rgba(255,255,255,0.02); color: {_TEXT_SECONDARY};
-            border-color: rgba(255,255,255,0.04);
+            background: {_BG_SURFACE}; color: {_TEXT_SECONDARY};
+            border-color: rgba(124,58,237,0.06);
         }}
 
-        /* ComboBox — glass */
+        /* ComboBox */
         QComboBox {{
-            background: rgba(255,255,255,0.05); color: {_TEXT_PRIMARY};
-            border: 1px solid {_BORDER}; border-radius: 10px; padding: 7px 12px;
+            background: #FFFFFF; color: {_TEXT_PRIMARY};
+            border: 1px solid {_BORDER}; border-radius: 10px; padding: 8px 14px;
+            font-size: 14px;
         }}
         QComboBox::drop-down {{ border: none; padding-right: 8px; }}
         QComboBox QAbstractItemView {{
-            background: {_BG_CARD}; color: {_TEXT_PRIMARY};
-            selection-background-color: rgba(129,140,248,0.25);
+            background: #FFFFFF; color: {_TEXT_PRIMARY};
+            selection-background-color: rgba(124,58,237,0.12);
             border: 1px solid {_BORDER};
         }}
 
@@ -161,14 +202,16 @@ def _apply_global_style(app: QApplication) -> None:
         }}
         QTabBar::tab {{
             background: transparent; color: {_TEXT_SECONDARY};
-            padding: 6px 20px; border-radius: 20px; margin-right: 4px;
+            padding: 7px 22px; border-radius: 20px; margin-right: 4px;
+            font-size: 13px;
         }}
         QTabBar::tab:selected {{
             background: qlineargradient(x1:0,y1:0,x2:1,y2:1,
-                stop:0 {_ACCENT_DEEP}, stop:1 {_ACCENT});
+                stop:0 {_ACCENT_DEEP}, stop:1 {_ACCENT_DIM});
             color: white;
         }}
-        QTabBar::tab:hover:!selected {{ background: rgba(255,255,255,0.06); color: {_TEXT_PRIMARY}; }}
+        QTabBar::tab:hover:!selected {{ background: {_BG_CARD}; color: {_TEXT_PRIMARY}; }}
+
         """
     )
 
@@ -186,8 +229,15 @@ class ChatLog(QScrollArea):
         append_action(name: str, tool_input: dict) -> None
     """
 
-    def __init__(self, parent: QWidget | None = None) -> None:
+    def __init__(
+        self,
+        parent: QWidget | None = None,
+        agent_name: str = "Agent",
+        companion_name: str = "You",
+    ) -> None:
         super().__init__(parent)
+        self._agent_display = agent_name
+        self._companion_display = companion_name
         self.setWidgetResizable(True)
         self.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
         self.setStyleSheet(f"QScrollArea {{ background: {_BG_BASE}; border: none; }}")
@@ -215,7 +265,7 @@ class ChatLog(QScrollArea):
         if text.startswith("[You]"):
             self._add_bubble(
                 text[5:].strip(),
-                prefix="You",
+                prefix=self._companion_display,
                 prefix_color=_TEXT_SECONDARY,
                 bg=_BUBBLE_USER_BG,
                 ml=60,
@@ -224,7 +274,7 @@ class ChatLog(QScrollArea):
         elif text.startswith("[Agent]"):
             self._add_bubble(
                 text[7:].strip(),
-                prefix="Agent",
+                prefix=self._agent_display,
                 prefix_color=_ACCENT,
                 bg=_BUBBLE_AGENT_BG,
                 ml=4,
@@ -234,8 +284,8 @@ class ChatLog(QScrollArea):
         elif text.startswith("[error]"):
             self._add_bubble(
                 f"⚠ {text[7:].strip()}",
-                bg="#2a1520",
-                text_color="#e63946",
+                bg="#FEF2F2",
+                text_color="#DC2626",
                 ml=20,
                 mr=20,
                 small=True,
@@ -269,12 +319,12 @@ class ChatLog(QScrollArea):
         accent_left: bool = False,
     ) -> None:
         escaped = _html.escape(text).replace("\n", "<br>")
-        fs = "11px" if small else "13px"
+        fs = "13px" if small else "15px"
         ff = "'Courier New', monospace" if monospace else "system-ui, -apple-system, sans-serif"
 
         if prefix:
             inner_html = (
-                f'<span style="color:{prefix_color};font-size:10px;font-weight:600;'
+                f'<span style="color:{prefix_color};font-size:12px;font-weight:600;'
                 f'letter-spacing:0.04em;text-transform:uppercase;">'
                 f"{_html.escape(prefix)}</span><br>"
                 f'<span style="color:{text_color};font-size:{fs};font-family:{ff};">'
@@ -339,10 +389,10 @@ class StreamLabel(QWidget):
         self._label.setWordWrap(True)
         self._label.setAlignment(Qt.AlignmentFlag.AlignTop | Qt.AlignmentFlag.AlignLeft)
         self._label.setStyleSheet(
-            f"background: rgba(255,255,255,0.03); color: {_TEXT_PRIMARY};"
-            f" padding: 10px 16px; border-radius: 14px;"
+            f"background: #FFFFFF; color: {_TEXT_PRIMARY};"
+            f" padding: 12px 18px; border-radius: 14px;"
             f" border: 1px solid {_BORDER}; border-left: 3px solid {_ACCENT};"
-            f" font-family: system-ui, -apple-system, sans-serif; font-size: 13px;"
+            f" font-family: system-ui, -apple-system, sans-serif; font-size: 15px;"
         )
 
         layout = QVBoxLayout(self)
@@ -406,6 +456,7 @@ class CameraView(QLabel):
         self.setStyleSheet(
             f"background: {_BG_CARD}; border-radius: 18px;"
             f" border: 1px solid {_BORDER}; color: {_TEXT_SECONDARY};"
+            f" font-size: 14px;"
         )
         self.setText("No camera image yet")
         self.setWordWrap(True)
@@ -450,14 +501,14 @@ class DesireBar(QWidget):
         display_name = name.replace("_", " ").title()
         name_lbl = QLabel(display_name)
         name_lbl.setStyleSheet(
-            f"color: {color}; font-size: 10px; font-weight: 600; background: transparent;"
+            f"color: {color}; font-size: 12px; font-weight: 600; background: transparent;"
             f" letter-spacing: 0.03em;"
         )
         header.addWidget(name_lbl)
         header.addStretch()
         self._pct_label = QLabel("0%")
         self._pct_label.setStyleSheet(
-            f"color: {_TEXT_SECONDARY}; font-size: 10px; background: transparent;"
+            f"color: {_TEXT_SECONDARY}; font-size: 11px; background: transparent;"
         )
         header.addWidget(self._pct_label)
         vbox.addLayout(header)
@@ -469,10 +520,10 @@ class DesireBar(QWidget):
         self._bar.setTextVisible(False)
         self._bar.setFixedHeight(6)
         self._bar.setStyleSheet(
-            f"QProgressBar {{ background: rgba(255,255,255,0.06); border-radius: 3px; border: none; }}"
+            f"QProgressBar {{ background: rgba(124,58,237,0.08); border-radius: 3px; border: none; }}"
             f"QProgressBar::chunk {{"
             f" background: qlineargradient(x1:0,y1:0,x2:1,y2:0,"
-            f" stop:0 rgba(0,0,0,0), stop:0.3 {color}55, stop:1 {color});"
+            f" stop:0 rgba(0,0,0,0), stop:0.3 {color}66, stop:1 {color});"
             f" border-radius: 3px;"
             f"}}"
         )
@@ -511,7 +562,7 @@ class DesirePanel(QWidget):
 
         title = QLabel("✦ DESIRES")
         title.setStyleSheet(
-            f"color: {_TEXT_SECONDARY}; font-size: 10px; font-weight: 600;"
+            f"color: {_TEXT_SECONDARY}; font-size: 12px; font-weight: 600;"
             f" background: transparent; letter-spacing: 0.1em;"
         )
         layout.addWidget(title)
@@ -566,7 +617,7 @@ class SettingsDialog(QDialog):
 
         # ── Tab 1: Agent ──────────────────────────────────────────
         agent_tab = QWidget()
-        agent_tab.setStyleSheet("background: transparent;")
+        agent_tab.setStyleSheet("background: transparent; font-size: 14px;")
         af = QFormLayout(agent_tab)
         af.setSpacing(10)
 
@@ -589,7 +640,7 @@ class SettingsDialog(QDialog):
 
         # ── Tab 2: Voice ──────────────────────────────────────────
         voice_tab = QWidget()
-        voice_tab.setStyleSheet("background: transparent;")
+        voice_tab.setStyleSheet("background: transparent; font-size: 14px;")
         vf = QFormLayout(voice_tab)
         vf.setSpacing(10)
 
@@ -610,7 +661,7 @@ class SettingsDialog(QDialog):
 
         # ── Tab 3: Camera ─────────────────────────────────────────
         cam_tab = QWidget()
-        cam_tab.setStyleSheet("background: transparent;")
+        cam_tab.setStyleSheet("background: transparent; font-size: 14px;")
         cf = QFormLayout(cam_tab)
         cf.setSpacing(10)
 
@@ -629,7 +680,7 @@ class SettingsDialog(QDialog):
 
         # ── Tab 4: Advanced ───────────────────────────────────────
         adv_tab = QWidget()
-        adv_tab.setStyleSheet("background: transparent;")
+        adv_tab.setStyleSheet("background: transparent; font-size: 14px;")
         advf = QFormLayout(adv_tab)
         advf.setSpacing(10)
 
@@ -723,6 +774,7 @@ class FamiliarWindow(QMainWindow):
         self._desires = desires
         self._input_queue: asyncio.Queue[str | None] = asyncio.Queue()
         self._agent_running = False
+        self._realtime_stt: RealtimeSttSession | None = create_realtime_stt_session()
 
         self.setWindowTitle("familiar-ai")
         self.resize(1020, 720)
@@ -732,6 +784,8 @@ class FamiliarWindow(QMainWindow):
         asyncio.ensure_future(self._process_queue())
         if not self._agent.is_embedding_ready:
             asyncio.ensure_future(self._show_init_status())
+        if self._realtime_stt:
+            asyncio.ensure_future(self._start_realtime_stt())
 
     # ------------------------------------------------------------------
     # UI construction
@@ -755,7 +809,7 @@ class FamiliarWindow(QMainWindow):
         # Header bar
         header = QWidget()
         header.setStyleSheet(
-            f"background: rgba(255,255,255,0.04); border-radius: 14px; border: 1px solid {_BORDER};"
+            f"background: #FFFFFF; border-radius: 14px; border: 1px solid {_BORDER};"
         )
         header_layout = QHBoxLayout(header)
         header_layout.setContentsMargins(16, 10, 10, 10)
@@ -763,26 +817,30 @@ class FamiliarWindow(QMainWindow):
 
         title_lbl = QLabel("✦ familiar-ai")
         title_lbl.setStyleSheet(
-            f"color: {_ACCENT}; font-size: 15px; font-weight: 700; background: transparent;"
+            f"color: {_ACCENT}; font-size: 18px; font-weight: 700; background: transparent;"
             f" letter-spacing: -0.02em;"
         )
         header_layout.addWidget(title_lbl)
         header_layout.addStretch()
 
-        settings_btn = QPushButton("⚙")
-        settings_btn.setFixedSize(32, 32)
+        settings_btn = QPushButton()
+        settings_btn.setFixedSize(36, 36)
+        settings_btn.setIcon(_gear_icon(_TEXT_SECONDARY, 20))
+        settings_btn.setIconSize(QSize(20, 20))
         settings_btn.setStyleSheet(
-            f"QPushButton {{ background: rgba(255,255,255,0.06); border-radius: 16px;"
-            f" border: 1px solid {_BORDER};"
-            f" font-size: 14px; color: {_TEXT_SECONDARY}; }}"
-            f"QPushButton:hover {{ background: rgba(255,255,255,0.10); color: {_TEXT_PRIMARY}; }}"
+            f"QPushButton {{ background: {_BG_CARD}; border-radius: 18px;"
+            f" border: 1px solid {_BORDER}; }}"
+            f"QPushButton:hover {{ background: {_BG_ELEVATED}; }}"
         )
         settings_btn.clicked.connect(self._open_settings)
         header_layout.addWidget(settings_btn)
         left_layout.addWidget(header)
 
         # Chat log
-        self._log = ChatLog()
+        self._log = ChatLog(
+            agent_name=self._agent.config.agent_name,
+            companion_name=self._agent.config.companion_name,
+        )
         left_layout.addWidget(self._log, stretch=5)
 
         # Stream label
@@ -799,13 +857,13 @@ class FamiliarWindow(QMainWindow):
         self._input.setObjectName("msgInput")
         self._input.setStyleSheet(
             f"QLineEdit#msgInput {{"
-            f" border-radius: 999px; padding: 10px 20px;"
-            f" background: rgba(255,255,255,0.05); border: 1px solid {_BORDER};"
-            f" color: {_TEXT_PRIMARY}; font-size: 13px;"
+            f" border-radius: 999px; padding: 12px 22px;"
+            f" background: #FFFFFF; border: 1px solid {_BORDER};"
+            f" color: {_TEXT_PRIMARY}; font-size: 15px;"
             f" font-family: system-ui, -apple-system, sans-serif;"
             f"}}"
             f"QLineEdit#msgInput:focus {{"
-            f" border-color: {_ACCENT}; background: rgba(129,140,248,0.07);"
+            f" border-color: {_ACCENT}; background: #FDFCFF;"
             f"}}"
         )
         self._input.returnPressed.connect(self._on_send)
@@ -817,16 +875,16 @@ class FamiliarWindow(QMainWindow):
         self._send_btn.setStyleSheet(
             f"QPushButton#sendBtn {{"
             f" background: qlineargradient(x1:0,y1:0,x2:1,y2:1,"
-            f" stop:0 {_ACCENT_DEEP}, stop:1 {_ACCENT});"
+            f" stop:0 {_ACCENT_DEEP}, stop:1 {_ACCENT_DIM});"
             f" border-radius: 22px; border: none;"
-            f" font-size: 18px; color: white;"
+            f" font-size: 20px; color: white;"
             f"}}"
             f"QPushButton#sendBtn:hover {{"
             f" background: qlineargradient(x1:0,y1:0,x2:1,y2:1,"
-            f" stop:0 #5b52f5, stop:1 #9ba6fb);"
+            f" stop:0 #5B21B6, stop:1 #A78BFA);"
             f"}}"
             f"QPushButton#sendBtn:disabled {{"
-            f" background: rgba(255,255,255,0.06); color: {_TEXT_SECONDARY};"
+            f" background: {_BG_CARD}; color: {_TEXT_SECONDARY};"
             f"}}"
         )
         self._send_btn.clicked.connect(self._on_send)
@@ -846,7 +904,7 @@ class FamiliarWindow(QMainWindow):
 
         desire_card = QWidget()
         desire_card.setStyleSheet(
-            f"background: rgba(255,255,255,0.03); border-radius: 18px; border: 1px solid {_BORDER};"
+            f"background: #FFFFFF; border-radius: 18px; border: 1px solid {_BORDER};"
         )
         desire_card_vbox = QVBoxLayout(desire_card)
         desire_card_vbox.setContentsMargins(0, 0, 0, 0)
@@ -858,7 +916,7 @@ class FamiliarWindow(QMainWindow):
         # Splitter
         splitter = QSplitter(Qt.Orientation.Horizontal)
         splitter.setChildrenCollapsible(False)
-        splitter.setStyleSheet(f"QSplitter::handle {{ background: {_BORDER}; width: 1px; }}")
+        splitter.setStyleSheet(f"QSplitter::handle {{ background: {_BG_ELEVATED}; width: 1px; }}")
         splitter.addWidget(left)
         splitter.addWidget(right)
         splitter.setStretchFactor(0, 3)
@@ -971,10 +1029,37 @@ class FamiliarWindow(QMainWindow):
         self.setWindowTitle("familiar-ai")
 
     # ------------------------------------------------------------------
+    # Realtime STT
+    # ------------------------------------------------------------------
+
+    async def _start_realtime_stt(self) -> None:
+        """Initialize and run realtime STT in the background."""
+        assert self._realtime_stt is not None
+        try:
+            loop = asyncio.get_running_loop()
+
+            def _on_partial(text: str) -> None:
+                self._stream._label.setText(f"\U0001f3a4 {text}")
+
+            def _on_committed(text: str) -> None:
+                self._log.append_line(f"[You] \U0001f3a4 {text}")
+
+            self._realtime_stt.on_partial = _on_partial
+            self._realtime_stt.on_committed = _on_committed
+            await self._realtime_stt.start(loop, self._input_queue)
+            self._log.append_line("\U0001f3a4 Realtime STT ON (ElevenLabs)")
+        except Exception as e:
+            logger.warning("Realtime STT init failed: %s", e)
+            self._log.append_line(f"[error] Realtime STT init failed: {e}")
+            self._realtime_stt = None
+
+    # ------------------------------------------------------------------
     # Cleanup
     # ------------------------------------------------------------------
 
     def closeEvent(self, event) -> None:  # type: ignore[override]
+        if self._realtime_stt:
+            asyncio.ensure_future(self._realtime_stt.stop())
         asyncio.ensure_future(self._agent.close())
         self._input_queue.put_nowait(None)
         event.accept()
