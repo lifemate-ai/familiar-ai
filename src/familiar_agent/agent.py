@@ -575,8 +575,9 @@ class EmbodiedAgent:
             len(day_summaries),
         )
 
-        # Generate day summaries for past dates that don't have one yet
-        await self._backfill_day_summaries()
+        # Generate day summaries for past dates that don't have one yet.
+        # Run in background so it never delays the first-turn greeting response.
+        asyncio.ensure_future(self._backfill_day_summaries())
 
         # Re-fetch if backfill created new summaries
         if not day_summaries:
@@ -608,7 +609,14 @@ class EmbodiedAgent:
 
         Skips today (summary is generated at shutdown). Only processes
         the most recent 5 days to keep startup time reasonable.
+
+        Skipped when no separate utility backend is configured: the main
+        conversation backend may not handle bulk observations well (e.g.
+        Kimi K2.5 input-size limits), and we don't want to stall startup.
         """
+        if self._utility_backend is self.backend:
+            logger.debug("Backfill skipped: no separate utility backend configured")
+            return
         try:
             today = datetime.now().strftime("%Y-%m-%d")
             all_dates = await asyncio.to_thread(self._memory.get_dates_with_observations, 7)
@@ -768,14 +776,14 @@ class EmbodiedAgent:
     async def close(self) -> None:
         """Clean up resources. Bounded by timeouts to avoid hanging on exit."""
         # Generate (or refresh) today's day summary before shutting down.
-        # Today's summary is always regenerated because new observations may
-        # have been added since the last shutdown.
-        try:
-            today = datetime.now().strftime("%Y-%m-%d")
-            await asyncio.to_thread(self._memory.delete_day_summaries_for_date, today)
-            await self._generate_day_summary(today)
-        except Exception as e:
-            logger.warning("Failed to generate today's day summary on shutdown: %s", e)
+        # Skipped when no separate utility backend is configured.
+        if self._utility_backend is not self.backend:
+            try:
+                today = datetime.now().strftime("%Y-%m-%d")
+                await asyncio.to_thread(self._memory.delete_day_summaries_for_date, today)
+                await self._generate_day_summary(today)
+            except Exception as e:
+                logger.warning("Failed to generate today's day summary on shutdown: %s", e)
         if self._mcp:
             try:
                 await asyncio.wait_for(self._mcp.stop(), timeout=2.0)
