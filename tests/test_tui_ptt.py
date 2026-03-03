@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 from unittest.mock import MagicMock, patch
 
 
@@ -66,7 +67,12 @@ class TestSpaceKeyBinding:
         app._log_system = MagicMock()
         app._recording = False
         app._ptt_active = False
-        app.run_worker = MagicMock()
+
+        def _consume_worker(coro, **_kwargs):
+            if asyncio.iscoroutine(coro):
+                coro.close()
+
+        app.run_worker = MagicMock(side_effect=_consume_worker)
         app.query_one = MagicMock(return_value=MagicMock())
 
         # action_start_ptt should set _ptt_active
