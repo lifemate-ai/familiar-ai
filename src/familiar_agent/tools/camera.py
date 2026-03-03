@@ -106,7 +106,7 @@ class CameraTool:
             if self.preview:
                 cv2.imshow("Familiar-AI Camera Preview", frame)
                 # waitKey is required for imshow to actually render
-                if cv2.waitKey(1) & 0xFF == ord('q'):
+                if cv2.waitKey(1) & 0xFF == ord("q"):
                     self.preview = False
                     cv2.destroyAllWindows()
 
@@ -210,10 +210,12 @@ class CameraTool:
             elif direction == "down":
                 tilt_delta = degrees / 90.0
 
-            await self._ptz.RelativeMove({
-                "ProfileToken": self._profile_token,
-                "Translation": {"PanTilt": {"x": pan_delta, "y": tilt_delta}},
-            })
+            await self._ptz.RelativeMove(
+                {
+                    "ProfileToken": self._profile_token,
+                    "Translation": {"PanTilt": {"x": pan_delta, "y": tilt_delta}},
+                }
+            )
             await asyncio.sleep(0.4)
             return f"Looked {direction} by ~{degrees} degrees."
         except Exception as e:
