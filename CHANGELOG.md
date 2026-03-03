@@ -24,6 +24,10 @@ This project adheres to [Semantic Versioning](https://semver.org/).
   - `scripts/familiar_testflight_entry.py` as a PyInstaller-friendly GUI entrypoint
   - `scripts/build_testflight_windows.py` to package onefile/onedir testflight zips with external `.env`
   - `scripts/release_testflight_windows.py` to run env preparation + build in one command
+- Root build wrappers for easier invocation:
+  - `build.sh`
+  - `build.bat`
+  - `build-testflight.bat`
 - `docs/testflight.md` with practical distribution guidance (portable onefile/onedir `.exe` flows)
 - Owl-style app icon assets for Windows packaging/runtime (`assets/app.ico`, `assets/app.bmp`)
 

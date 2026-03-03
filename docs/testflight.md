@@ -27,8 +27,14 @@ Optional icon asset:
 Build package zip in one command:
 
 ```bash
-uv run python scripts/release_testflight_windows.py --mode onefile --name familiar-testflight
+./build.sh
 ```
+
+```bat
+build.bat
+```
+
+`build-testflight.bat` でも同じ動作です。
 
 Outputs:
 - `.release/familiar-testflight/` (ready-to-send folder)
@@ -41,7 +47,11 @@ What this one command does:
 If you want faster startup instead of single-file convenience:
 
 ```bash
-uv run python scripts/release_testflight_windows.py --mode onedir --name familiar-testflight
+./build.sh --mode onedir --name familiar-testflight
+```
+
+```bat
+build.bat --mode onedir --name familiar-testflight
 ```
 
 If you want to run each step manually:
