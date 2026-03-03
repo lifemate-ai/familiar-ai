@@ -22,7 +22,10 @@ This project adheres to [Semantic Versioning](https://semver.org/).
 - Testflight helper scripts:
   - `scripts/prepare_testflight_env.py` to generate distributable `.env` with embedded API key from local environment
   - `scripts/familiar_testflight_entry.py` as a PyInstaller-friendly GUI entrypoint
-- `docs/testflight.md` with practical distribution guidance (portable one-folder `.exe` flow)
+  - `scripts/build_testflight_windows.py` to package onefile/onedir testflight zips with external `.env`
+  - `scripts/release_testflight_windows.py` to run env preparation + build in one command
+- `docs/testflight.md` with practical distribution guidance (portable onefile/onedir `.exe` flows)
+- Owl-style app icon assets for Windows packaging/runtime (`assets/app.ico`, `assets/app.bmp`)
 
 ### Changed
 - GUI settings dialog now keeps JP labels fully visible (including short labels like `名`), refreshed the app to a bright, soft, rounded light theme, split first-turn startup status from "thinking", and increased GUI font sizing for readability.

@@ -7,39 +7,49 @@ Ship a tester-friendly build where:
 - Mobility/vacuum controls are disabled.
 
 ## Recommended for Tonight
-Use a **portable one-folder `.exe` zip** instead of a full installer.
+Use a **portable onefile `.exe` zip** (single executable + external `.env`).
 
 Reasons:
-- Faster iteration (rebuild + re-send in minutes).
-- Easier rollback for a small trusted cohort.
-- Fewer installer-specific failure points.
+- Easiest handoff for non-technical testers.
+- No installer friction/UAC surprises.
+- Keeps only settings (`.env`) editable outside the executable.
 
-## Prepare Testflight `.env` (with current API key)
+Note:
+- Onefile extraction can make cold startup slower than onedir. For two testers this is usually acceptable.
+
+## Build (Windows)
+
+Optional icon asset:
+- `assets/app.ico` (already prepared)
+- `assets/app.bmp` (preview/reference)
+- Override icon path at runtime with env var: `FAMILIAR_APP_ICON=app.ico`
+
+Build package zip in one command:
+
+```bash
+uv run python scripts/release_testflight_windows.py --mode onefile --name familiar-testflight
+```
+
+Outputs:
+- `.release/familiar-testflight/` (ready-to-send folder)
+- `.release/familiar-testflight.zip` (send this file)
+
+What this one command does:
+1. Generates `.testflight/.env` from your local `.env` / env vars (API key embedded).
+2. Builds Windows package with PyInstaller.
+
+If you want faster startup instead of single-file convenience:
+
+```bash
+uv run python scripts/release_testflight_windows.py --mode onedir --name familiar-testflight
+```
+
+If you want to run each step manually:
 
 ```bash
 uv run python scripts/prepare_testflight_env.py --output .testflight/.env
+uv run python scripts/build_testflight_windows.py --mode onefile --name familiar-testflight
 ```
-
-This writes:
-- `TESTFLIGHT_MODE=true`
-- `MOBILITY_ENABLED=false`
-- `API_KEY=<copied from current env/.env>`
-
-## Build Suggestion (Windows)
-
-Use PyInstaller one-folder mode and include the generated `.env` beside the executable.
-
-Example command:
-
-```bash
-pyinstaller --noconfirm --windowed --name familiar-testflight scripts/familiar_testflight_entry.py
-```
-
-Then package:
-- `dist/familiar-testflight/` directory
-- `.testflight/.env` copied to `dist/familiar-testflight/.env`
-
-Zip that directory and send it.
 
 ## First-run Setup Flow (in app)
 When `TESTFLIGHT_MODE=true`, GUI shows a setup wizard with two pages:

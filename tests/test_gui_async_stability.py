@@ -17,6 +17,7 @@ from familiar_agent.gui import (
     FamiliarWindow,
     build_testflight_persona,
     needs_testflight_setup,
+    resolve_app_icon_path,
 )
 
 
@@ -384,6 +385,15 @@ def test_needs_testflight_setup_depends_on_flag_camera_and_persona(tmp_path) -> 
         camera=SimpleNamespace(host="", username="", password=""),
     )
     assert needs_testflight_setup(cfg_off, setup_flag="false", persona_path=persona) is False
+
+
+def test_resolve_app_icon_path_prefers_env_relative_to_runtime_dir(monkeypatch, tmp_path) -> None:
+    icon = tmp_path / "custom.ico"
+    icon.write_bytes(b"ico")
+    monkeypatch.setenv("FAMILIAR_APP_ICON", "custom.ico")
+    monkeypatch.setattr("familiar_agent.gui._runtime_base_dir", lambda: tmp_path)
+
+    assert resolve_app_icon_path() == icon
 
 
 def test_gui_build_rtsp_url_encodes_credentials_and_supports_raw_url() -> None:
