@@ -50,14 +50,16 @@ The camera image is the affordance signal. Without it, the model hallucinates pl
 
 [Reflexion (Shinn et al., 2023)](https://arxiv.org/abs/2303.11366) showed that storing failure traces as natural language memory enables an LLM agent to improve across episodes without weight updates.
 
-familiar-ai stores every completed turn as a memory entry in ChromaDB (via `memory-mcp`):
+familiar-ai stores every completed turn in a local SQLite memory store (with vector embeddings):
 
 - Observations → stored as `observation` memories
 - Conversations → stored as `conversation` memories
 - Self-reflections → stored as `self_model` memories
 - Curiosity targets → stored as `curiosity` memories
 
-At the start of each session, relevant past memories are retrieved by semantic similarity and injected into the system prompt. The agent can compare today's observation to a dated memory from last week without any special retrieval logic — it's just context.
+At the start of each session, relevant past memories are retrieved by semantic similarity and injected into the system prompt with evidence metadata (memory id, source kind, confidence). Low-confidence recalls are treated as uncertain context rather than hard facts.
+
+Schema changes are applied automatically at startup through timestamped migration scripts under `migration/`, tracked by `schema_migrations`.
 
 Implementation: `src/familiar_agent/tools/memory.py`
 
