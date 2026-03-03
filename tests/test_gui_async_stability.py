@@ -205,3 +205,8 @@ def test_gui_on_send_uses_companion_display_name() -> None:
     FamiliarWindow._on_send(win)
 
     win._log.append_line.assert_called_once_with("[Kota] hello")
+
+
+def test_gui_thinking_status_text_includes_elapsed_seconds() -> None:
+    assert FamiliarWindow._thinking_status_text(0) == "AIが思考中... 0s"
+    assert FamiliarWindow._thinking_status_text(7) == "AIが思考中... 7s"
