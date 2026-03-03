@@ -39,6 +39,9 @@ class CameraConfig:
             os.environ.get("CAMERA_ONVIF_PORT", os.environ.get("TAPO_ONVIF_PORT", "2020"))
         )
     )
+    preview: bool = field(
+        default_factory=lambda: os.environ.get("CAMERA_PREVIEW", "false").lower() == "true"
+    )
 
 
 @dataclass

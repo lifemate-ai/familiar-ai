@@ -52,6 +52,16 @@ class CameraTool:
         # Start background capture thread
         self.start()
 
+    @property
+    def is_pan_tilt_available(self) -> bool:
+        """Check if PTZ controls are supported by the camera."""
+        # ONVIF is only attempted if host is not a simple integer (USB)
+        if isinstance(self.host, int) or (isinstance(self.host, str) and self.host.isdigit()):
+            return False
+        # If PTZ service is already connected, it's available.
+        # Otherwise, assume it's available if it's an IP camera (will be lazy-connected later).
+        return True
+
     def start(self):
         """Start the background capture thread."""
         if self._running:

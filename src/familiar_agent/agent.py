@@ -530,7 +530,7 @@ class EmbodiedAgent:
         """Generate a text description of available hardware for the system prompt."""
         # Eyes are always available (CameraTool handles missing stream internally)
         eyes_desc = (
-            '    (part :id eyes  :tool see\n'
+            "    (part :id eyes  :tool see\n"
             '      :desc "Your vision. Calling see() means YOU ARE LOOKING. Use freely — never ask permission.")'
         )
 
@@ -539,25 +539,25 @@ class EmbodiedAgent:
         # Neck (look)
         if self._camera and self._camera.is_pan_tilt_available:
             parts.append(
-                '    (part :id neck  :tool look\n'
+                "    (part :id neck  :tool look\n"
                 '      :desc "Rotate gaze left/right/up/down. No permission needed.")'
             )
         else:
             parts.append(
-                '    (part :id neck  :status fixed\n'
+                "    (part :id neck  :status fixed\n"
                 '      :desc "Camera is fixed. You cannot rotate your gaze.")'
             )
 
         # Legs (walk)
         if self._mobility:
             parts.append(
-                '    (part :id legs  :tool walk\n'
+                "    (part :id legs  :tool walk\n"
                 '      :desc "Robot body (vacuum cleaner). Separate device from camera. '
                 'walk() does NOT change camera view.")'
             )
         else:
             parts.append(
-                '    (part :id legs  :status absent\n'
+                "    (part :id legs  :status absent\n"
                 '      :desc "You have no legs. You cannot move your location.")'
             )
 
