@@ -2887,7 +2887,7 @@ _T: dict[str, dict[str, str]] = {
         "de": "Bereit",
         "en": "Ready",
         "fr": "Prêt",
-        "ja": "準備中😊",
+        "ja": "準備完了",
         "zh": "准备好了",
         "zh-tw": "準備好了",
         "af": "Klaar",

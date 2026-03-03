@@ -39,6 +39,9 @@ def _make_window_stub() -> FamiliarWindow:
     win._agent_task = None
     win._queue_task = None
     win._init_task = None
+    win._look_preview_task = None
+    win._look_preview_until = 0.0
+    win._look_preview_disabled = False
     win._desires = MagicMock()
     win._log = MagicMock()
     win._send_btn = MagicMock()
@@ -221,3 +224,57 @@ def test_gui_thinking_status_text_uses_i18n_and_agent_display_name(monkeypatch) 
 
     assert FamiliarWindow._thinking_status_text(win, 0) == "Yukine:::0"
     assert FamiliarWindow._thinking_status_text(win, 7) == "Yukine:::7"
+
+
+def test_gui_build_rtsp_url_encodes_credentials_and_supports_raw_url() -> None:
+    built = FamiliarWindow._build_rtsp_url("192.168.0.10", "user name", "p@ss")
+    assert built == "rtsp://user%20name:p%40ss@192.168.0.10:554/stream1"
+
+    raw = FamiliarWindow._build_rtsp_url("rtsp://camera.local/stream1", "u", "p")
+    assert raw == "rtsp://camera.local/stream1"
+
+
+def test_gui_look_preview_seconds_are_clamped() -> None:
+    assert FamiliarWindow._look_preview_seconds_for_degrees(5) >= 0.8
+    assert FamiliarWindow._look_preview_seconds_for_degrees(90) <= 2.0
+    assert FamiliarWindow._look_preview_seconds_for_degrees(None) >= 0.8
+
+
+def test_gui_extract_jpeg_frames_parses_multiple_frames() -> None:
+    frame1 = b"\xff\xd8abc\xff\xd9"
+    frame2 = b"\xff\xd8xyz\xff\xd9"
+    buf = bytearray(b"noise" + frame1 + b"junk" + frame2 + b"tail")
+
+    frames = FamiliarWindow._extract_jpeg_frames(buf, max_frames=2)
+
+    assert frames == [frame1, frame2]
+    assert buf.startswith(b"tail")
+
+
+def test_gui_request_look_preview_starts_task_and_extends_deadline(monkeypatch):
+    win = _make_window_stub()
+    win._camera_rtsp_url = lambda: "rtsp://camera/stream1"  # type: ignore[method-assign]
+
+    class _DummyTask:
+        def done(self) -> bool:
+            return False
+
+    created: list[object] = []
+
+    def _fake_create_task(coro):
+        created.append(coro)
+        coro.close()
+        return _DummyTask()
+
+    win._create_task = _fake_create_task  # type: ignore[method-assign]
+
+    ts = iter([10.0, 10.4])
+    monkeypatch.setattr(time, "perf_counter", lambda: next(ts))
+
+    FamiliarWindow._request_look_preview(win, 20)
+    first_until = win._look_preview_until
+    FamiliarWindow._request_look_preview(win, 90)
+
+    assert win._look_preview_task is not None
+    assert len(created) == 1
+    assert win._look_preview_until > first_until

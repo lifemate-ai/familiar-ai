@@ -18,11 +18,13 @@ from __future__ import annotations
 
 import asyncio
 import base64
+import contextlib
 import html as _html
 import logging
 import time
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
+from urllib.parse import quote
 
 import qasync
 from PySide6.QtCore import QEasingCurve, QPropertyAnimation, QSize, Qt, QTimer
@@ -98,6 +100,11 @@ _STREAM_FLUSH_INTERVAL_MS = 50
 _GUI_LOOP_LAG_CHECK_SEC = 1.0
 _GUI_LOOP_LAG_WARN_SEC = 0.35
 _GUI_QUEUE_WARN_SIZE = 20
+_GUI_LOOK_PREVIEW_FPS = 8
+_GUI_LOOK_PREVIEW_MIN_SEC = 0.8
+_GUI_LOOK_PREVIEW_MAX_SEC = 2.0
+_GUI_LOOK_PREVIEW_GRACE_SEC = 0.3
+_GUI_LOOK_PREVIEW_READ_TIMEOUT_SEC = 0.35
 
 # Resolve .env path: project root, then cwd fallback
 _ENV_PATH: Path = Path(__file__).resolve().parents[2] / ".env"
@@ -787,6 +794,9 @@ class FamiliarWindow(QMainWindow):
         self._agent_task: asyncio.Task[str] | None = None
         self._queue_task: asyncio.Task[None] | None = None
         self._init_task: asyncio.Task[None] | None = None
+        self._look_preview_task: asyncio.Task[None] | None = None
+        self._look_preview_until: float = 0.0
+        self._look_preview_disabled = False
         self._last_lag_tick = time.perf_counter()
         self._lag_timer = QTimer(self)
         self._lag_timer.setInterval(int(_GUI_LOOP_LAG_CHECK_SEC * 1000))
@@ -813,6 +823,150 @@ class FamiliarWindow(QMainWindow):
         except RuntimeError:
             loop = asyncio.get_event_loop()
         return loop.create_task(coro)
+
+    @staticmethod
+    def _build_rtsp_url(host: str, username: str, password: str) -> str | None:
+        """Build RTSP URL from camera config, preserving explicit URI hosts."""
+        host = (host or "").strip()
+        if not host:
+            return None
+        if "://" in host:
+            return host
+        user = quote((username or "").strip(), safe="")
+        pw = quote((password or "").strip(), safe="")
+        auth = ""
+        if user and pw:
+            auth = f"{user}:{pw}@"
+        elif user:
+            auth = f"{user}@"
+        return f"rtsp://{auth}{host}:554/stream1"
+
+    def _camera_rtsp_url(self) -> str | None:
+        cam = self._agent.config.camera
+        return self._build_rtsp_url(cam.host, cam.username, cam.password)
+
+    @staticmethod
+    def _look_preview_seconds_for_degrees(degrees: int | None) -> float:
+        """Map look degrees to preview duration (short look -> shorter preview)."""
+        raw = 30 if degrees is None else degrees
+        clamped = max(1, min(90, int(raw)))
+        sec = clamped / 45.0
+        return max(_GUI_LOOK_PREVIEW_MIN_SEC, min(_GUI_LOOK_PREVIEW_MAX_SEC, sec))
+
+    @staticmethod
+    def _extract_jpeg_frames(buffer: bytearray, max_frames: int = 2) -> list[bytes]:
+        """Extract complete JPEG frames from a byte buffer and consume them."""
+        frames: list[bytes] = []
+        while len(frames) < max_frames:
+            start = buffer.find(b"\xff\xd8")
+            if start < 0:
+                if len(buffer) > 1_000_000:
+                    buffer.clear()
+                break
+            if start > 0:
+                del buffer[:start]
+            end = buffer.find(b"\xff\xd9", 2)
+            if end < 0:
+                break
+            frame = bytes(buffer[: end + 2])
+            del buffer[: end + 2]
+            frames.append(frame)
+        return frames
+
+    def _request_look_preview(self, degrees: int | None = None) -> None:
+        """Start/extend a short live preview window for look() actions."""
+        if self._look_preview_disabled:
+            return
+        stream_url = self._camera_rtsp_url()
+        if not stream_url:
+            return
+        duration = self._look_preview_seconds_for_degrees(degrees) + _GUI_LOOK_PREVIEW_GRACE_SEC
+        self._look_preview_until = max(self._look_preview_until, time.perf_counter() + duration)
+        if self._look_preview_task and not self._look_preview_task.done():
+            return
+        self._look_preview_task = self._create_task(self._run_look_preview(stream_url))
+
+    async def _run_look_preview(self, stream_url: str) -> None:
+        """Render low-FPS RTSP frames while look() is in progress."""
+        cmd = [
+            "ffmpeg",
+            "-loglevel",
+            "error",
+            "-rtsp_transport",
+            "tcp",
+            "-fflags",
+            "nobuffer",
+            "-flags",
+            "low_delay",
+            "-probesize",
+            "32",
+            "-analyzeduration",
+            "0",
+            "-i",
+            stream_url,
+            "-an",
+            "-sn",
+            "-vf",
+            "scale=640:-1",
+            "-r",
+            str(_GUI_LOOK_PREVIEW_FPS),
+            "-f",
+            "image2pipe",
+            "-vcodec",
+            "mjpeg",
+            "-q:v",
+            "7",
+            "-",
+        ]
+
+        proc: asyncio.subprocess.Process | None = None
+        try:
+            proc = await asyncio.create_subprocess_exec(
+                *cmd,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
+            )
+        except FileNotFoundError:
+            logger.warning("Live look preview disabled: ffmpeg not found")
+            self._look_preview_disabled = True
+            return
+        except Exception as exc:
+            logger.debug("Live look preview unavailable: %s", exc)
+            return
+
+        assert proc.stdout is not None
+        buf = bytearray()
+        last_emit = 0.0
+        min_interval = 1.0 / max(1, _GUI_LOOK_PREVIEW_FPS)
+
+        try:
+            while not self._closing and time.perf_counter() < self._look_preview_until:
+                try:
+                    chunk = await asyncio.wait_for(
+                        proc.stdout.read(4096),
+                        timeout=_GUI_LOOK_PREVIEW_READ_TIMEOUT_SEC,
+                    )
+                except asyncio.TimeoutError:
+                    continue
+                if not chunk:
+                    if proc.returncode is not None:
+                        break
+                    await asyncio.sleep(0.01)
+                    continue
+
+                buf.extend(chunk)
+                for frame in self._extract_jpeg_frames(buf, max_frames=2):
+                    now = time.perf_counter()
+                    if now - last_emit < min_interval:
+                        continue
+                    self._camera.update_image(base64.b64encode(frame).decode("ascii"))
+                    last_emit = now
+        finally:
+            if proc.returncode is None:
+                proc.kill()
+                with contextlib.suppress(Exception):
+                    await proc.wait()
+            self._look_preview_task = None
 
     # ------------------------------------------------------------------
     # UI construction
@@ -1107,6 +1261,8 @@ class FamiliarWindow(QMainWindow):
             if committed.strip():
                 self._log.append_line(f"[{self._agent_display_name}] {committed.strip()}")
             self._log.append_action(name, tool_input)
+            if name == "look":
+                self._request_look_preview(tool_input.get("degrees"))
 
         def on_image(b64: str) -> None:
             self._camera.update_image(b64)
@@ -1209,6 +1365,10 @@ class FamiliarWindow(QMainWindow):
         """Best-effort async cleanup on window close."""
         self._lag_timer.stop()
         self._cancel_turn(reason="shutdown")
+        if self._look_preview_task and not self._look_preview_task.done():
+            self._look_preview_task.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await self._look_preview_task
         self._input_queue.put_nowait(None)
         if self._queue_task and not self._queue_task.done():
             self._queue_task.cancel()
