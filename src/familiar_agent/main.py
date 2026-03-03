@@ -19,6 +19,7 @@ from ._ui_helpers import (
     IDLE_CHECK_INTERVAL,
     desire_tick_prompt,
     format_action as _format_action,
+    should_fire_idle_desire,
 )
 
 
@@ -135,7 +136,13 @@ async def repl(agent: EmbodiedAgent, desires: DesireSystem, debug: bool = False)
 
             if queued_input is None and input_queue.empty():
                 # Genuine idle — check desires, but respect cooldown after conversation
-                if time.time() - last_interaction_time < DESIRE_COOLDOWN:
+                if not should_fire_idle_desire(
+                    agent_running=False,
+                    has_pending_input=not input_queue.empty(),
+                    last_interaction=last_interaction_time,
+                    now=time.time(),
+                    cooldown=DESIRE_COOLDOWN,
+                ):
                     continue  # Still in post-conversation cooldown
 
                 # Peek at any pending input before firing desire

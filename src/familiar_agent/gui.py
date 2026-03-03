@@ -53,6 +53,7 @@ from ._ui_helpers import (
     IDLE_CHECK_INTERVAL,
     desire_tick_prompt,
     format_action,
+    should_fire_idle_desire,
 )
 
 if TYPE_CHECKING:
@@ -723,15 +724,19 @@ class FamiliarWindow(QMainWindow):
         self._desires = desires
         self._input_queue: asyncio.Queue[str | None] = asyncio.Queue()
         self._agent_running = False
+        self._closing = False
+        self._agent_task: asyncio.Task[str] | None = None
+        self._queue_task: asyncio.Task[None] | None = None
+        self._init_task: asyncio.Task[None] | None = None
 
         self.setWindowTitle("familiar-ai")
         self.resize(1020, 720)
         self.setStyleSheet(f"background: {_BG_BASE};")
         self._build_ui()
 
-        asyncio.ensure_future(self._process_queue())
+        self._queue_task = asyncio.create_task(self._process_queue())
         if not self._agent.is_embedding_ready:
-            asyncio.ensure_future(self._show_init_status())
+            self._init_task = asyncio.create_task(self._show_init_status())
 
     # ------------------------------------------------------------------
     # UI construction
@@ -894,20 +899,29 @@ class FamiliarWindow(QMainWindow):
             try:
                 text = await asyncio.wait_for(self._input_queue.get(), timeout=IDLE_CHECK_INTERVAL)
             except asyncio.TimeoutError:
-                if not self._agent_running and time.time() - last_interaction >= DESIRE_COOLDOWN:
-                    pending: list[str] = []
+                now = time.time()
+                if self._closing:
+                    continue
+                if not should_fire_idle_desire(
+                    agent_running=self._agent_running,
+                    has_pending_input=not self._input_queue.empty(),
+                    last_interaction=last_interaction,
+                    now=now,
+                    cooldown=DESIRE_COOLDOWN,
+                ):
+                    continue
+
+                tick = desire_tick_prompt(self._desires, [])
+                if tick:
+                    # If user input arrived meanwhile, prioritize that over autonomous desire.
                     if not self._input_queue.empty():
-                        item = self._input_queue.get_nowait()
-                        if item is not None:
-                            pending.append(item)
-                    tick = desire_tick_prompt(self._desires, pending)
-                    if tick:
-                        desire_name, prompt, _ = tick
-                        self._log.append_line(f"… {desire_name}")
-                        await self._run_agent("", inner_voice=prompt)
-                        self._desires.satisfy(desire_name)
-                        self._desires.curiosity_target = None
-                        last_interaction = time.time()
+                        continue
+                    desire_name, prompt, _ = tick
+                    self._log.append_line(f"… {desire_name}")
+                    await self._run_agent("", inner_voice=prompt)
+                    self._desires.satisfy(desire_name)
+                    self._desires.curiosity_target = None
+                    last_interaction = time.time()
                 continue
 
             if text is None:
@@ -917,7 +931,6 @@ class FamiliarWindow(QMainWindow):
 
     async def _run_agent(self, user_input: str, inner_voice: str = "") -> None:
         self._agent_running = True
-        self._send_btn.setEnabled(False)
 
         def on_text(chunk: str) -> None:
             self._stream.append_chunk(chunk)
@@ -932,15 +945,18 @@ class FamiliarWindow(QMainWindow):
             self._camera.update_image(b64)
 
         try:
-            final_text = await self._agent.run(
-                user_input,
-                on_action=on_action,
-                on_text=on_text,
-                on_image=on_image,
-                desires=self._desires,
-                inner_voice=inner_voice,
-                interrupt_queue=self._input_queue,
+            self._agent_task = asyncio.create_task(
+                self._agent.run(
+                    user_input,
+                    on_action=on_action,
+                    on_text=on_text,
+                    on_image=on_image,
+                    desires=self._desires,
+                    inner_voice=inner_voice,
+                    interrupt_queue=self._input_queue,
+                )
             )
+            final_text = await self._agent_task
             committed = self._stream.commit_and_clear()
             display = committed.strip() or final_text.strip()
             if display:
@@ -952,8 +968,8 @@ class FamiliarWindow(QMainWindow):
             logger.exception("Agent run error")
             self._log.append_line(f"[error] {exc}")
         finally:
+            self._agent_task = None
             self._agent_running = False
-            self._send_btn.setEnabled(True)
 
     async def _show_init_status(self) -> None:
         """Update window title with elapsed time until embedding model is ready."""
@@ -975,9 +991,28 @@ class FamiliarWindow(QMainWindow):
     # ------------------------------------------------------------------
 
     def closeEvent(self, event) -> None:  # type: ignore[override]
-        asyncio.ensure_future(self._agent.close())
+        self._closing = True
         self._input_queue.put_nowait(None)
+        if self._queue_task and not self._queue_task.done():
+            self._queue_task.cancel()
+        if self._init_task and not self._init_task.done():
+            self._init_task.cancel()
+        if self._agent_task and not self._agent_task.done():
+            self._agent_task.cancel()
+        asyncio.create_task(self._shutdown())
         event.accept()
+
+    async def _shutdown(self) -> None:
+        """Best-effort async cleanup on window close."""
+        try:
+            if self._agent_task and not self._agent_task.done():
+                try:
+                    await asyncio.wait_for(asyncio.shield(self._agent_task), timeout=1.0)
+                except (asyncio.TimeoutError, asyncio.CancelledError, Exception):
+                    pass
+            await asyncio.wait_for(self._agent.close(), timeout=3.0)
+        except (asyncio.TimeoutError, Exception):
+            pass
 
 
 # ---------------------------------------------------------------------------

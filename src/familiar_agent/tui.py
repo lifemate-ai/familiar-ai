@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import logging
 import os
 import re
@@ -25,6 +26,7 @@ from ._ui_helpers import (
     IDLE_CHECK_INTERVAL as _IDLE_CHECK_INTERVAL,
     desire_tick_prompt,
     format_action as _format_action,
+    should_fire_idle_desire,
 )
 from .realtime_stt_session import create_realtime_stt_session, RealtimeSttSession
 
@@ -180,6 +182,7 @@ class FamiliarApp(App):
         self._recording = False
         self._stop_recording: asyncio.Event = asyncio.Event()
         self._last_toggle_listen: float = 0.0  # debounce Ctrl+T key-repeat
+        self._closing = False
         # ESC cancel support
         self._cancel_event: asyncio.Event = asyncio.Event()
         self._agent_task: asyncio.Task | None = None
@@ -256,15 +259,23 @@ class FamiliarApp(App):
         if self.agent.is_embedding_ready:
             return
         start = time.time()
-        stream: Static = self.query_one("#stream", Static)
-        while not self.agent.is_embedding_ready:
+        with contextlib.suppress(Exception):
+            stream: Static = self.query_one("#stream", Static)
+        if "stream" not in locals():
+            return
+        while not self.agent.is_embedding_ready and not self._closing:
             elapsed = int(time.time() - start)
-            stream.update(f"[dim]{_t('initializing')}... ({elapsed}s)[/dim]")
+            with contextlib.suppress(Exception):
+                stream.update(f"[dim]{_t('initializing')}... ({elapsed}s)[/dim]")
             await asyncio.sleep(0.5)
+        if self._closing:
+            return
         elapsed = int(time.time() - start)
-        stream.update(f"[dim]{_t('initializing_done')} ({elapsed}s)[/dim]")
+        with contextlib.suppress(Exception):
+            stream.update(f"[dim]{_t('initializing_done')} ({elapsed}s)[/dim]")
         await asyncio.sleep(2.0)
-        stream.update("")
+        with contextlib.suppress(Exception):
+            stream.update("")
 
     # ── logging helpers ────────────────────────────────────────────
 
@@ -328,6 +339,10 @@ class FamiliarApp(App):
     async def _process_queue(self) -> None:
         """Main loop: dequeue user messages and run agent."""
         while True:
+            if self._agent_running:
+                # Keep incoming input in queue so agent.run() can consume it via interrupt_queue.
+                await asyncio.sleep(0.05)
+                continue
             text = await self._input_queue.get()
             if text is None:
                 break
@@ -451,29 +466,42 @@ class FamiliarApp(App):
             self._write_log(f"[red]エラー: {e}[/red]")
         finally:
             watcher.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await watcher
             self._agent_task = None
             _stop_spinner()
+            if not spinner_task.done():
+                with contextlib.suppress(asyncio.TimeoutError):
+                    await asyncio.wait_for(spinner_task, timeout=0.2)
+            if not spinner_task.done():
+                spinner_task.cancel()
+                with contextlib.suppress(asyncio.CancelledError):
+                    await spinner_task
             stream.update("")
             self._agent_running = False
 
     async def _desire_tick(self) -> None:
         """Check desires and fire autonomous actions when idle."""
-        if self._agent_running:
-            return
-        if not self._input_queue.empty():
-            return
-        if time.time() - self._last_interaction < DESIRE_COOLDOWN:
+        now = time.time()
+        if not should_fire_idle_desire(
+            agent_running=self._agent_running,
+            has_pending_input=not self._input_queue.empty(),
+            last_interaction=self._last_interaction,
+            now=now,
+            cooldown=DESIRE_COOLDOWN,
+        ):
             return
 
-        # Peek at pending input without removing it from the queue
-        pending_items: list[str] = []
-        if not self._input_queue.empty():
-            item = self._input_queue.get_nowait()
-            if item:
-                pending_items.append(item)
-
-        tick = desire_tick_prompt(self.desires, pending_items)
+        tick = desire_tick_prompt(self.desires, [])
         if tick is None:
+            return
+        if not should_fire_idle_desire(
+            agent_running=self._agent_running,
+            has_pending_input=not self._input_queue.empty(),
+            last_interaction=self._last_interaction,
+            now=time.time(),
+            cooldown=DESIRE_COOLDOWN,
+        ):
             return
 
         desire_name, prompt, _pending = tick
@@ -608,6 +636,7 @@ class FamiliarApp(App):
         self._stop_recording.set()
 
     async def action_quit(self) -> None:
+        self._closing = True
         try:
             self._input_queue.put_nowait(None)
             # Cancel the running agent task first (mirrors action_cancel_turn logic).

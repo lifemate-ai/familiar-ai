@@ -3,6 +3,7 @@
 This module is the single source of truth for:
   - ACTION_ICONS: icon mapping for tool calls
   - format_action(): human-readable tool-call label
+  - should_fire_idle_desire(): shared gate for autonomous desire turns
   - desire_tick_prompt(): extract the current dominant desire prompt (UI-agnostic)
 
 Keeping these here prevents duplication across tui.py, gui.py, and main.py.
@@ -90,6 +91,22 @@ def format_action(name: str, tool_input: dict) -> str:
 
 IDLE_CHECK_INTERVAL: float = 10.0  # seconds between desire checks when idle
 DESIRE_COOLDOWN: float = 90.0  # seconds after last user interaction before desires fire
+
+
+def should_fire_idle_desire(
+    *,
+    agent_running: bool,
+    has_pending_input: bool,
+    last_interaction: float,
+    now: float,
+    cooldown: float = DESIRE_COOLDOWN,
+) -> bool:
+    """Return True when an autonomous desire turn is allowed to fire."""
+    if agent_running:
+        return False
+    if has_pending_input:
+        return False
+    return now - last_interaction >= cooldown
 
 
 def desire_tick_prompt(

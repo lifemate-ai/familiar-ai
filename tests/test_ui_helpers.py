@@ -11,6 +11,7 @@ from familiar_agent._ui_helpers import (
     ACTION_ICONS,
     desire_tick_prompt,
     format_action,
+    should_fire_idle_desire,
 )
 
 
@@ -174,3 +175,46 @@ class TestDesireTickPrompt:
         assert result is not None
         desire_name, _, _ = result
         assert desire_name == "unknown_desire_xyz"
+
+
+# ---------------------------------------------------------------------------
+# should_fire_idle_desire tests
+# ---------------------------------------------------------------------------
+
+
+class TestShouldFireIdleDesire:
+    def test_false_while_agent_running(self):
+        assert not should_fire_idle_desire(
+            agent_running=True,
+            has_pending_input=False,
+            last_interaction=0.0,
+            now=999.0,
+            cooldown=90.0,
+        )
+
+    def test_false_with_pending_input(self):
+        assert not should_fire_idle_desire(
+            agent_running=False,
+            has_pending_input=True,
+            last_interaction=0.0,
+            now=999.0,
+            cooldown=90.0,
+        )
+
+    def test_false_before_cooldown(self):
+        assert not should_fire_idle_desire(
+            agent_running=False,
+            has_pending_input=False,
+            last_interaction=100.0,
+            now=150.0,
+            cooldown=90.0,
+        )
+
+    def test_true_after_cooldown(self):
+        assert should_fire_idle_desire(
+            agent_running=False,
+            has_pending_input=False,
+            last_interaction=100.0,
+            now=190.0,
+            cooldown=90.0,
+        )
