@@ -122,3 +122,34 @@ def test_gui_event_loop_lag_warning_emits_log(caplog: pytest.LogCaptureFixture):
         FamiliarWindow._report_event_loop_lag(win)
 
     assert "event-loop lag detected" in caplog.text
+
+
+def test_gui_create_task_falls_back_when_no_running_loop(monkeypatch):
+    win = _make_window_stub()
+
+    class _DummyTask:
+        pass
+
+    class _DummyLoop:
+        def __init__(self) -> None:
+            self.created = False
+
+        def create_task(self, coro):
+            self.created = True
+            coro.close()
+            return _DummyTask()
+
+    dummy_loop = _DummyLoop()
+
+    def _raise_no_running_loop():
+        raise RuntimeError("no running event loop")
+
+    monkeypatch.setattr(asyncio, "get_running_loop", _raise_no_running_loop)
+    monkeypatch.setattr(asyncio, "get_event_loop", lambda: dummy_loop)
+
+    async def _noop() -> None:
+        return None
+
+    task = FamiliarWindow._create_task(win, _noop())
+    assert isinstance(task, _DummyTask)
+    assert dummy_loop.created is True
