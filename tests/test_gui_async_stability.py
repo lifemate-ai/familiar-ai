@@ -91,6 +91,50 @@ async def test_gui_process_queue_handles_burst_in_order():
 
 
 @pytest.mark.asyncio
+async def test_gui_idle_desire_logs_localized_murmur(monkeypatch):
+    win = _make_window_stub()
+
+    async def _fake_run_agent(text: str, inner_voice: str = "") -> None:
+        assert text == ""
+        assert inner_voice == "inner-prompt"
+
+    win._run_agent = _fake_run_agent  # type: ignore[method-assign]
+
+    call_count = {"n": 0}
+
+    async def _fake_wait_for(awaitable, timeout):
+        # _process_queue passes queue.get() coroutine each loop; close it here
+        # because this fake doesn't await it.
+        if hasattr(awaitable, "close"):
+            awaitable.close()
+        call_count["n"] += 1
+        if call_count["n"] == 1:
+            raise asyncio.TimeoutError
+        return None
+
+    monkeypatch.setattr("familiar_agent.gui.asyncio.wait_for", _fake_wait_for)
+    monkeypatch.setattr(
+        "familiar_agent.gui.should_fire_idle_desire",
+        lambda **kwargs: True,
+    )
+    monkeypatch.setattr(
+        "familiar_agent.gui.desire_tick_prompt",
+        lambda _desires, _peek: ("worry_companion", "inner-prompt", None),
+    )
+    monkeypatch.setattr(
+        "familiar_agent.gui._t",
+        lambda key, **kwargs: (
+            "localized-worry" if key == "desire_worry_companion" else "localized-default"
+        ),
+    )
+
+    await FamiliarWindow._process_queue(win)
+
+    win._log.append_line.assert_called_with("localized-worry")
+    win._desires.satisfy.assert_called_once_with("worry_companion")
+
+
+@pytest.mark.asyncio
 async def test_gui_cancel_turn_cancels_running_task_and_logs():
     win = _make_window_stub()
     win._agent_running = True

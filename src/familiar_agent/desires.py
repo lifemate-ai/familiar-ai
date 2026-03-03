@@ -4,8 +4,11 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 import time
 from pathlib import Path
+
+from ._i18n import _t
 
 logger = logging.getLogger(__name__)
 
@@ -94,10 +97,17 @@ DECAY_ON_SATISFY = 0.5  # drop hard so it can rebuild and fire again
 class DesireSystem:
     """Manages autonomous desires that drive self-initiated behavior."""
 
-    def __init__(self, state_path: Path | None = None):
+    def __init__(self, state_path: Path | None = None, companion_name: str | None = None):
         self._state_path = state_path or Path.home() / ".familiar_ai" / "desires.json"
         self._desires: dict[str, float] = {}
         self._last_tick: float = time.time()
+        default_name = _t("default_companion_name")
+        resolved_name = (
+            (companion_name or "").strip()
+            or os.environ.get("COMPANION_NAME", "").strip()
+            or default_name
+        )
+        self._companion_name = resolved_name or default_name
         self.curiosity_target: str | None = None  # What the agent wants to investigate next
         self._load()
 
@@ -164,31 +174,21 @@ class DesireSystem:
 
         # If there's a curiosity target, use it for look_around/explore
         if name in ("look_around", "explore") and self.curiosity_target:
-            target = self.curiosity_target
-            return f"さっき気になったことがある。{target}をもっとよく見て。カメラを向けて確認して。"
+            return _t("desire_prompt_curiosity_target", target=self.curiosity_target)
 
         # These are INTERNAL IMPULSES — the agent acts on them autonomously.
         # Framed in first person so the model knows this is its own desire, not a user request.
         prompts = {
-            "look_around": (
-                "（内部衝動）なんか外が気になってきた。"
-                "see()で見てみる。"
-                "カメラが繋がらなかったら、1回だけ別の方向を試して、それでもダメなら諦めて記憶を振り返るか別のことをする。"
-                "何度も同じことを繰り返さない。"
+            "look_around": _t("desire_prompt_look_around"),
+            "explore": _t("desire_prompt_explore"),
+            "greet_companion": _t(
+                "desire_prompt_greet_companion",
+                companion=self._companion_name,
             ),
-            "explore": (
-                "（内部衝動）ちょっとうろうろしたい。walk()で移動してから、see()で今いる場所を確認する。"
-                "カメラが繋がらなくても、移動したこと自体を楽しめる。"
-            ),
-            "greet_companion": (
-                "（内部衝動）コウタに声かけたくなってきた。say()で短く一言。"
-                "今の時間帯に合った言葉で。"
-            ),
-            "rest": "（内部衝動）ちょっとひと休み。何もしないで、ただそこにいる。",
-            "worry_companion": (
-                "（内部衝動）コウタのこと、なんか心配になってきた。"
-                "say()で短く声かけてみる。体調とか、ちゃんと寝れてるか確認したい。"
-                "重くならないように、さりげなく。"
+            "rest": _t("desire_prompt_rest"),
+            "worry_companion": _t(
+                "desire_prompt_worry_companion",
+                companion=self._companion_name,
             ),
         }
         return prompts.get(name)
