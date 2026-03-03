@@ -67,3 +67,27 @@ def test_moved_conversation_projects_to_support_policy(tmp_path) -> None:
     policy = policies[0]
     assert policy["trigger_context"] == "conversation"
     assert policy["action_hint"] == "respond_supportively"
+
+
+def test_projection_updates_create_revision_chain(tmp_path) -> None:
+    db_path = str(tmp_path / "projection_revisions.db")
+    with (
+        patch.object(_EmbeddingModel, "pre_warm"),
+        patch.object(_EmbeddingModel, "encode_document", return_value=[[0.1, 0.2, 0.3]]),
+        patch.object(_EmbeddingModel, "encode_query", return_value=[[0.1, 0.2, 0.3]]),
+    ):
+        mem = ObservationMemory(db_path=db_path)
+        assert mem.save("I value honesty in responses.", kind="self_model", emotion="moved")
+        assert mem.save(
+            "I value precision and honesty in responses.", kind="self_model", emotion="moved"
+        )
+
+        facts = mem.recall_semantic_facts("honesty", n=5)
+        revisions = mem.recall_revisions(entity_type="semantic_fact", entity_key="self_model:core")
+        mem.close()
+
+    assert facts
+    assert "precision" in facts[0]["summary"].lower()
+    assert revisions
+    assert "value honesty" in revisions[0]["previous_text"].lower()
+    assert "precision" in revisions[0]["new_text"].lower()
