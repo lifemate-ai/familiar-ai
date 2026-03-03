@@ -22,7 +22,7 @@ import html as _html
 import logging
 import time
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 import qasync
 from PySide6.QtCore import QEasingCurve, QPropertyAnimation, QSize, Qt, QTimer
@@ -747,9 +747,21 @@ class FamiliarWindow(QMainWindow):
         self.setStyleSheet(f"background: {_BG_BASE};")
         self._build_ui()
 
-        self._queue_task = asyncio.create_task(self._process_queue())
+        self._queue_task = self._create_task(self._process_queue())
         if not self._agent.is_embedding_ready:
-            self._init_task = asyncio.create_task(self._show_init_status())
+            self._init_task = self._create_task(self._show_init_status())
+
+    def _create_task(self, coro) -> asyncio.Task[Any]:
+        """Create an asyncio task from GUI sync callbacks safely.
+
+        `asyncio.create_task()` requires a running loop and fails during
+        early window construction on some platforms (notably Windows).
+        """
+        try:
+            loop = asyncio.get_running_loop()
+        except RuntimeError:
+            loop = asyncio.get_event_loop()
+        return loop.create_task(coro)
 
     # ------------------------------------------------------------------
     # UI construction
@@ -1024,7 +1036,7 @@ class FamiliarWindow(QMainWindow):
             self._camera.update_image(b64)
 
         try:
-            self._agent_task = asyncio.create_task(
+            self._agent_task = self._create_task(
                 self._agent.run(
                     user_input,
                     on_action=on_action,
@@ -1093,7 +1105,7 @@ class FamiliarWindow(QMainWindow):
     def _ensure_shutdown_task(self) -> asyncio.Task[None]:
         if self._shutdown_task and not self._shutdown_task.done():
             return self._shutdown_task
-        self._shutdown_task = asyncio.create_task(self._shutdown())
+        self._shutdown_task = self._create_task(self._shutdown())
         self._shutdown_task.add_done_callback(lambda _task: self._finalize_close())
         return self._shutdown_task
 
