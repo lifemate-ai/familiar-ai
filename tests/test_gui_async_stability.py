@@ -15,6 +15,8 @@ import pytest
 from familiar_agent.gui import (
     ChatLog,
     FamiliarWindow,
+    _apply_runtime_env_overrides,
+    _refresh_agent_config_from_env,
     build_testflight_persona,
     needs_testflight_setup,
     resolve_app_icon_path,
@@ -394,6 +396,34 @@ def test_resolve_app_icon_path_prefers_env_relative_to_runtime_dir(monkeypatch, 
     monkeypatch.setattr("familiar_agent.gui._runtime_base_dir", lambda: tmp_path)
 
     assert resolve_app_icon_path() == icon
+
+
+def test_runtime_env_overrides_refresh_agent_config(monkeypatch) -> None:
+    from familiar_agent.config import AgentConfig
+
+    monkeypatch.setenv("AGENT_NAME", "Before")
+    monkeypatch.setenv("COMPANION_NAME", "BeforeUser")
+    monkeypatch.setenv("CAMERA_HOST", "")
+    monkeypatch.setenv("CAMERA_USERNAME", "admin")
+    monkeypatch.setenv("CAMERA_PASSWORD", "")
+    cfg = AgentConfig()
+
+    _apply_runtime_env_overrides(
+        [
+            ("AGENT_NAME", "After"),
+            ("COMPANION_NAME", "AfterUser"),
+            ("CAMERA_HOST", "192.168.0.77"),
+            ("CAMERA_USERNAME", "cam-user"),
+            ("CAMERA_PASSWORD", "cam-pass"),
+        ]
+    )
+    _refresh_agent_config_from_env(cfg)
+
+    assert cfg.agent_name == "After"
+    assert cfg.companion_name == "AfterUser"
+    assert cfg.camera.host == "192.168.0.77"
+    assert cfg.camera.username == "cam-user"
+    assert cfg.camera.password == "cam-pass"
 
 
 def test_gui_build_rtsp_url_encodes_credentials_and_supports_raw_url() -> None:

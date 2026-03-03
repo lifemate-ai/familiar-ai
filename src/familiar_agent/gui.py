@@ -160,6 +160,20 @@ def resolve_app_icon_path() -> Path | None:
     return None
 
 
+def _apply_runtime_env_overrides(pairs: list[tuple[str, str]]) -> None:
+    """Apply key/value overrides to current process environment."""
+    for key, value in pairs:
+        os.environ[key] = value
+
+
+def _refresh_agent_config_from_env(config: "AgentConfig") -> None:
+    """Refresh an existing AgentConfig instance from current environment."""
+    from .config import AgentConfig
+
+    refreshed = AgentConfig()
+    config.__dict__.update(refreshed.__dict__)
+
+
 # ---------------------------------------------------------------------------
 # Global stylesheet
 # ---------------------------------------------------------------------------
@@ -746,6 +760,7 @@ class TestflightSetupDialog(QDialog):
         parent: QWidget | None = None,
     ) -> None:
         super().__init__(parent)
+        self._config = config
         self._env_path = env_path
         self._persona_path = persona_path
 
@@ -885,6 +900,8 @@ class TestflightSetupDialog(QDialog):
             ]
             for key, value in pairs:
                 set_key(env_str, key, value)
+            _apply_runtime_env_overrides(pairs)
+            _refresh_agent_config_from_env(self._config)
         except Exception as exc:
             QMessageBox.warning(self, "保存失敗", str(exc))
             return
@@ -922,6 +939,7 @@ class SettingsDialog(QDialog):
         parent: QWidget | None = None,
     ) -> None:
         super().__init__(parent)
+        self._config = config
         self._env_path = env_path
         self.setWindowTitle(_t("settings_window_title"))
         self.setMinimumWidth(760)
@@ -1070,12 +1088,17 @@ class SettingsDialog(QDialog):
 
         try:
             self._env_path.touch(exist_ok=True)
+            applied_pairs: list[tuple[str, str]] = []
             for key, value in plain_pairs:
                 if value:
                     set_key(env_str, key, value)
+                    applied_pairs.append((key, value))
             for key, value in masked_pairs:
                 if value:
                     set_key(env_str, key, value)
+                    applied_pairs.append((key, value))
+            _apply_runtime_env_overrides(applied_pairs)
+            _refresh_agent_config_from_env(self._config)
         except Exception as exc:
             QMessageBox.warning(self, _t("settings_save_failed_title"), str(exc))
             return

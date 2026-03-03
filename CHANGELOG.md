@@ -38,6 +38,9 @@ This project adheres to [Semantic Versioning](https://semver.org/).
 - Setup logging no longer imports `transformers` at startup (avoids packaged Windows crash on torch DLL init).
 - Embedding model load failures now degrade to zero-vector fallback instead of crashing startup.
 - `build.sh` / `build.bat` now default to `--mode onedir` for more reliable Windows testflight builds.
+- Testflight env generation now also carries over `ELEVENLABS_API_KEY` and `ELEVENLABS_VOICE_ID` from local `.env`/environment.
+- Testflight setup/settings saves now update process env + runtime config immediately, so saved values appear in GUI without restart.
+- Testflight packaged entrypoint now force-exits the process after GUI shutdown to avoid relaunch failures on Windows.
 
 ## [0.1.0] - 2026-02-22
 

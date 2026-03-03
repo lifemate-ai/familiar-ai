@@ -43,7 +43,8 @@ Outputs:
 - `.release/familiar-testflight.zip` (send this file)
 
 What this one command does:
-1. Generates `.testflight/.env` from your local `.env` / env vars (API key embedded).
+1. Generates `.testflight/.env` from your local `.env` / env vars.
+   It embeds `API_KEY`, `ELEVENLABS_API_KEY`, and `ELEVENLABS_VOICE_ID`.
 2. Builds Windows package with PyInstaller.
 
 If you still want a single-file `.exe`:
