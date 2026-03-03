@@ -363,6 +363,7 @@ class StreamLabel(QWidget):
         super().__init__(parent)
         self._chunks: list[str] = []
         self._text = ""
+        self._status_text = ""
         self._cursor_on = False
 
         self._label = QLabel("")
@@ -390,8 +391,25 @@ class StreamLabel(QWidget):
 
     def append_chunk(self, chunk: str) -> None:
         self._chunks.append(chunk)
+        self._status_text = ""
         if not self._blink_timer.isActive():
             self._blink_timer.start()
+
+    def set_status(self, text: str) -> None:
+        """Display non-streaming status text (e.g., thinking elapsed time)."""
+        self._status_text = text
+        if not self._text and not self._chunks:
+            self._label.setText(self._status_text)
+
+    def clear_status(self) -> None:
+        """Clear the status text if no streaming text is currently shown."""
+        self._status_text = ""
+        if not self._text and not self._chunks:
+            self._label.setText("")
+
+    def has_content(self) -> bool:
+        """Whether streamed assistant text is currently visible/pending."""
+        return bool(self._text or self._chunks)
 
     def _flush(self) -> None:
         if self._chunks:
@@ -404,8 +422,13 @@ class StreamLabel(QWidget):
         self._update_label()
 
     def _update_label(self) -> None:
-        cursor = "▊" if self._cursor_on else " "
-        self._label.setText(self._text + cursor)
+        if self._text:
+            cursor = "▊" if self._cursor_on else " "
+            self._label.setText(self._text + cursor)
+        elif self._status_text:
+            self._label.setText(self._status_text)
+        else:
+            self._label.setText("")
 
     def commit_and_clear(self) -> str:
         """Flush pending chunks, return full accumulated text, then clear."""
@@ -413,6 +436,7 @@ class StreamLabel(QWidget):
         text = self._text
         self._text = ""
         self._chunks.clear()
+        self._status_text = ""
         self._cursor_on = False
         self._blink_timer.stop()
         self._label.setText("")
@@ -995,6 +1019,14 @@ class FamiliarWindow(QMainWindow):
     def _set_turn_ui_state(self, running: bool) -> None:
         self._stop_btn.setEnabled(running)
 
+    def _thinking_status_text(self, elapsed_sec: int) -> str:
+        """Status line shown while waiting for the first response chunk."""
+        return _t(
+            "thinking_status",
+            name=self._agent_display_name,
+            seconds=str(elapsed_sec),
+        )
+
     # ------------------------------------------------------------------
     # Agent loop
     # ------------------------------------------------------------------
@@ -1053,7 +1085,21 @@ class FamiliarWindow(QMainWindow):
             self._input_queue.qsize(),
         )
 
+        thinking_timer = QTimer(self)
+        thinking_timer.setInterval(200)
+
+        def _update_thinking_status() -> None:
+            if self._stream.has_content():
+                return
+            elapsed = int(time.perf_counter() - turn_started)
+            self._stream.set_status(self._thinking_status_text(elapsed))
+
+        thinking_timer.timeout.connect(_update_thinking_status)
+        _update_thinking_status()
+        thinking_timer.start()
+
         def on_text(chunk: str) -> None:
+            self._stream.clear_status()
             self._stream.append_chunk(chunk)
 
         def on_action(name: str, tool_input: dict) -> None:
@@ -1090,6 +1136,8 @@ class FamiliarWindow(QMainWindow):
             logger.exception("Agent run error")
             self._log.append_line(f"[error] {exc}")
         finally:
+            thinking_timer.stop()
+            self._stream.clear_status()
             self._agent_task = None
             self._agent_running = False
             self._set_turn_ui_state(False)
