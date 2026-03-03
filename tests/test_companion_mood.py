@@ -113,6 +113,10 @@ class TestInferCompanionMood:
 
         agent._memory = MagicMock(spec=ObservationMemory)
         agent._memory.recall_day_summaries_async = AsyncMock(return_value=[])
+        agent._memory.recall_semantic_facts_async = AsyncMock(return_value=[])
+        agent._memory.recall_behavior_policies_async = AsyncMock(return_value=[])
+        agent._memory.format_semantic_facts_for_context = MagicMock(return_value="")
+        agent._memory.format_behavior_policies_for_context = MagicMock(return_value="")
         agent._memory_tool = MagicMock(spec=MemoryTool)
         agent._tom_tool = MagicMock(spec=ToMTool)
         agent._coding = MagicMock(spec=CodingTool)
@@ -215,11 +219,15 @@ class TestFrustratedBoostsDesire:
         agent._memory.recall_self_model_async = AsyncMock(return_value=[])
         agent._memory.recall_curiosities_async = AsyncMock(return_value=[])
         agent._memory.recall_day_summaries_async = AsyncMock(return_value=[])
+        agent._memory.recall_semantic_facts_async = AsyncMock(return_value=[])
+        agent._memory.recall_behavior_policies_async = AsyncMock(return_value=[])
         agent._memory.save_async = AsyncMock(return_value=True)
         agent._memory.format_for_context = MagicMock(return_value="")
         agent._memory.format_feelings_for_context = MagicMock(return_value="")
         agent._memory.format_self_model_for_context = MagicMock(return_value="")
         agent._memory.format_curiosities_for_context = MagicMock(return_value="")
+        agent._memory.format_semantic_facts_for_context = MagicMock(return_value="")
+        agent._memory.format_behavior_policies_for_context = MagicMock(return_value="")
 
         mock_backend = MagicMock()
         # complete() for _infer_companion_mood → "frustrated"

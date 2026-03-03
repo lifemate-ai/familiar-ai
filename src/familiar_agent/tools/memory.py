@@ -10,6 +10,7 @@ Architecture inspired by memory-mcp (Phase 11: SQLite+numpy).
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import json
 import logging
 import sqlite3
@@ -63,6 +64,10 @@ def _encode_vector(vec: list[float]) -> bytes:
 
 def _decode_vector(blob: bytes) -> np.ndarray:
     return np.frombuffer(blob, dtype=np.float32)
+
+
+def _stable_hash(text: str, length: int = 16) -> str:
+    return hashlib.sha1(text.encode("utf-8", errors="ignore")).hexdigest()[:length]
 
 
 # ── lazy embedding model ──────────────────────────────────────
@@ -351,6 +356,174 @@ class ObservationMemory:
             db.commit()
             return status
 
+    def _upsert_semantic_fact_locked(
+        self,
+        db: sqlite3.Connection,
+        fact_key: str,
+        fact_text: str,
+        source_memory_id: str | None = None,
+        confidence: float = 0.6,
+        tags: str = "",
+    ) -> None:
+        now_iso = self._now_iso()
+        confidence = max(0.0, min(1.0, float(confidence)))
+        existing = db.execute(
+            "SELECT id FROM semantic_facts WHERE fact_key = ?",
+            (fact_key,),
+        ).fetchone()
+        if existing:
+            db.execute(
+                "UPDATE semantic_facts "
+                "SET fact_text = ?, source_memory_id = COALESCE(?, source_memory_id), "
+                "confidence = MAX(confidence, ?), tags = ?, last_seen_at = ?, updated_at = ? "
+                "WHERE fact_key = ?",
+                (
+                    fact_text,
+                    source_memory_id,
+                    confidence,
+                    tags,
+                    now_iso,
+                    now_iso,
+                    fact_key,
+                ),
+            )
+            return
+        db.execute(
+            "INSERT INTO semantic_facts "
+            "(id, fact_key, fact_text, source_memory_id, confidence, tags, last_seen_at, created_at, updated_at) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            (
+                str(uuid.uuid4()),
+                fact_key,
+                fact_text,
+                source_memory_id,
+                confidence,
+                tags,
+                now_iso,
+                now_iso,
+                now_iso,
+            ),
+        )
+
+    def _upsert_behavior_policy_locked(
+        self,
+        db: sqlite3.Connection,
+        policy_key: str,
+        policy_text: str,
+        trigger_context: str = "",
+        action_hint: str = "",
+        source_memory_id: str | None = None,
+        confidence: float = 0.6,
+    ) -> None:
+        now_iso = self._now_iso()
+        confidence = max(0.0, min(1.0, float(confidence)))
+        existing = db.execute(
+            "SELECT id FROM behavior_policies WHERE policy_key = ?",
+            (policy_key,),
+        ).fetchone()
+        if existing:
+            db.execute(
+                "UPDATE behavior_policies "
+                "SET policy_text = ?, trigger_context = ?, action_hint = ?, "
+                "source_memory_id = COALESCE(?, source_memory_id), "
+                "confidence = MAX(confidence, ?), last_seen_at = ?, updated_at = ? "
+                "WHERE policy_key = ?",
+                (
+                    policy_text,
+                    trigger_context,
+                    action_hint,
+                    source_memory_id,
+                    confidence,
+                    now_iso,
+                    now_iso,
+                    policy_key,
+                ),
+            )
+            return
+        db.execute(
+            "INSERT INTO behavior_policies "
+            "(id, policy_key, policy_text, trigger_context, action_hint, source_memory_id, confidence, "
+            "last_seen_at, created_at, updated_at) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            (
+                str(uuid.uuid4()),
+                policy_key,
+                policy_text,
+                trigger_context,
+                action_hint,
+                source_memory_id,
+                confidence,
+                now_iso,
+                now_iso,
+                now_iso,
+            ),
+        )
+
+    def _project_memory_locked(
+        self,
+        db: sqlite3.Connection,
+        source_memory_id: str,
+        content: str,
+        kind: str,
+        emotion: str,
+    ) -> None:
+        text = content.strip()
+        if not text:
+            return
+
+        # Episodic -> semantic (stable self/companion facts)
+        if kind == "self_model":
+            key = f"self_model:{_stable_hash(text)}"
+            self._upsert_semantic_fact_locked(
+                db,
+                fact_key=key,
+                fact_text=text[:220],
+                source_memory_id=source_memory_id,
+                confidence=0.82,
+                tags="self_model",
+            )
+            return
+
+        if kind == "companion_status":
+            key = f"companion_status:{_stable_hash(text)}"
+            self._upsert_semantic_fact_locked(
+                db,
+                fact_key=key,
+                fact_text=text[:220],
+                source_memory_id=source_memory_id,
+                confidence=0.78,
+                tags="companion_status",
+            )
+            return
+
+        # Episodic -> policy (action tendencies)
+        if kind == "curiosity":
+            key = f"curiosity_policy:{_stable_hash(text)}"
+            policy_text = f"When idle, follow up this curiosity thread: {text[:180]}"
+            self._upsert_behavior_policy_locked(
+                db,
+                policy_key=key,
+                policy_text=policy_text,
+                trigger_context="idle",
+                action_hint="look_around",
+                source_memory_id=source_memory_id,
+                confidence=0.74,
+            )
+            return
+
+        if kind == "conversation" and emotion in {"moved", "excited"}:
+            key = f"conversation_style:{_stable_hash(text)}"
+            policy_text = f"Prefer this response style when supporting the companion: {text[:180]}"
+            self._upsert_behavior_policy_locked(
+                db,
+                policy_key=key,
+                policy_text=policy_text,
+                trigger_context="conversation",
+                action_hint="respond_supportively",
+                source_memory_id=source_memory_id,
+                confidence=0.62,
+            )
+
     def _materialize_memory_save_event(self, event_id: str, payload: dict[str, Any]) -> bool:
         """Materialize a memory.save payload into observations + embeddings."""
         content = str(payload.get("content", "")).strip()
@@ -406,6 +579,13 @@ class ObservationMemory:
             db.execute(
                 "INSERT INTO obs_embeddings (obs_id, vector) VALUES (?, ?)",
                 (event_id, blob),
+            )
+            self._project_memory_locked(
+                db,
+                source_memory_id=event_id,
+                content=content,
+                kind=kind,
+                emotion=emotion,
             )
             db.commit()
         return True
@@ -714,6 +894,90 @@ class ObservationMemory:
             lines.append(f"- {c['date']} {c['time']}: {c['summary'][:120]}")
         return "\n".join(lines)
 
+    def recall_semantic_facts(self, query: str, n: int = 5) -> list[dict]:
+        """Recall stable semantic facts relevant to the current topic."""
+        try:
+            like = f"%{query.strip()}%" if query.strip() else "%"
+            with self._db_lock:
+                db = self._ensure_connected()
+                rows = db.execute(
+                    "SELECT fact_key, fact_text, source_memory_id, confidence, tags, last_seen_at "
+                    "FROM semantic_facts "
+                    "WHERE (? = '%' OR fact_text LIKE ? OR tags LIKE ?) "
+                    "ORDER BY CASE WHEN fact_text LIKE ? THEN 0 ELSE 1 END, last_seen_at DESC "
+                    "LIMIT ?",
+                    (like, like, like, like, n),
+                ).fetchall()
+            return [
+                {
+                    "key": r["fact_key"],
+                    "summary": r["fact_text"],
+                    "source_memory_id": r["source_memory_id"],
+                    "confidence": float(r["confidence"]),
+                    "tags": r["tags"],
+                    "last_seen_at": r["last_seen_at"],
+                }
+                for r in rows
+            ]
+        except Exception as e:
+            logger.warning("Failed to recall semantic facts: %s", e)
+            return []
+
+    def recall_behavior_policies(self, query: str, n: int = 5) -> list[dict]:
+        """Recall behavior policies relevant to the current topic."""
+        try:
+            like = f"%{query.strip()}%" if query.strip() else "%"
+            with self._db_lock:
+                db = self._ensure_connected()
+                rows = db.execute(
+                    "SELECT policy_key, policy_text, trigger_context, action_hint, "
+                    "source_memory_id, confidence, last_seen_at "
+                    "FROM behavior_policies "
+                    "WHERE (? = '%' OR policy_text LIKE ? OR trigger_context LIKE ? OR action_hint LIKE ?) "
+                    "ORDER BY CASE WHEN policy_text LIKE ? THEN 0 ELSE 1 END, last_seen_at DESC "
+                    "LIMIT ?",
+                    (like, like, like, like, like, n),
+                ).fetchall()
+            return [
+                {
+                    "key": r["policy_key"],
+                    "summary": r["policy_text"],
+                    "trigger_context": r["trigger_context"],
+                    "action_hint": r["action_hint"],
+                    "source_memory_id": r["source_memory_id"],
+                    "confidence": float(r["confidence"]),
+                    "last_seen_at": r["last_seen_at"],
+                }
+                for r in rows
+            ]
+        except Exception as e:
+            logger.warning("Failed to recall behavior policies: %s", e)
+            return []
+
+    def format_semantic_facts_for_context(self, facts: list[dict]) -> str:
+        if not facts:
+            return ""
+        lines = ["[安定した事実（semantic memory）]:"]
+        for fact in facts:
+            lines.append(
+                f"- conf:{float(fact.get('confidence', 0.0)):.2f} "
+                f"key:{str(fact.get('key', '?'))[:24]}: {str(fact.get('summary', ''))[:140]}"
+            )
+        return "\n".join(lines)
+
+    def format_behavior_policies_for_context(self, policies: list[dict]) -> str:
+        if not policies:
+            return ""
+        lines = ["[行動方針（policy memory）]:"]
+        for policy in policies:
+            trigger = str(policy.get("trigger_context", ""))[:24]
+            action = str(policy.get("action_hint", ""))[:32]
+            lines.append(
+                f"- conf:{float(policy.get('confidence', 0.0)):.2f} "
+                f"trigger:{trigger} action:{action}: {str(policy.get('summary', ''))[:140]}"
+            )
+        return "\n".join(lines)
+
     async def save_async(
         self,
         content: str,
@@ -748,6 +1012,12 @@ class ObservationMemory:
 
     async def recall_curiosities_async(self, n: int = 5) -> list[dict]:
         return await asyncio.to_thread(self.recall_curiosities, n)
+
+    async def recall_semantic_facts_async(self, query: str, n: int = 5) -> list[dict]:
+        return await asyncio.to_thread(self.recall_semantic_facts, query, n)
+
+    async def recall_behavior_policies_async(self, query: str, n: int = 5) -> list[dict]:
+        return await asyncio.to_thread(self.recall_behavior_policies, query, n)
 
     # ── Day summary support ────────────────────────────────────────
 

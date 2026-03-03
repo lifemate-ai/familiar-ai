@@ -37,8 +37,12 @@ def _make_agent():
     agent._memory.recent_feelings_async = AsyncMock(return_value=[])
     agent._memory.recall_self_model_async = AsyncMock(return_value=[])
     agent._memory.recall_curiosities_async = AsyncMock(return_value=[])
+    agent._memory.recall_semantic_facts_async = AsyncMock(return_value=[])
+    agent._memory.recall_behavior_policies_async = AsyncMock(return_value=[])
     agent._memory.format_for_context = MagicMock(return_value="")
     agent._memory.format_feelings_for_context = MagicMock(return_value="")
+    agent._memory.format_semantic_facts_for_context = MagicMock(return_value="")
+    agent._memory.format_behavior_policies_for_context = MagicMock(return_value="")
     agent._me_md = ""
 
     from familiar_agent.exploration import ExplorationTracker
