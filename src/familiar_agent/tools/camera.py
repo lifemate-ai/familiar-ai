@@ -210,6 +210,7 @@ class CameraTool:
             elif direction == "down":
                 tilt_delta = degrees / 90.0
 
+            # Relative move via ONVIF PTZ service
             await self._ptz.RelativeMove(
                 {
                     "ProfileToken": self._profile_token,
