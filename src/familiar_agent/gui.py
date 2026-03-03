@@ -1019,10 +1019,13 @@ class FamiliarWindow(QMainWindow):
     def _set_turn_ui_state(self, running: bool) -> None:
         self._stop_btn.setEnabled(running)
 
-    @staticmethod
-    def _thinking_status_text(elapsed_sec: int) -> str:
+    def _thinking_status_text(self, elapsed_sec: int) -> str:
         """Status line shown while waiting for the first response chunk."""
-        return f"AIが思考中... {elapsed_sec}s"
+        return _t(
+            "thinking_status",
+            name=self._agent_display_name,
+            seconds=str(elapsed_sec),
+        )
 
     # ------------------------------------------------------------------
     # Agent loop

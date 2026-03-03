@@ -2960,6 +2960,10 @@ _T: dict[str, dict[str, str]] = {
         "ur": "تیار ہوں",
         "vi": "Sẵn sàng",
     },
+    "thinking_status": {
+        "en": "{name} is thinking... {seconds}s",
+        "ja": "{name}が思考中... {seconds}s",
+    },
 }
 
 

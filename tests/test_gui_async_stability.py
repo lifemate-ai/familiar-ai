@@ -45,9 +45,9 @@ def _make_window_stub() -> FamiliarWindow:
     win._stop_btn = MagicMock()
     win._lag_timer = MagicMock()
     win._last_lag_tick = time.perf_counter()
-    win.setEnabled = MagicMock()
-    win.setWindowTitle = MagicMock()
-    win.close = MagicMock()
+    win.setEnabled = MagicMock()  # type: ignore[method-assign]
+    win.setWindowTitle = MagicMock()  # type: ignore[method-assign]
+    win.close = MagicMock()  # type: ignore[method-assign]
     return win
 
 
@@ -62,7 +62,7 @@ def _make_chat_log_stub(
     def _capture(text: str, **kwargs) -> None:
         captured.append((text, kwargs))
 
-    log._add_bubble = _capture  # type: ignore[method-assign]
+    log._add_bubble = _capture  # type: ignore[assignment]
     return log, captured
 
 
@@ -204,9 +204,20 @@ def test_gui_on_send_uses_companion_display_name() -> None:
 
     FamiliarWindow._on_send(win)
 
+    assert isinstance(win._log, MagicMock)
     win._log.append_line.assert_called_once_with("[Kota] hello")
 
 
-def test_gui_thinking_status_text_includes_elapsed_seconds() -> None:
-    assert FamiliarWindow._thinking_status_text(0) == "AIが思考中... 0s"
-    assert FamiliarWindow._thinking_status_text(7) == "AIが思考中... 7s"
+def test_gui_thinking_status_text_uses_i18n_and_agent_display_name(monkeypatch) -> None:
+    win = _make_window_stub()
+    win._agent_display_name = "Yukine"
+
+    def _fake_t(key: str, **kwargs: str) -> str:
+        assert key == "thinking_status"
+        assert kwargs["name"] == "Yukine"
+        return f"{kwargs['name']}:::{kwargs['seconds']}"
+
+    monkeypatch.setattr("familiar_agent.gui._t", _fake_t)
+
+    assert FamiliarWindow._thinking_status_text(win, 0) == "Yukine:::0"
+    assert FamiliarWindow._thinking_status_text(win, 7) == "Yukine:::7"
