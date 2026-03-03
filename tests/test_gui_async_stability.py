@@ -10,7 +10,7 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from familiar_agent.gui import FamiliarWindow
+from familiar_agent.gui import ChatLog, FamiliarWindow
 
 
 class _FakeCloseEvent:
@@ -27,6 +27,8 @@ class _FakeCloseEvent:
 
 def _make_window_stub() -> FamiliarWindow:
     win = FamiliarWindow.__new__(FamiliarWindow)
+    win._agent_display_name = "Yukine"
+    win._companion_display_name = "Kota"
     win._input_queue = asyncio.Queue()
     win._agent_running = False
     win._closing = False
@@ -47,6 +49,21 @@ def _make_window_stub() -> FamiliarWindow:
     win.setWindowTitle = MagicMock()
     win.close = MagicMock()
     return win
+
+
+def _make_chat_log_stub(
+    *, agent_label: str = "Yukine", companion_label: str = "Kota"
+) -> tuple[ChatLog, list[tuple[str, dict]]]:
+    log = ChatLog.__new__(ChatLog)
+    log._agent_label = agent_label
+    log._companion_label = companion_label
+    captured: list[tuple[str, dict]] = []
+
+    def _capture(text: str, **kwargs) -> None:
+        captured.append((text, kwargs))
+
+    log._add_bubble = _capture  # type: ignore[method-assign]
+    return log, captured
 
 
 @pytest.mark.asyncio
@@ -153,3 +170,38 @@ def test_gui_create_task_falls_back_when_no_running_loop(monkeypatch):
     task = FamiliarWindow._create_task(win, _noop())
     assert isinstance(task, _DummyTask)
     assert dummy_loop.created is True
+
+
+def test_chatlog_uses_configured_labels_for_user_and_agent_prefixes() -> None:
+    log, captured = _make_chat_log_stub(agent_label="ゆきね", companion_label="コウタ")
+
+    ChatLog.append_line(log, "[コウタ] こんにちは")
+    ChatLog.append_line(log, "[ゆきね] おはよう")
+
+    assert captured[0][0] == "こんにちは"
+    assert captured[0][1]["prefix"] == "コウタ"
+    assert captured[1][0] == "おはよう"
+    assert captured[1][1]["prefix"] == "ゆきね"
+
+
+def test_chatlog_accepts_legacy_you_agent_markers_with_custom_labels() -> None:
+    log, captured = _make_chat_log_stub(agent_label="ゆきね", companion_label="コウタ")
+
+    ChatLog.append_line(log, "[You] legacy user")
+    ChatLog.append_line(log, "[Agent] legacy agent")
+
+    assert captured[0][0] == "legacy user"
+    assert captured[0][1]["prefix"] == "コウタ"
+    assert captured[1][0] == "legacy agent"
+    assert captured[1][1]["prefix"] == "ゆきね"
+
+
+def test_gui_on_send_uses_companion_display_name() -> None:
+    win = _make_window_stub()
+    win._input = MagicMock()
+    win._input.text.return_value = "hello"
+    win._input.clear = MagicMock()
+
+    FamiliarWindow._on_send(win)
+
+    win._log.append_line.assert_called_once_with("[Kota] hello")

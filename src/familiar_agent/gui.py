@@ -191,8 +191,16 @@ class ChatLog(QScrollArea):
         append_action(name: str, tool_input: dict) -> None
     """
 
-    def __init__(self, parent: QWidget | None = None) -> None:
+    def __init__(
+        self,
+        parent: QWidget | None = None,
+        *,
+        agent_label: str = "Agent",
+        companion_label: str = "You",
+    ) -> None:
         super().__init__(parent)
+        self._agent_label = (agent_label or "Agent").strip() or "Agent"
+        self._companion_label = (companion_label or "You").strip() or "You"
         self.setWidgetResizable(True)
         self.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
         self.setStyleSheet(f"QScrollArea {{ background: {_BG_BASE}; border: none; }}")
@@ -211,32 +219,49 @@ class ChatLog(QScrollArea):
             20, lambda: self.verticalScrollBar().setValue(self.verticalScrollBar().maximum())
         )
 
+    @staticmethod
+    def _extract_prefixed_text(text: str, label: str) -> str | None:
+        marker = f"[{label}]"
+        if text.startswith(marker):
+            return text[len(marker) :].strip()
+        return None
+
     def append_line(self, text: str) -> None:
         """Add a styled bubble. Prefix determines bubble style."""
         text = text.strip()
         if not text:
             return
 
-        if text.startswith("[You]"):
+        user_text = self._extract_prefixed_text(text, self._companion_label)
+        if user_text is None and self._companion_label != "You":
+            user_text = self._extract_prefixed_text(text, "You")
+        if user_text is not None:
             self._add_bubble(
-                text[5:].strip(),
-                prefix="You",
+                user_text,
+                prefix=self._companion_label,
                 prefix_color=_TEXT_SECONDARY,
                 bg=_BUBBLE_USER_BG,
                 ml=60,
                 mr=4,
             )
-        elif text.startswith("[Agent]"):
+            return
+
+        agent_text = self._extract_prefixed_text(text, self._agent_label)
+        if agent_text is None and self._agent_label != "Agent":
+            agent_text = self._extract_prefixed_text(text, "Agent")
+        if agent_text is not None:
             self._add_bubble(
-                text[7:].strip(),
-                prefix="Agent",
+                agent_text,
+                prefix=self._agent_label,
                 prefix_color=_ACCENT,
                 bg=_BUBBLE_AGENT_BG,
                 ml=4,
                 mr=60,
                 accent_left=True,
             )
-        elif text.startswith("[error]"):
+            return
+
+        if text.startswith("[error]"):
             self._add_bubble(
                 f"⚠ {text[7:].strip()}",
                 bg="#2a1520",
@@ -726,6 +751,8 @@ class FamiliarWindow(QMainWindow):
         super().__init__()
         self._agent = agent
         self._desires = desires
+        self._agent_display_name = (self._agent.config.agent_name or "Agent").strip() or "Agent"
+        self._companion_display_name = (self._agent.config.companion_name or "You").strip() or "You"
         self._input_queue: asyncio.Queue[str | None] = asyncio.Queue()
         self._agent_running = False
         self._closing = False
@@ -812,7 +839,10 @@ class FamiliarWindow(QMainWindow):
         left_layout.addWidget(header)
 
         # Chat log
-        self._log = ChatLog()
+        self._log = ChatLog(
+            agent_label=self._agent_display_name,
+            companion_label=self._companion_display_name,
+        )
         left_layout.addWidget(self._log, stretch=5)
 
         # Stream label
@@ -930,7 +960,7 @@ class FamiliarWindow(QMainWindow):
         if not text:
             return
         self._input.clear()
-        self._log.append_line(f"[You] {text}")
+        self._log.append_line(f"[{self._companion_display_name}] {text}")
         self._input_queue.put_nowait(text)
         qsize = self._input_queue.qsize()
         if qsize >= _GUI_QUEUE_WARN_SIZE:
@@ -1029,7 +1059,7 @@ class FamiliarWindow(QMainWindow):
         def on_action(name: str, tool_input: dict) -> None:
             committed = self._stream.commit_and_clear()
             if committed.strip():
-                self._log.append_line(f"[Agent] {committed.strip()}")
+                self._log.append_line(f"[{self._agent_display_name}] {committed.strip()}")
             self._log.append_action(name, tool_input)
 
         def on_image(b64: str) -> None:
@@ -1051,7 +1081,7 @@ class FamiliarWindow(QMainWindow):
             committed = self._stream.commit_and_clear()
             display = committed.strip() or final_text.strip()
             if display:
-                self._log.append_line(f"[Agent] {display}")
+                self._log.append_line(f"[{self._agent_display_name}] {display}")
         except asyncio.CancelledError:
             self._stream.commit_and_clear()
             if not self._cancel_requested:
