@@ -27,6 +27,7 @@ from ._i18n import _t
 logger = logging.getLogger(__name__)
 
 MAX_ITERATIONS = 50
+_MORNING_CONTEXT_MAX_CHARS = 2600
 _DEFAULT_TOOL_TIMEOUT = 20.0
 _TOOL_TIMEOUTS: dict[str, float] = {
     "see": 12.0,
@@ -574,6 +575,33 @@ class EmbodiedAgent:
         """Return exploration history for ICL-based direction steering."""
         return self._exploration.context_for_prompt(n=5)
 
+    @staticmethod
+    def _select_context_blocks(
+        blocks: list[tuple[str, float]],
+        max_chars: int = _MORNING_CONTEXT_MAX_CHARS,
+    ) -> list[str]:
+        """Select high-priority context blocks within a character budget."""
+        if max_chars <= 0:
+            return [text for text, _ in blocks]
+
+        ranked = [
+            (idx, text, score) for idx, (text, score) in enumerate(blocks) if text and text.strip()
+        ]
+        ranked.sort(key=lambda item: item[2], reverse=True)
+
+        selected: list[tuple[int, str]] = []
+        used = 0
+        for idx, text, _score in ranked:
+            block_len = len(text)
+            sep = 2 if selected else 0
+            if used + sep + block_len > max_chars:
+                continue
+            selected.append((idx, text))
+            used += sep + block_len
+
+        selected.sort(key=lambda item: item[0])
+        return [text for _, text in selected]
+
     async def _infer_emotion(self, text: str) -> str:
         """Ask the LLM to label the emotion of a response. Returns label string."""
         label = await self._utility_backend.complete(
@@ -651,19 +679,37 @@ class EmbodiedAgent:
         if desires is not None and curiosities and desires.curiosity_target is None:
             desires.curiosity_target = curiosities[0]["summary"]
 
-        parts = []
+        blocks: list[tuple[str, float]] = []
         if day_summaries:
-            parts.append(self._memory.format_day_summaries_for_context(day_summaries))
+            blocks.append((self._memory.format_day_summaries_for_context(day_summaries), 0.78))
         if semantic_facts:
-            parts.append(self._memory.format_semantic_facts_for_context(semantic_facts))
+            avg_conf = sum(float(x.get("confidence", 0.5)) for x in semantic_facts) / len(
+                semantic_facts
+            )
+            blocks.append(
+                (
+                    self._memory.format_semantic_facts_for_context(semantic_facts),
+                    0.86 + avg_conf * 0.1,
+                )
+            )
         if behavior_policies:
-            parts.append(self._memory.format_behavior_policies_for_context(behavior_policies))
+            avg_conf = sum(float(x.get("confidence", 0.5)) for x in behavior_policies) / len(
+                behavior_policies
+            )
+            blocks.append(
+                (
+                    self._memory.format_behavior_policies_for_context(behavior_policies),
+                    0.84 + avg_conf * 0.1,
+                )
+            )
         if self_model:
-            parts.append(self._memory.format_self_model_for_context(self_model))
+            blocks.append((self._memory.format_self_model_for_context(self_model), 0.83))
         if curiosities:
-            parts.append(self._memory.format_curiosities_for_context(curiosities))
+            blocks.append((self._memory.format_curiosities_for_context(curiosities), 0.74))
         if feelings:
-            parts.append(self._memory.format_feelings_for_context(feelings))
+            blocks.append((self._memory.format_feelings_for_context(feelings), 0.71))
+
+        parts = self._select_context_blocks(blocks, _MORNING_CONTEXT_MAX_CHARS)
 
         if not parts:
             # No history yet — make it explicit so the agent doesn't fabricate a past
