@@ -1,4 +1,4 @@
-"""PySide6 GUI for familiar-ai — Midnight Iris theme.
+"""PySide6 GUI for familiar-ai — Soft Daylight theme.
 
 Provides a native desktop window with:
 - Scrollable conversation log with styled HTML-like bubbles (ChatLog)
@@ -72,29 +72,33 @@ logger = logging.getLogger(__name__)
 # Color palette
 # ---------------------------------------------------------------------------
 
-_BG_BASE = "#0e0f16"
-_BG_SURFACE = "#13141e"
-_BG_CARD = "#1a1b2a"
-_BG_ELEVATED = "#1a1b2a"
-_BG_HOVER = "rgba(255,255,255,0.06)"
-_ACCENT = "#818cf8"
-_ACCENT_DEEP = "#4f46e5"
-_ACCENT_DIM = "#3730a3"
-_TEXT_PRIMARY = "#eaebf8"
-_TEXT_SECONDARY = "#6b6f8f"
-_BORDER = "rgba(255,255,255,0.07)"
-_BUBBLE_USER_BG = "rgba(129,140,248,0.18)"
-_BUBBLE_AGENT_BG = "rgba(255,255,255,0.04)"
-_BUBBLE_TOOL_BG = "rgba(0,0,0,0.30)"
+_BG_BASE = "#f8fbff"
+_BG_SURFACE = "#ffffff"
+_BG_CARD = "#ffffff"
+_BG_ELEVATED = "#fff8fc"
+_BG_HOVER = "rgba(255, 167, 190, 0.16)"
+_ACCENT = "#ff8db1"
+_ACCENT_DEEP = "#ff6e9d"
+_ACCENT_DIM = "#ffd7e7"
+_TEXT_PRIMARY = "#342c44"
+_TEXT_SECONDARY = "#7f7394"
+_BORDER = "rgba(255, 169, 192, 0.42)"
+_BUBBLE_USER_BG = "#ffe9f3"
+_BUBBLE_AGENT_BG = "#ffffff"
+_BUBBLE_TOOL_BG = "#eef6ff"
+_UI_FONT_STACK = (
+    "'Noto Sans CJK JP', 'Yu Gothic UI', 'Hiragino Sans', 'Meiryo', 'Segoe UI', sans-serif"
+)
+_MONO_FONT_STACK = "'Cascadia Mono', 'Consolas', 'Courier New', monospace"
 
 _DESIRE_COLORS: dict[str, str] = {
-    "look_around": "#4cc9f0",
-    "look_outside": "#4361ee",
-    "miss_companion": "#f72585",
-    "browse_curiosity": "#7209b7",
-    "explore": "#3a0ca3",
-    "greet_companion": "#f4a261",
-    "worry_companion": "#e63946",
+    "look_around": "#57b8ff",
+    "look_outside": "#4f8cff",
+    "miss_companion": "#ff7ea3",
+    "browse_curiosity": "#58c5b7",
+    "explore": "#5ea1ff",
+    "greet_companion": "#ffb35f",
+    "worry_companion": "#ff6b73",
 }
 
 # Flush streamed text at most this often (ms)
@@ -120,69 +124,85 @@ if not _ENV_PATH.exists():
 
 
 def _apply_global_style(app: QApplication) -> None:
-    """Apply the Midnight Iris stylesheet to the whole application."""
+    """Apply the Soft Daylight stylesheet to the whole application."""
     app.setStyleSheet(
         f"""
-        QMainWindow {{ background: {_BG_BASE}; }}
-        QDialog {{ background: {_BG_SURFACE}; }}
+        QWidget {{
+            color: {_TEXT_PRIMARY};
+            font-family: {_UI_FONT_STACK};
+        }}
+        QMainWindow {{
+            background: qlineargradient(x1:0,y1:0,x2:0,y2:1, stop:0 #fefeff, stop:1 {_BG_BASE});
+        }}
+        QDialog {{
+            background: {_BG_SURFACE};
+            border: 1px solid {_BORDER};
+            border-radius: 20px;
+        }}
+        QLabel {{ color: {_TEXT_PRIMARY}; }}
 
-        /* Scrollbar — ultra thin, ghost */
+        /* Scrollbar — soft rounded */
         QScrollBar:vertical {{
             background: transparent; width: 6px; border-radius: 3px;
         }}
         QScrollBar::handle:vertical {{
-            background: rgba(255,255,255,0.12); border-radius: 3px; min-height: 24px;
+            background: rgba(127,115,148,0.34); border-radius: 3px; min-height: 24px;
         }}
-        QScrollBar::handle:vertical:hover {{ background: rgba(129,140,248,0.35); }}
+        QScrollBar::handle:vertical:hover {{ background: rgba(255,141,177,0.72); }}
         QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical {{ height: 0; }}
 
-        /* Inputs — translucent glass */
+        /* Inputs */
         QLineEdit {{
-            background: rgba(255,255,255,0.05); color: {_TEXT_PRIMARY};
-            border: 1px solid {_BORDER}; border-radius: 10px; padding: 7px 12px;
+            background: {_BG_SURFACE}; color: {_TEXT_PRIMARY};
+            border: 1px solid {_BORDER}; border-radius: 15px; padding: 8px 12px;
             selection-background-color: {_ACCENT_DIM};
         }}
-        QLineEdit:focus {{ border-color: {_ACCENT}; }}
+        QLineEdit:focus {{
+            border-color: {_ACCENT};
+            background: #fffaff;
+        }}
 
-        /* Buttons — ghost surface */
+        /* Buttons */
         QPushButton {{
-            background: rgba(255,255,255,0.05); color: {_TEXT_PRIMARY};
-            border: 1px solid {_BORDER}; border-radius: 8px; padding: 6px 16px;
+            background: #fff4fa; color: {_TEXT_PRIMARY};
+            border: 1px solid {_BORDER}; border-radius: 16px; padding: 7px 16px;
         }}
-        QPushButton:hover {{ background: rgba(255,255,255,0.09); border-color: rgba(129,140,248,0.3); }}
-        QPushButton:pressed {{ background: rgba(255,255,255,0.03); }}
+        QPushButton:hover {{ background: #ffe8f2; border-color: rgba(255,141,177,0.75); }}
+        QPushButton:pressed {{ background: #ffdfea; }}
         QPushButton:disabled {{
-            background: rgba(255,255,255,0.02); color: {_TEXT_SECONDARY};
-            border-color: rgba(255,255,255,0.04);
+            background: #f7f3f8; color: {_TEXT_SECONDARY};
+            border-color: rgba(127,115,148,0.20);
         }}
 
-        /* ComboBox — glass */
+        /* ComboBox */
         QComboBox {{
-            background: rgba(255,255,255,0.05); color: {_TEXT_PRIMARY};
-            border: 1px solid {_BORDER}; border-radius: 10px; padding: 7px 12px;
+            background: {_BG_SURFACE}; color: {_TEXT_PRIMARY};
+            border: 1px solid {_BORDER}; border-radius: 15px; padding: 8px 12px;
         }}
         QComboBox::drop-down {{ border: none; padding-right: 8px; }}
         QComboBox QAbstractItemView {{
             background: {_BG_CARD}; color: {_TEXT_PRIMARY};
-            selection-background-color: rgba(129,140,248,0.25);
+            selection-background-color: #ffe1ee;
             border: 1px solid {_BORDER};
         }}
 
-        /* Tabs — pill style */
+        /* Tabs */
         QTabWidget::pane {{
             border: 1px solid {_BORDER}; background: {_BG_SURFACE}; top: -1px;
-            border-radius: 12px;
+            border-radius: 16px;
         }}
         QTabBar::tab {{
-            background: transparent; color: {_TEXT_SECONDARY};
-            padding: 6px 20px; border-radius: 20px; margin-right: 4px;
+            background: #fff7fc; color: {_TEXT_SECONDARY};
+            padding: 7px 20px; border-radius: 18px; margin-right: 6px;
+            border: 1px solid rgba(255,169,192,0.28);
         }}
         QTabBar::tab:selected {{
             background: qlineargradient(x1:0,y1:0,x2:1,y2:1,
                 stop:0 {_ACCENT_DEEP}, stop:1 {_ACCENT});
             color: white;
+            border-color: rgba(255,110,157,0.8);
         }}
-        QTabBar::tab:hover:!selected {{ background: rgba(255,255,255,0.06); color: {_TEXT_PRIMARY}; }}
+        QTabBar::tab:hover:!selected {{ background: #ffeef6; color: {_TEXT_PRIMARY}; }}
         """
     )
 
@@ -273,8 +293,8 @@ class ChatLog(QScrollArea):
         if text.startswith("[error]"):
             self._add_bubble(
                 f"⚠ {text[7:].strip()}",
-                bg="#2a1520",
-                text_color="#e63946",
+                bg="#ffe9ee",
+                text_color="#d83d58",
                 ml=20,
                 mr=20,
                 small=True,
@@ -309,7 +329,7 @@ class ChatLog(QScrollArea):
     ) -> None:
         escaped = _html.escape(text).replace("\n", "<br>")
         fs = "11px" if small else "13px"
-        ff = "'Courier New', monospace" if monospace else "system-ui, -apple-system, sans-serif"
+        ff = _MONO_FONT_STACK if monospace else _UI_FONT_STACK
 
         if prefix:
             inner_html = (
@@ -379,10 +399,10 @@ class StreamLabel(QWidget):
         self._label.setWordWrap(True)
         self._label.setAlignment(Qt.AlignmentFlag.AlignTop | Qt.AlignmentFlag.AlignLeft)
         self._label.setStyleSheet(
-            f"background: rgba(255,255,255,0.03); color: {_TEXT_PRIMARY};"
+            f"background: {_BG_SURFACE}; color: {_TEXT_PRIMARY};"
             f" padding: 10px 16px; border-radius: 14px;"
             f" border: 1px solid {_BORDER}; border-left: 3px solid {_ACCENT};"
-            f" font-family: system-ui, -apple-system, sans-serif; font-size: 13px;"
+            f" font-family: {_UI_FONT_STACK}; font-size: 13px;"
         )
 
         layout = QVBoxLayout(self)
@@ -535,7 +555,7 @@ class DesireBar(QWidget):
         self._bar.setTextVisible(False)
         self._bar.setFixedHeight(6)
         self._bar.setStyleSheet(
-            f"QProgressBar {{ background: rgba(255,255,255,0.06); border-radius: 3px; border: none; }}"
+            f"QProgressBar {{ background: rgba(127,115,148,0.16); border-radius: 3px; border: none; }}"
             f"QProgressBar::chunk {{"
             f" background: qlineargradient(x1:0,y1:0,x2:1,y2:0,"
             f" stop:0 rgba(0,0,0,0), stop:0.3 {color}55, stop:1 {color});"
@@ -630,11 +650,27 @@ class SettingsDialog(QDialog):
         tabs = QTabWidget()
         vbox.addWidget(tabs)
 
+        def _style_form(form: QFormLayout) -> None:
+            form.setHorizontalSpacing(16)
+            form.setVerticalSpacing(11)
+            form.setFieldGrowthPolicy(QFormLayout.FieldGrowthPolicy.ExpandingFieldsGrow)
+            form.setFormAlignment(Qt.AlignmentFlag.AlignTop | Qt.AlignmentFlag.AlignLeft)
+
+        def _form_label(key: str) -> QLabel:
+            label = QLabel(_t(key))
+            # Keep enough width so short JP labels like 「名」 never get clipped.
+            label.setMinimumWidth(132)
+            label.setStyleSheet(
+                f"color: {_TEXT_PRIMARY}; font-size: 13px; font-weight: 600;"
+                f"padding-right: 6px; background: transparent;"
+            )
+            return label
+
         # ── Tab 1: Agent ──────────────────────────────────────────
         agent_tab = QWidget()
         agent_tab.setStyleSheet("background: transparent;")
         af = QFormLayout(agent_tab)
-        af.setSpacing(10)
+        _style_form(af)
 
         self._agent_name = QLineEdit(config.agent_name)
         self._companion_name = QLineEdit(config.companion_name)
@@ -646,18 +682,18 @@ class SettingsDialog(QDialog):
         self._api_key.setPlaceholderText(_t("settings_placeholder_unchanged"))
         self._model = QLineEdit(config.model)
 
-        af.addRow(_t("settings_field_agent_name"), self._agent_name)
-        af.addRow(_t("settings_field_companion_name"), self._companion_name)
-        af.addRow(_t("settings_field_platform"), self._platform)
-        af.addRow(_t("settings_field_api_key"), self._api_key)
-        af.addRow(_t("settings_field_model"), self._model)
+        af.addRow(_form_label("settings_field_agent_name"), self._agent_name)
+        af.addRow(_form_label("settings_field_companion_name"), self._companion_name)
+        af.addRow(_form_label("settings_field_platform"), self._platform)
+        af.addRow(_form_label("settings_field_api_key"), self._api_key)
+        af.addRow(_form_label("settings_field_model"), self._model)
         tabs.addTab(agent_tab, _t("settings_tab_agent"))
 
         # ── Tab 2: Voice ──────────────────────────────────────────
         voice_tab = QWidget()
         voice_tab.setStyleSheet("background: transparent;")
         vf = QFormLayout(voice_tab)
-        vf.setSpacing(10)
+        _style_form(vf)
 
         self._el_api_key = QLineEdit(config.tts.elevenlabs_api_key)
         self._el_api_key.setEchoMode(QLineEdit.EchoMode.Password)
@@ -668,17 +704,17 @@ class SettingsDialog(QDialog):
         _set_combo(self._tts_output, config.tts.output)
         self._stt_language = QLineEdit(config.stt.language)
 
-        vf.addRow(_t("settings_field_elevenlabs_api_key"), self._el_api_key)
-        vf.addRow(_t("settings_field_voice_id"), self._voice_id)
-        vf.addRow(_t("settings_field_tts_output"), self._tts_output)
-        vf.addRow(_t("settings_field_stt_language"), self._stt_language)
+        vf.addRow(_form_label("settings_field_elevenlabs_api_key"), self._el_api_key)
+        vf.addRow(_form_label("settings_field_voice_id"), self._voice_id)
+        vf.addRow(_form_label("settings_field_tts_output"), self._tts_output)
+        vf.addRow(_form_label("settings_field_stt_language"), self._stt_language)
         tabs.addTab(voice_tab, _t("settings_tab_voice"))
 
         # ── Tab 3: Camera ─────────────────────────────────────────
         cam_tab = QWidget()
         cam_tab.setStyleSheet("background: transparent;")
         cf = QFormLayout(cam_tab)
-        cf.setSpacing(10)
+        _style_form(cf)
 
         self._cam_host = QLineEdit(config.camera.host)
         self._cam_user = QLineEdit(config.camera.username)
@@ -687,17 +723,17 @@ class SettingsDialog(QDialog):
         self._cam_pass.setPlaceholderText(_t("settings_placeholder_unchanged"))
         self._cam_port = QLineEdit(str(config.camera.port))
 
-        cf.addRow(_t("settings_field_camera_host"), self._cam_host)
-        cf.addRow(_t("settings_field_camera_username"), self._cam_user)
-        cf.addRow(_t("settings_field_camera_password"), self._cam_pass)
-        cf.addRow(_t("settings_field_camera_onvif_port"), self._cam_port)
+        cf.addRow(_form_label("settings_field_camera_host"), self._cam_host)
+        cf.addRow(_form_label("settings_field_camera_username"), self._cam_user)
+        cf.addRow(_form_label("settings_field_camera_password"), self._cam_pass)
+        cf.addRow(_form_label("settings_field_camera_onvif_port"), self._cam_port)
         tabs.addTab(cam_tab, _t("settings_tab_camera"))
 
         # ── Tab 4: Advanced ───────────────────────────────────────
         adv_tab = QWidget()
         adv_tab.setStyleSheet("background: transparent;")
         advf = QFormLayout(adv_tab)
-        advf.setSpacing(10)
+        _style_form(advf)
 
         self._thinking_mode = QComboBox()
         self._thinking_mode.addItems(["auto", "adaptive", "extended", "disabled"])
@@ -707,9 +743,9 @@ class SettingsDialog(QDialog):
         _set_combo(self._thinking_effort, config.thinking_effort)
         self._memory_path = QLineEdit(config.memory.db_path)
 
-        advf.addRow(_t("settings_field_thinking_mode"), self._thinking_mode)
-        advf.addRow(_t("settings_field_thinking_effort"), self._thinking_effort)
-        advf.addRow(_t("settings_field_memory_db_path"), self._memory_path)
+        advf.addRow(_form_label("settings_field_thinking_mode"), self._thinking_mode)
+        advf.addRow(_form_label("settings_field_thinking_effort"), self._thinking_effort)
+        advf.addRow(_form_label("settings_field_memory_db_path"), self._memory_path)
         tabs.addTab(adv_tab, _t("settings_tab_advanced"))
 
         # Buttons
@@ -999,7 +1035,7 @@ class FamiliarWindow(QMainWindow):
         # Header bar
         header = QWidget()
         header.setStyleSheet(
-            f"background: rgba(255,255,255,0.04); border-radius: 14px; border: 1px solid {_BORDER};"
+            f"background: {_BG_SURFACE}; border-radius: 16px; border: 1px solid {_BORDER};"
         )
         header_layout = QHBoxLayout(header)
         header_layout.setContentsMargins(16, 10, 10, 10)
@@ -1007,7 +1043,7 @@ class FamiliarWindow(QMainWindow):
 
         title_lbl = QLabel("✦ familiar-ai")
         title_lbl.setStyleSheet(
-            f"color: {_ACCENT}; font-size: 15px; font-weight: 700; background: transparent;"
+            f"color: {_ACCENT_DEEP}; font-size: 15px; font-weight: 700; background: transparent;"
             f" letter-spacing: -0.02em;"
         )
         header_layout.addWidget(title_lbl)
@@ -1018,10 +1054,10 @@ class FamiliarWindow(QMainWindow):
         settings_btn.setFixedHeight(32)
         settings_btn.setMinimumWidth(96)
         settings_btn.setStyleSheet(
-            f"QPushButton {{ background: rgba(255,255,255,0.06); border-radius: 16px;"
+            f"QPushButton {{ background: #fff2f8; border-radius: 16px;"
             f" border: 1px solid {_BORDER};"
             f" padding: 0 12px; font-size: 12px; color: {_TEXT_SECONDARY}; }}"
-            f"QPushButton:hover {{ background: rgba(255,255,255,0.10); color: {_TEXT_PRIMARY}; }}"
+            f"QPushButton:hover {{ background: #ffe7f2; color: {_TEXT_PRIMARY}; }}"
         )
         settings_btn.clicked.connect(self._open_settings)
         header_layout.addWidget(settings_btn)
@@ -1049,12 +1085,12 @@ class FamiliarWindow(QMainWindow):
         self._input.setStyleSheet(
             f"QLineEdit#msgInput {{"
             f" border-radius: 999px; padding: 10px 20px;"
-            f" background: rgba(255,255,255,0.05); border: 1px solid {_BORDER};"
+            f" background: {_BG_SURFACE}; border: 1px solid {_BORDER};"
             f" color: {_TEXT_PRIMARY}; font-size: 13px;"
-            f" font-family: system-ui, -apple-system, sans-serif;"
+            f" font-family: {_UI_FONT_STACK};"
             f"}}"
             f"QLineEdit#msgInput:focus {{"
-            f" border-color: {_ACCENT}; background: rgba(129,140,248,0.07);"
+            f" border-color: {_ACCENT}; background: #fff8fc;"
             f"}}"
         )
         self._input.returnPressed.connect(self._on_send)
@@ -1072,10 +1108,10 @@ class FamiliarWindow(QMainWindow):
             f"}}"
             f"QPushButton#sendBtn:hover {{"
             f" background: qlineargradient(x1:0,y1:0,x2:1,y2:1,"
-            f" stop:0 #5b52f5, stop:1 #9ba6fb);"
+            f" stop:0 #ff5f96, stop:1 #ff9fbc);"
             f"}}"
             f"QPushButton#sendBtn:disabled {{"
-            f" background: rgba(255,255,255,0.06); color: {_TEXT_SECONDARY};"
+            f" background: rgba(127,115,148,0.15); color: {_TEXT_SECONDARY};"
             f"}}"
         )
         self._send_btn.clicked.connect(self._on_send)
@@ -1087,16 +1123,16 @@ class FamiliarWindow(QMainWindow):
         self._stop_btn.setToolTip(_t("gui_cancel_turn_tooltip"))
         self._stop_btn.setStyleSheet(
             f"QPushButton#stopBtn {{"
-            f" background: rgba(230,57,70,0.20);"
-            f" border-radius: 22px; border: 1px solid rgba(230,57,70,0.45);"
-            f" font-size: 14px; color: #ff7b86;"
+            f" background: rgba(255,107,115,0.20);"
+            f" border-radius: 22px; border: 1px solid rgba(255,107,115,0.52);"
+            f" font-size: 14px; color: #e34f5d;"
             f"}}"
             f"QPushButton#stopBtn:hover {{"
-            f" background: rgba(230,57,70,0.28); color: #ff9aa3;"
+            f" background: rgba(255,107,115,0.30); color: #c13f4d;"
             f"}}"
             f"QPushButton#stopBtn:disabled {{"
-            f" background: rgba(255,255,255,0.04); color: {_TEXT_SECONDARY};"
-            f" border-color: rgba(255,255,255,0.08);"
+            f" background: rgba(127,115,148,0.12); color: {_TEXT_SECONDARY};"
+            f" border-color: rgba(127,115,148,0.20);"
             f"}}"
         )
         self._stop_btn.setEnabled(False)
@@ -1117,7 +1153,7 @@ class FamiliarWindow(QMainWindow):
 
         desire_card = QWidget()
         desire_card.setStyleSheet(
-            f"background: rgba(255,255,255,0.03); border-radius: 18px; border: 1px solid {_BORDER};"
+            f"background: {_BG_ELEVATED}; border-radius: 18px; border: 1px solid {_BORDER};"
         )
         desire_card_vbox = QVBoxLayout(desire_card)
         desire_card_vbox.setContentsMargins(0, 0, 0, 0)
@@ -1129,7 +1165,9 @@ class FamiliarWindow(QMainWindow):
         # Splitter
         splitter = QSplitter(Qt.Orientation.Horizontal)
         splitter.setChildrenCollapsible(False)
-        splitter.setStyleSheet(f"QSplitter::handle {{ background: {_BORDER}; width: 1px; }}")
+        splitter.setStyleSheet(
+            "QSplitter::handle { background: rgba(255,169,192,0.42); width: 2px; }"
+        )
         splitter.addWidget(left)
         splitter.addWidget(right)
         splitter.setStretchFactor(0, 3)
