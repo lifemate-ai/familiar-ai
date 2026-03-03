@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 import asyncio
+import hashlib
 import logging
 import os
 import time
@@ -496,6 +497,18 @@ class EmbodiedAgent:
                 interrupts.append(item)
         return interrupts
 
+    def _memory_dedupe_key(
+        self,
+        kind: str,
+        content: str,
+        scope: str = "turn",
+        scope_id: str | None = None,
+    ) -> str:
+        """Build a stable dedupe key to avoid duplicate writes on retries."""
+        digest = hashlib.sha1(content.encode("utf-8", errors="ignore")).hexdigest()[:12]
+        resolved_scope_id = scope_id or str(self._turn_count)
+        return f"{scope}:{resolved_scope_id}:{kind}:{digest}"
+
     def _load_me_md(self) -> str:
         """Load ME.md personality file if it exists."""
         from pathlib import Path
@@ -600,18 +613,30 @@ class EmbodiedAgent:
         to know who we are now. Called only on the first turn of a session.
         """
         logger.info("Morning reconstruction started")
-        self_model, curiosities, feelings, day_summaries = await asyncio.gather(
+        (
+            self_model,
+            curiosities,
+            feelings,
+            day_summaries,
+            semantic_facts,
+            behavior_policies,
+        ) = await asyncio.gather(
             self._memory.recall_self_model_async(n=5),
             self._memory.recall_curiosities_async(n=3),
             self._memory.recent_feelings_async(n=3),
             self._memory.recall_day_summaries_async(n=5),
+            self._memory.recall_semantic_facts_async("", n=5),
+            self._memory.recall_behavior_policies_async("", n=4),
         )
         logger.info(
-            "Morning data: self_model=%d, curiosities=%d, feelings=%d, day_summaries=%d",
+            "Morning data: self_model=%d, curiosities=%d, feelings=%d, day_summaries=%d, "
+            "semantic_facts=%d, behavior_policies=%d",
             len(self_model),
             len(curiosities),
             len(feelings),
             len(day_summaries),
+            len(semantic_facts),
+            len(behavior_policies),
         )
 
         # Generate day summaries for past dates that don't have one yet.
@@ -629,6 +654,10 @@ class EmbodiedAgent:
         parts = []
         if day_summaries:
             parts.append(self._memory.format_day_summaries_for_context(day_summaries))
+        if semantic_facts:
+            parts.append(self._memory.format_semantic_facts_for_context(semantic_facts))
+        if behavior_policies:
+            parts.append(self._memory.format_behavior_policies_for_context(behavior_policies))
         if self_model:
             parts.append(self._memory.format_self_model_for_context(self_model))
         if curiosities:
@@ -710,6 +739,9 @@ class EmbodiedAgent:
                     kind="day_summary",
                     emotion="neutral",
                     override_date=date,
+                    dedupe_key=self._memory_dedupe_key(
+                        "day_summary", summary[:200], scope="day", scope_id=date
+                    ),
                     materialize_now=False,
                 )
                 logger.info("Day summary generated for %s: %s", date, summary[:80])
@@ -739,6 +771,7 @@ class EmbodiedAgent:
                     direction="内省",
                     kind="self_model",
                     emotion=emotion,
+                    dedupe_key=self._memory_dedupe_key("self_model", insight),
                     materialize_now=False,
                 )
                 logger.info("Self-model updated: %s", insight[:60])
@@ -882,16 +915,30 @@ class EmbodiedAgent:
         recall_n = 5 if self._post_compact else 3
         self._post_compact = False  # consume the flag regardless
         if not is_desire_turn:
-            memories, feelings, companion_mood = await asyncio.gather(
+            (
+                memories,
+                feelings,
+                companion_mood,
+                semantic_facts,
+                behavior_policies,
+            ) = await asyncio.gather(
                 self._memory.recall_async(user_input, n=recall_n),
                 self._memory.recent_feelings_async(n=4),
                 self._infer_companion_mood(user_input),
+                self._memory.recall_semantic_facts_async(user_input, n=3),
+                self._memory.recall_behavior_policies_async(user_input, n=2),
             )
             memory_parts = []
             if memories:
                 memory_parts.append(self._memory.format_for_context(memories))
             if feelings:
                 memory_parts.append(self._memory.format_feelings_for_context(feelings))
+            if semantic_facts:
+                memory_parts.append(self._memory.format_semantic_facts_for_context(semantic_facts))
+            if behavior_policies:
+                memory_parts.append(
+                    self._memory.format_behavior_policies_for_context(behavior_policies)
+                )
             if memory_parts:
                 user_input_with_ctx = user_input + "\n\n" + "\n\n".join(memory_parts)
             else:
@@ -954,17 +1001,13 @@ class EmbodiedAgent:
                 if final_text and final_text != "(no response)":
                     # Save observation and compute novelty for ICL exploration
                     if camera_used:
-                        await self._memory.save_async(
-                            final_text[:500], direction="観察", kind="observation"
-                        )
                         # Novelty = how different this observation is from recent ones.
                         # recall_async returns records sorted by cosine similarity (highest first).
                         # The most similar past observation's score ≈ redundancy; invert it.
                         recent_obs = await self._memory.recall_async(
                             final_text[:200], n=6, kind="observation"
                         )
-                        # Skip the just-saved record (index 0 is itself); use next ones
-                        past_scores = [m.get("score", 0.5) for m in recent_obs[1:4]]
+                        past_scores = [m.get("score", 0.5) for m in recent_obs[:3]]
                         if past_scores:
                             avg_similarity = sum(past_scores) / len(past_scores)
                             novelty = 1.0 - avg_similarity  # low similarity → high novelty
@@ -974,6 +1017,13 @@ class EmbodiedAgent:
                         self._exploration.record_novelty(novelty)
                         if desires is not None:
                             desires.boost("look_around", novelty * 0.3)
+                        await self._memory.save_async(
+                            final_text[:500],
+                            direction="観察",
+                            kind="observation",
+                            dedupe_key=self._memory_dedupe_key("observation", final_text[:500]),
+                            materialize_now=False,
+                        )
 
                     # Save emotional memory of this conversation exchange
                     emotion = await self._infer_emotion(final_text)
@@ -983,6 +1033,7 @@ class EmbodiedAgent:
                         direction="会話",
                         kind="conversation",
                         emotion=emotion,
+                        dedupe_key=self._memory_dedupe_key("conversation", summary),
                         materialize_now=False,
                     )
 
@@ -1016,6 +1067,7 @@ class EmbodiedAgent:
                             direction="好奇心",
                             kind="curiosity",
                             emotion="curious",
+                            dedupe_key=self._memory_dedupe_key("curiosity", curiosity),
                             materialize_now=False,
                         )
                         logger.info("Curiosity persisted: %s", curiosity)
