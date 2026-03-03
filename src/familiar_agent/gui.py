@@ -90,6 +90,7 @@ _UI_FONT_STACK = (
     "'Noto Sans CJK JP', 'Yu Gothic UI', 'Hiragino Sans', 'Meiryo', 'Segoe UI', sans-serif"
 )
 _MONO_FONT_STACK = "'Cascadia Mono', 'Consolas', 'Courier New', monospace"
+_FONT_SCALE = 1.9
 
 _DESIRE_COLORS: dict[str, str] = {
     "look_around": "#57b8ff",
@@ -112,6 +113,12 @@ _GUI_LOOK_PREVIEW_MAX_SEC = 2.0
 _GUI_LOOK_PREVIEW_GRACE_SEC = 0.3
 _GUI_LOOK_PREVIEW_READ_TIMEOUT_SEC = 0.35
 
+
+def _px(size: int) -> int:
+    """Scale font-size in px for large readable UI."""
+    return max(1, int(round(size * _FONT_SCALE)))
+
+
 # Resolve .env path: project root, then cwd fallback
 _ENV_PATH: Path = Path(__file__).resolve().parents[2] / ".env"
 if not _ENV_PATH.exists():
@@ -130,6 +137,7 @@ def _apply_global_style(app: QApplication) -> None:
         QWidget {{
             color: {_TEXT_PRIMARY};
             font-family: {_UI_FONT_STACK};
+            font-size: {_px(13)}px;
         }}
         QMainWindow {{
             background: qlineargradient(x1:0,y1:0,x2:0,y2:1, stop:0 #fefeff, stop:1 {_BG_BASE});
@@ -154,7 +162,7 @@ def _apply_global_style(app: QApplication) -> None:
         /* Inputs */
         QLineEdit {{
             background: {_BG_SURFACE}; color: {_TEXT_PRIMARY};
-            border: 1px solid {_BORDER}; border-radius: 15px; padding: 8px 12px;
+            border: 1px solid {_BORDER}; border-radius: 15px; padding: 10px 14px;
             selection-background-color: {_ACCENT_DIM};
         }}
         QLineEdit:focus {{
@@ -165,7 +173,7 @@ def _apply_global_style(app: QApplication) -> None:
         /* Buttons */
         QPushButton {{
             background: #fff4fa; color: {_TEXT_PRIMARY};
-            border: 1px solid {_BORDER}; border-radius: 16px; padding: 7px 16px;
+            border: 1px solid {_BORDER}; border-radius: 16px; padding: 10px 18px;
         }}
         QPushButton:hover {{ background: #ffe8f2; border-color: rgba(255,141,177,0.75); }}
         QPushButton:pressed {{ background: #ffdfea; }}
@@ -177,7 +185,7 @@ def _apply_global_style(app: QApplication) -> None:
         /* ComboBox */
         QComboBox {{
             background: {_BG_SURFACE}; color: {_TEXT_PRIMARY};
-            border: 1px solid {_BORDER}; border-radius: 15px; padding: 8px 12px;
+            border: 1px solid {_BORDER}; border-radius: 15px; padding: 10px 14px;
         }}
         QComboBox::drop-down {{ border: none; padding-right: 8px; }}
         QComboBox QAbstractItemView {{
@@ -193,7 +201,7 @@ def _apply_global_style(app: QApplication) -> None:
         }}
         QTabBar::tab {{
             background: #fff7fc; color: {_TEXT_SECONDARY};
-            padding: 7px 20px; border-radius: 18px; margin-right: 6px;
+            padding: 10px 22px; border-radius: 18px; margin-right: 6px;
             border: 1px solid rgba(255,169,192,0.28);
         }}
         QTabBar::tab:selected {{
@@ -328,12 +336,12 @@ class ChatLog(QScrollArea):
         accent_left: bool = False,
     ) -> None:
         escaped = _html.escape(text).replace("\n", "<br>")
-        fs = "11px" if small else "13px"
+        fs = f"{_px(11) if small else _px(13)}px"
         ff = _MONO_FONT_STACK if monospace else _UI_FONT_STACK
 
         if prefix:
             inner_html = (
-                f'<span style="color:{prefix_color};font-size:10px;font-weight:600;'
+                f'<span style="color:{prefix_color};font-size:{_px(10)}px;font-weight:600;'
                 f'letter-spacing:0.04em;text-transform:uppercase;">'
                 f"{_html.escape(prefix)}</span><br>"
                 f'<span style="color:{text_color};font-size:{fs};font-family:{ff};">'
@@ -402,7 +410,7 @@ class StreamLabel(QWidget):
             f"background: {_BG_SURFACE}; color: {_TEXT_PRIMARY};"
             f" padding: 10px 16px; border-radius: 14px;"
             f" border: 1px solid {_BORDER}; border-left: 3px solid {_ACCENT};"
-            f" font-family: {_UI_FONT_STACK}; font-size: 13px;"
+            f" font-family: {_UI_FONT_STACK}; font-size: {_px(13)}px;"
         )
 
         layout = QVBoxLayout(self)
@@ -536,14 +544,14 @@ class DesireBar(QWidget):
             display_name = name.replace("_", " ").title()
         name_lbl = QLabel(display_name)
         name_lbl.setStyleSheet(
-            f"color: {color}; font-size: 10px; font-weight: 600; background: transparent;"
+            f"color: {color}; font-size: {_px(10)}px; font-weight: 600; background: transparent;"
             f" letter-spacing: 0.03em;"
         )
         header.addWidget(name_lbl)
         header.addStretch()
         self._pct_label = QLabel("0%")
         self._pct_label.setStyleSheet(
-            f"color: {_TEXT_SECONDARY}; font-size: 10px; background: transparent;"
+            f"color: {_TEXT_SECONDARY}; font-size: {_px(10)}px; background: transparent;"
         )
         header.addWidget(self._pct_label)
         vbox.addLayout(header)
@@ -597,7 +605,7 @@ class DesirePanel(QWidget):
 
         title = QLabel(_t("desire_panel_title"))
         title.setStyleSheet(
-            f"color: {_TEXT_SECONDARY}; font-size: 10px; font-weight: 600;"
+            f"color: {_TEXT_SECONDARY}; font-size: {_px(10)}px; font-weight: 600;"
             f" background: transparent; letter-spacing: 0.1em;"
         )
         layout.addWidget(title)
@@ -640,7 +648,7 @@ class SettingsDialog(QDialog):
         super().__init__(parent)
         self._env_path = env_path
         self.setWindowTitle(_t("settings_window_title"))
-        self.setMinimumWidth(500)
+        self.setMinimumWidth(760)
         self.setModal(True)
 
         vbox = QVBoxLayout(self)
@@ -659,9 +667,9 @@ class SettingsDialog(QDialog):
         def _form_label(key: str) -> QLabel:
             label = QLabel(_t(key))
             # Keep enough width so short JP labels like 「名」 never get clipped.
-            label.setMinimumWidth(132)
+            label.setMinimumWidth(180)
             label.setStyleSheet(
-                f"color: {_TEXT_PRIMARY}; font-size: 13px; font-weight: 600;"
+                f"color: {_TEXT_PRIMARY}; font-size: {_px(13)}px; font-weight: 600;"
                 f"padding-right: 6px; background: transparent;"
             )
             return label
@@ -1043,7 +1051,7 @@ class FamiliarWindow(QMainWindow):
 
         title_lbl = QLabel("✦ familiar-ai")
         title_lbl.setStyleSheet(
-            f"color: {_ACCENT_DEEP}; font-size: 15px; font-weight: 700; background: transparent;"
+            f"color: {_ACCENT_DEEP}; font-size: {_px(15)}px; font-weight: 700; background: transparent;"
             f" letter-spacing: -0.02em;"
         )
         header_layout.addWidget(title_lbl)
@@ -1051,12 +1059,12 @@ class FamiliarWindow(QMainWindow):
 
         settings_btn = QPushButton(_t("settings_button"))
         settings_btn.setToolTip(_t("settings_button_tooltip"))
-        settings_btn.setFixedHeight(32)
-        settings_btn.setMinimumWidth(96)
+        settings_btn.setFixedHeight(48)
+        settings_btn.setMinimumWidth(160)
         settings_btn.setStyleSheet(
             f"QPushButton {{ background: #fff2f8; border-radius: 16px;"
             f" border: 1px solid {_BORDER};"
-            f" padding: 0 12px; font-size: 12px; color: {_TEXT_SECONDARY}; }}"
+            f" padding: 0 16px; font-size: {_px(12)}px; color: {_TEXT_SECONDARY}; }}"
             f"QPushButton:hover {{ background: #ffe7f2; color: {_TEXT_PRIMARY}; }}"
         )
         settings_btn.clicked.connect(self._open_settings)
@@ -1072,7 +1080,7 @@ class FamiliarWindow(QMainWindow):
 
         # Stream label
         self._stream = StreamLabel()
-        self._stream.setMinimumHeight(64)
+        self._stream.setMinimumHeight(110)
         left_layout.addWidget(self._stream, stretch=1)
 
         # Input row — pill QLineEdit + circular send button
@@ -1086,7 +1094,7 @@ class FamiliarWindow(QMainWindow):
             f"QLineEdit#msgInput {{"
             f" border-radius: 999px; padding: 10px 20px;"
             f" background: {_BG_SURFACE}; border: 1px solid {_BORDER};"
-            f" color: {_TEXT_PRIMARY}; font-size: 13px;"
+            f" color: {_TEXT_PRIMARY}; font-size: {_px(13)}px;"
             f" font-family: {_UI_FONT_STACK};"
             f"}}"
             f"QLineEdit#msgInput:focus {{"
@@ -1097,14 +1105,14 @@ class FamiliarWindow(QMainWindow):
         input_row.addWidget(self._input)
 
         self._send_btn = QPushButton("⬆")
-        self._send_btn.setFixedSize(44, 44)
+        self._send_btn.setFixedSize(60, 60)
         self._send_btn.setObjectName("sendBtn")
         self._send_btn.setStyleSheet(
             f"QPushButton#sendBtn {{"
             f" background: qlineargradient(x1:0,y1:0,x2:1,y2:1,"
             f" stop:0 {_ACCENT_DEEP}, stop:1 {_ACCENT});"
-            f" border-radius: 22px; border: none;"
-            f" font-size: 18px; color: white;"
+            f" border-radius: 30px; border: none;"
+            f" font-size: {_px(18)}px; color: white;"
             f"}}"
             f"QPushButton#sendBtn:hover {{"
             f" background: qlineargradient(x1:0,y1:0,x2:1,y2:1,"
@@ -1118,14 +1126,14 @@ class FamiliarWindow(QMainWindow):
         input_row.addWidget(self._send_btn)
 
         self._stop_btn = QPushButton("■")
-        self._stop_btn.setFixedSize(44, 44)
+        self._stop_btn.setFixedSize(60, 60)
         self._stop_btn.setObjectName("stopBtn")
         self._stop_btn.setToolTip(_t("gui_cancel_turn_tooltip"))
         self._stop_btn.setStyleSheet(
             f"QPushButton#stopBtn {{"
             f" background: rgba(255,107,115,0.20);"
-            f" border-radius: 22px; border: 1px solid rgba(255,107,115,0.52);"
-            f" font-size: 14px; color: #e34f5d;"
+            f" border-radius: 30px; border: 1px solid rgba(255,107,115,0.52);"
+            f" font-size: {_px(14)}px; color: #e34f5d;"
             f"}}"
             f"QPushButton#stopBtn:hover {{"
             f" background: rgba(255,107,115,0.30); color: #c13f4d;"
@@ -1266,6 +1274,11 @@ class FamiliarWindow(QMainWindow):
             seconds=str(elapsed_sec),
         )
 
+    @staticmethod
+    def _startup_status_text(elapsed_sec: int) -> str:
+        """Status line shown while first-turn startup work is in progress."""
+        return f"{_t('initializing')}... ({elapsed_sec}s)"
+
     # ------------------------------------------------------------------
     # Agent loop
     # ------------------------------------------------------------------
@@ -1328,18 +1341,39 @@ class FamiliarWindow(QMainWindow):
             self._input_queue.qsize(),
         )
 
+        phase = (
+            "startup"
+            if (getattr(self._agent, "_turn_count", 0) == 0 or not self._agent.is_embedding_ready)
+            else "thinking"
+        )
+        phase_started = time.perf_counter()
         thinking_timer = QTimer(self)
         thinking_timer.setInterval(200)
 
         def _update_thinking_status() -> None:
+            nonlocal phase_started
             if self._stream.has_content():
                 return
-            elapsed = int(time.perf_counter() - turn_started)
-            self._stream.set_status(self._thinking_status_text(elapsed))
+            elapsed = int(time.perf_counter() - phase_started)
+            if phase == "startup":
+                self._stream.set_status(self._startup_status_text(elapsed))
+            else:
+                self._stream.set_status(self._thinking_status_text(elapsed))
 
         thinking_timer.timeout.connect(_update_thinking_status)
         _update_thinking_status()
         thinking_timer.start()
+
+        def on_phase(new_phase: str) -> None:
+            nonlocal phase, phase_started
+            if new_phase not in {"startup", "thinking"}:
+                return
+            if phase == new_phase:
+                return
+            phase = new_phase
+            phase_started = time.perf_counter()
+            if not self._stream.has_content():
+                _update_thinking_status()
 
         def on_text(chunk: str) -> None:
             self._stream.clear_status()
@@ -1363,6 +1397,7 @@ class FamiliarWindow(QMainWindow):
                     on_action=on_action,
                     on_text=on_text,
                     on_image=on_image,
+                    on_phase=on_phase,
                     desires=self._desires,
                     inner_voice=inner_voice,
                     interrupt_queue=self._input_queue,
