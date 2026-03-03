@@ -20,6 +20,7 @@ import asyncio
 import base64
 import html as _html
 import logging
+import time
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -94,6 +95,9 @@ _DESIRE_COLORS: dict[str, str] = {
 
 # Flush streamed text at most this often (ms)
 _STREAM_FLUSH_INTERVAL_MS = 50
+_GUI_LOOP_LAG_CHECK_SEC = 1.0
+_GUI_LOOP_LAG_WARN_SEC = 0.35
+_GUI_QUEUE_WARN_SIZE = 20
 
 # Resolve .env path: project root, then cwd fallback
 _ENV_PATH: Path = Path(__file__).resolve().parents[2] / ".env"
@@ -725,9 +729,18 @@ class FamiliarWindow(QMainWindow):
         self._input_queue: asyncio.Queue[str | None] = asyncio.Queue()
         self._agent_running = False
         self._closing = False
+        self._shutdown_requested = False
+        self._shutdown_done = False
+        self._shutdown_task: asyncio.Task[None] | None = None
+        self._cancel_requested = False
         self._agent_task: asyncio.Task[str] | None = None
         self._queue_task: asyncio.Task[None] | None = None
         self._init_task: asyncio.Task[None] | None = None
+        self._last_lag_tick = time.perf_counter()
+        self._lag_timer = QTimer(self)
+        self._lag_timer.setInterval(int(_GUI_LOOP_LAG_CHECK_SEC * 1000))
+        self._lag_timer.timeout.connect(self._report_event_loop_lag)
+        self._lag_timer.start()
 
         self.setWindowTitle("familiar-ai")
         self.resize(1020, 720)
@@ -836,6 +849,28 @@ class FamiliarWindow(QMainWindow):
         )
         self._send_btn.clicked.connect(self._on_send)
         input_row.addWidget(self._send_btn)
+
+        self._stop_btn = QPushButton("■")
+        self._stop_btn.setFixedSize(44, 44)
+        self._stop_btn.setObjectName("stopBtn")
+        self._stop_btn.setToolTip("Cancel current turn (Esc)")
+        self._stop_btn.setStyleSheet(
+            f"QPushButton#stopBtn {{"
+            f" background: rgba(230,57,70,0.20);"
+            f" border-radius: 22px; border: 1px solid rgba(230,57,70,0.45);"
+            f" font-size: 14px; color: #ff7b86;"
+            f"}}"
+            f"QPushButton#stopBtn:hover {{"
+            f" background: rgba(230,57,70,0.28); color: #ff9aa3;"
+            f"}}"
+            f"QPushButton#stopBtn:disabled {{"
+            f" background: rgba(255,255,255,0.04); color: {_TEXT_SECONDARY};"
+            f" border-color: rgba(255,255,255,0.08);"
+            f"}}"
+        )
+        self._stop_btn.setEnabled(False)
+        self._stop_btn.clicked.connect(self._on_cancel_clicked)
+        input_row.addWidget(self._stop_btn)
         left_layout.addLayout(input_row)
 
         # ── Right panel ─────────────────────────────────────────
@@ -885,6 +920,38 @@ class FamiliarWindow(QMainWindow):
         self._input.clear()
         self._log.append_line(f"[You] {text}")
         self._input_queue.put_nowait(text)
+        qsize = self._input_queue.qsize()
+        if qsize >= _GUI_QUEUE_WARN_SIZE:
+            logger.warning("GUI input queue backlog: %d", qsize)
+        else:
+            logger.debug("GUI input queued (size=%d)", qsize)
+
+    def _on_cancel_clicked(self) -> None:
+        self._cancel_turn(reason="user")
+
+    def keyPressEvent(self, event) -> None:  # type: ignore[override]
+        if event.key() == Qt.Key.Key_Escape:
+            self._cancel_turn(reason="user")
+            event.accept()
+            return
+        super().keyPressEvent(event)
+
+    def _cancel_turn(self, reason: str = "user") -> None:
+        """Cancel current turn if running.
+
+        reason: "user" (explicit cancel) or "shutdown" (window/app exit).
+        """
+        if not self._agent_running:
+            return
+        self._cancel_requested = True
+        if self._agent_task and not self._agent_task.done():
+            self._agent_task.cancel()
+        if reason == "user":
+            self._log.append_line("[interrupted]")
+        logger.info("GUI turn cancel requested (%s), queue=%d", reason, self._input_queue.qsize())
+
+    def _set_turn_ui_state(self, running: bool) -> None:
+        self._stop_btn.setEnabled(running)
 
     # ------------------------------------------------------------------
     # Agent loop
@@ -892,8 +959,6 @@ class FamiliarWindow(QMainWindow):
 
     async def _process_queue(self) -> None:
         """Dequeue user messages and run the agent; fire desires when idle."""
-        import time
-
         last_interaction = time.time()
         while True:
             try:
@@ -927,10 +992,24 @@ class FamiliarWindow(QMainWindow):
             if text is None:
                 break
             last_interaction = time.time()
+            logger.debug(
+                "GUI dequeued input (remaining queue=%d, running=%s)",
+                self._input_queue.qsize(),
+                self._agent_running,
+            )
             await self._run_agent(text)
 
     async def _run_agent(self, user_input: str, inner_voice: str = "") -> None:
+        turn_started = time.perf_counter()
         self._agent_running = True
+        self._cancel_requested = False
+        self._set_turn_ui_state(True)
+        logger.info(
+            "GUI turn start (user_input=%d chars, inner_voice=%s, queue=%d)",
+            len(user_input),
+            bool(inner_voice),
+            self._input_queue.qsize(),
+        )
 
         def on_text(chunk: str) -> None:
             self._stream.append_chunk(chunk)
@@ -963,18 +1042,25 @@ class FamiliarWindow(QMainWindow):
                 self._log.append_line(f"[Agent] {display}")
         except asyncio.CancelledError:
             self._stream.commit_and_clear()
-            self._log.append_line("[interrupted]")
+            if not self._cancel_requested:
+                self._log.append_line("[interrupted]")
         except Exception as exc:
             logger.exception("Agent run error")
             self._log.append_line(f"[error] {exc}")
         finally:
             self._agent_task = None
             self._agent_running = False
+            self._set_turn_ui_state(False)
+            logger.info(
+                "GUI turn end (duration=%.2fs, cancelled=%s, queue=%d)",
+                time.perf_counter() - turn_started,
+                self._cancel_requested,
+                self._input_queue.qsize(),
+            )
+            self._cancel_requested = False
 
     async def _show_init_status(self) -> None:
         """Update window title with elapsed time until embedding model is ready."""
-        import time
-
         if self._agent.is_embedding_ready:
             return
         start = time.time()
@@ -991,19 +1077,53 @@ class FamiliarWindow(QMainWindow):
     # ------------------------------------------------------------------
 
     def closeEvent(self, event) -> None:  # type: ignore[override]
+        if self._shutdown_done:
+            event.accept()
+            return
+        if self._shutdown_requested:
+            event.ignore()
+            return
+        self._shutdown_requested = True
         self._closing = True
+        self.setEnabled(False)
+        self.setWindowTitle("familiar-ai  ⏳ shutting down...")
+        self._ensure_shutdown_task()
+        event.ignore()
+
+    def _ensure_shutdown_task(self) -> asyncio.Task[None]:
+        if self._shutdown_task and not self._shutdown_task.done():
+            return self._shutdown_task
+        self._shutdown_task = asyncio.create_task(self._shutdown())
+        self._shutdown_task.add_done_callback(lambda _task: self._finalize_close())
+        return self._shutdown_task
+
+    def _finalize_close(self) -> None:
+        if not self._shutdown_done:
+            return
+        self.close()
+
+    def _report_event_loop_lag(self) -> None:
+        now = time.perf_counter()
+        elapsed = now - self._last_lag_tick
+        self._last_lag_tick = now
+        lag = elapsed - _GUI_LOOP_LAG_CHECK_SEC
+        if lag > _GUI_LOOP_LAG_WARN_SEC:
+            logger.warning(
+                "GUI event-loop lag detected: %.3fs (queue=%d running=%s)",
+                lag,
+                self._input_queue.qsize(),
+                self._agent_running,
+            )
+
+    async def _shutdown(self) -> None:
+        """Best-effort async cleanup on window close."""
+        self._lag_timer.stop()
+        self._cancel_turn(reason="shutdown")
         self._input_queue.put_nowait(None)
         if self._queue_task and not self._queue_task.done():
             self._queue_task.cancel()
         if self._init_task and not self._init_task.done():
             self._init_task.cancel()
-        if self._agent_task and not self._agent_task.done():
-            self._agent_task.cancel()
-        asyncio.create_task(self._shutdown())
-        event.accept()
-
-    async def _shutdown(self) -> None:
-        """Best-effort async cleanup on window close."""
         try:
             if self._agent_task and not self._agent_task.done():
                 try:
@@ -1013,6 +1133,7 @@ class FamiliarWindow(QMainWindow):
             await asyncio.wait_for(self._agent.close(), timeout=3.0)
         except (asyncio.TimeoutError, Exception):
             pass
+        self._shutdown_done = True
 
 
 # ---------------------------------------------------------------------------
@@ -1033,6 +1154,7 @@ def run_gui(agent: "EmbodiedAgent", desires: "DesireSystem") -> None:
 
     window = FamiliarWindow(agent, desires)
     window.show()
+    qt_app.aboutToQuit.connect(window._ensure_shutdown_task)
 
     with loop:
         loop.run_forever()

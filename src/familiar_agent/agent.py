@@ -25,6 +25,21 @@ from ._i18n import _t
 logger = logging.getLogger(__name__)
 
 MAX_ITERATIONS = 50
+_DEFAULT_TOOL_TIMEOUT = 20.0
+_TOOL_TIMEOUTS: dict[str, float] = {
+    "see": 12.0,
+    "look": 8.0,
+    "walk": 12.0,
+    "say": 25.0,
+    "remember": 20.0,
+    "recall": 20.0,
+    "tom": 20.0,
+    "read_file": 30.0,
+    "edit_file": 30.0,
+    "glob": 20.0,
+    "grep": 20.0,
+    "bash": 45.0,
+}
 
 SYSTEM_PROMPT = """
 (agent :type embodied
@@ -456,6 +471,23 @@ class EmbodiedAgent:
             return await self._mcp.call(name, tool_input)
         else:
             return f"Tool '{name}' not available (check configuration).", None
+
+    @staticmethod
+    def _tool_timeout_seconds(name: str) -> float:
+        """Return per-tool timeout budget in seconds."""
+        return _TOOL_TIMEOUTS.get(name, _DEFAULT_TOOL_TIMEOUT)
+
+    @staticmethod
+    def _drain_interrupt_queue(
+        interrupt_queue: asyncio.Queue[str | None], max_items: int = 6
+    ) -> list[str]:
+        """Drain pending user interrupts, preserving queue order."""
+        interrupts: list[str] = []
+        while len(interrupts) < max_items and not interrupt_queue.empty():
+            item = interrupt_queue.get_nowait()
+            if item:
+                interrupts.append(item)
+        return interrupts
 
     def _load_me_md(self) -> str:
         """Load ME.md personality file if it exists."""
@@ -975,8 +1007,17 @@ class EmbodiedAgent:
                     if on_action:
                         on_action(tc.name, tc.input)
 
+                    timeout_s = self._tool_timeout_seconds(tc.name)
                     try:
-                        text, image = await self._execute_tool(tc.name, tc.input)
+                        text, image = await asyncio.wait_for(
+                            self._execute_tool(tc.name, tc.input), timeout=timeout_s
+                        )
+                    except asyncio.TimeoutError:
+                        logger.warning("Tool %s timed out after %.1fs", tc.name, timeout_s)
+                        text, image = (
+                            f"Tool timeout: {tc.name} exceeded {timeout_s:.1f}s.",
+                            None,
+                        )
                     except Exception as e:
                         logger.warning("Tool %s failed: %s", tc.name, e)
                         text, image = f"Tool error: {e}", None
@@ -1008,11 +1049,15 @@ class EmbodiedAgent:
 
                 # Check for user interrupt (typed while agent was busy)
                 if interrupt_queue is not None and not interrupt_queue.empty():
-                    interrupt = interrupt_queue.get_nowait()
-                    if interrupt:
+                    interrupts = self._drain_interrupt_queue(interrupt_queue)
+                    if interrupts:
+                        head = " / ".join(interrupts[:3])
+                        if len(interrupts) > 3:
+                            head += f" (+{len(interrupts) - 3} more)"
+                        logger.debug("Consumed %d queued interrupts", len(interrupts))
                         self.messages.append(
                             self.backend.make_user_message(
-                                f"[User interrupted]: {interrupt}. "
+                                f"[User interrupted x{len(interrupts)}]: {head}. "
                                 "Respond to this directly with say() now."
                             )
                         )
