@@ -6,6 +6,7 @@ import asyncio
 import contextlib
 import logging
 import time
+from collections.abc import Callable
 from unittest.mock import MagicMock
 
 import pytest
@@ -25,6 +26,31 @@ class _FakeCloseEvent:
         self.ignored = True
 
 
+class _ManualRealtimeStt:
+    """Minimal controllable realtime STT session stub for GUI tests."""
+
+    def __init__(self) -> None:
+        self.on_partial: Callable[[str], None] | None = None
+        self.on_committed: Callable[[str], None] | None = None
+        self._queue: asyncio.Queue[str | None] | None = None
+        self.started = False
+
+    async def start(
+        self, _loop: asyncio.AbstractEventLoop, committed_queue: asyncio.Queue[str | None]
+    ) -> None:
+        self._queue = committed_queue
+        self.started = True
+
+    async def stop(self) -> None:
+        self.started = False
+
+    async def emit_committed(self, text: str) -> None:
+        assert self._queue is not None
+        if self.on_committed:
+            self.on_committed(text)
+        await self._queue.put(text)
+
+
 def _make_window_stub() -> FamiliarWindow:
     win = FamiliarWindow.__new__(FamiliarWindow)
     win._agent_display_name = "Yukine"
@@ -42,8 +68,12 @@ def _make_window_stub() -> FamiliarWindow:
     win._look_preview_task = None
     win._look_preview_until = 0.0
     win._look_preview_disabled = False
+    win._realtime_stt = None
+    win._realtime_stt_task = None
     win._desires = MagicMock()
     win._log = MagicMock()
+    win._stream = MagicMock()
+    win._stream.has_content.return_value = False
     win._send_btn = MagicMock()
     win._stop_btn = MagicMock()
     win._lag_timer = MagicMock()
@@ -88,6 +118,47 @@ async def test_gui_process_queue_handles_burst_in_order():
 
     await asyncio.wait_for(FamiliarWindow._process_queue(win), timeout=1.0)
     assert processed == burst
+
+
+@pytest.mark.asyncio
+async def test_gui_realtime_stt_callbacks_log_and_enqueue_text():
+    win = _make_window_stub()
+    fake_stt = _ManualRealtimeStt()
+    win._realtime_stt = fake_stt  # type: ignore[assignment]
+
+    await FamiliarWindow._start_realtime_stt(win)
+
+    assert fake_stt.started is True
+    assert fake_stt.on_partial is not None
+    assert fake_stt.on_committed is not None
+    win._log.append_line.assert_any_call("🎤 Realtime STT ON (ElevenLabs)")
+
+    fake_stt.on_partial("testing partial")
+    win._stream.set_status.assert_called_with("🎤 testing partial")
+
+    await fake_stt.emit_committed("voice hello")
+    win._stream.clear_status.assert_called()
+    win._log.append_line.assert_any_call("[Kota] voice hello")
+    assert await asyncio.wait_for(win._input_queue.get(), timeout=0.5) == "voice hello"
+
+
+@pytest.mark.asyncio
+async def test_gui_realtime_stt_init_failure_sets_session_none():
+    win = _make_window_stub()
+
+    class _FailRealtimeStt:
+        on_partial = None
+        on_committed = None
+
+        async def start(self, _loop: asyncio.AbstractEventLoop, _queue) -> None:
+            raise RuntimeError("boom")
+
+    win._realtime_stt = _FailRealtimeStt()  # type: ignore[assignment]
+
+    await FamiliarWindow._start_realtime_stt(win)
+
+    assert win._realtime_stt is None
+    win._log.append_line.assert_any_call("[error] Realtime STT init failed: boom")
 
 
 @pytest.mark.asyncio

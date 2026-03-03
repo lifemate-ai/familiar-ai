@@ -58,11 +58,13 @@ from ._ui_helpers import (
     format_action,
     should_fire_idle_desire,
 )
+from .realtime_stt_session import create_realtime_stt_session
 
 if TYPE_CHECKING:
     from familiar_agent.agent import EmbodiedAgent
     from familiar_agent.config import AgentConfig
     from familiar_agent.desires import DesireSystem
+    from familiar_agent.realtime_stt_session import RealtimeSttSession
 
 logger = logging.getLogger(__name__)
 
@@ -800,6 +802,8 @@ class FamiliarWindow(QMainWindow):
         self._look_preview_task: asyncio.Task[None] | None = None
         self._look_preview_until: float = 0.0
         self._look_preview_disabled = False
+        self._realtime_stt: RealtimeSttSession | None = create_realtime_stt_session()
+        self._realtime_stt_task: asyncio.Task[None] | None = None
         self._last_lag_tick = time.perf_counter()
         self._lag_timer = QTimer(self)
         self._lag_timer.setInterval(int(_GUI_LOOP_LAG_CHECK_SEC * 1000))
@@ -814,6 +818,8 @@ class FamiliarWindow(QMainWindow):
         self._queue_task = self._create_task(self._process_queue())
         if not self._agent.is_embedding_ready:
             self._init_task = self._create_task(self._show_init_status())
+        if self._realtime_stt:
+            self._realtime_stt_task = self._create_task(self._start_realtime_stt())
 
     def _create_task(self, coro) -> asyncio.Task[Any]:
         """Create an asyncio task from GUI sync callbacks safely.
@@ -1141,6 +1147,7 @@ class FamiliarWindow(QMainWindow):
         if not text:
             return
         self._input.clear()
+        self._stream.clear_status()
         self._log.append_line(f"[{self._companion_display_name}] {text}")
         self._input_queue.put_nowait(text)
         qsize = self._input_queue.qsize()
@@ -1148,6 +1155,41 @@ class FamiliarWindow(QMainWindow):
             logger.warning("GUI input queue backlog: %d", qsize)
         else:
             logger.debug("GUI input queued (size=%d)", qsize)
+
+    def _on_realtime_stt_partial(self, text: str) -> None:
+        """Display partial STT transcript while idle."""
+        if self._closing:
+            return
+        partial = text.strip()
+        if not partial:
+            return
+        if self._agent_running or self._stream.has_content():
+            return
+        self._stream.set_status(f"🎤 {partial}")
+
+    def _on_realtime_stt_committed(self, text: str) -> None:
+        """Display committed STT transcript as a user message bubble."""
+        if self._closing:
+            return
+        spoken = text.strip()
+        if not spoken:
+            return
+        self._stream.clear_status()
+        self._log.append_line(f"[{self._companion_display_name}] {spoken}")
+
+    async def _start_realtime_stt(self) -> None:
+        """Initialize realtime STT and feed transcripts into the GUI input queue."""
+        assert self._realtime_stt is not None
+        try:
+            loop = asyncio.get_event_loop()
+            self._realtime_stt.on_partial = self._on_realtime_stt_partial
+            self._realtime_stt.on_committed = self._on_realtime_stt_committed
+            await self._realtime_stt.start(loop, self._input_queue)
+            self._log.append_line("🎤 Realtime STT ON (ElevenLabs)")
+        except Exception as exc:
+            logger.warning("Realtime STT init failed: %s", exc)
+            self._log.append_line(f"[error] Realtime STT init failed: {exc}")
+            self._realtime_stt = None
 
     def _on_cancel_clicked(self) -> None:
         self._cancel_turn(reason="user")
@@ -1372,6 +1414,15 @@ class FamiliarWindow(QMainWindow):
         """Best-effort async cleanup on window close."""
         self._lag_timer.stop()
         self._cancel_turn(reason="shutdown")
+        if self._realtime_stt_task and not self._realtime_stt_task.done():
+            self._realtime_stt_task.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await self._realtime_stt_task
+        self._realtime_stt_task = None
+        if self._realtime_stt:
+            with contextlib.suppress(asyncio.TimeoutError, Exception):
+                await asyncio.wait_for(self._realtime_stt.stop(), timeout=2.0)
+            self._realtime_stt = None
         if self._look_preview_task and not self._look_preview_task.done():
             self._look_preview_task.cancel()
             with contextlib.suppress(asyncio.CancelledError):
