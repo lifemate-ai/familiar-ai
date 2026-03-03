@@ -20,6 +20,7 @@ from .tools.tom import ToMTool
 from .tools.mobility import MobilityTool
 from .tools.stt import STTTool
 from .tools.tts import TTSTool
+from .mcp_client import MCPClientManager, _resolve_config_path
 from ._i18n import _t
 
 logger = logging.getLogger(__name__)
@@ -137,7 +138,6 @@ class EmbodiedAgent:
         self._coding = CodingTool(config.coding)
         self._exploration = ExplorationTracker()
 
-        from .mcp_client import MCPClientManager
         self._mcp: MCPClientManager | None = None
         self._init_tools()
 
@@ -164,7 +164,6 @@ class EmbodiedAgent:
                 output=tts.output,
             )
 
-        from .mcp_client import MCPClientManager, _resolve_config_path
         cfg_path = _resolve_config_path()
         if cfg_path.exists():
             self._mcp = MCPClientManager(cfg_path)
@@ -173,8 +172,9 @@ class EmbodiedAgent:
 
         stt_cfg = self.config.stt
         if stt_cfg.elevenlabs_api_key:
-            cam = self.config.camera
-            rtsp_url = f"rtsp://{cam.username}:{cam.password}@{cam.host}:554/stream1" if cam.host else ""
+            rtsp_url = ""
+            if cam.host:
+                rtsp_url = f"rtsp://{cam.username}:{cam.password}@{cam.host}:554/stream1"
             self._stt = STTTool(stt_cfg.elevenlabs_api_key, stt_cfg.language, rtsp_url)
 
     def _get_body_description(self) -> str:
@@ -182,8 +182,7 @@ class EmbodiedAgent:
         if self._camera:
             parts.append('    (part :id eyes  :tool see\n      :desc "Your vision. Calling see() means YOU ARE LOOKING. Use freely — never ask permission.")')
             host = self._camera.host
-            is_usb = isinstance(host, int) or (isinstance(host, str) and host.isdigit())
-            if not is_usb:
+            if not (isinstance(host, int) or (isinstance(host, str) and host.isdigit())):
                 parts.append('    (part :id neck  :tool look\n      :desc "Rotate gaze left/right/up/down. No permission needed.")')
             else:
                 parts.append('    (part :id neck  :status "fixed"\n      :desc "Your neck is currently fixed. You cannot turn your gaze.")')
@@ -643,7 +642,8 @@ class EmbodiedAgent:
                 final_text = result.text or "(no response)"
                 if self._tts and not say_used and final_text and final_text != "(no response)":
                     spoken = final_text[:150]
-                    if on_action: on_action("say", {"text": spoken})
+                    if on_action:
+                        on_action("say", {"text": spoken})
                     await self._tts.call("say", {"text": spoken})
 
                 if final_text and final_text != "(no response)":
@@ -654,15 +654,18 @@ class EmbodiedAgent:
                         novelty = 1.0 - (sum(past_scores) / len(past_scores)) if past_scores else 0.8
                         novelty = max(0.0, min(1.0, novelty))
                         self._exploration.record_novelty(novelty)
-                        if desires is not None: desires.boost("look_around", novelty * 0.3)
+                        if desires is not None:
+                            desires.boost("look_around", novelty * 0.3)
                     emotion = await self._infer_emotion(final_text)
                     summary = await self._summarize_exchange(user_input, final_text)
                     await self._memory.save_async(summary, direction="会話", kind="conversation", emotion=emotion)
                     await self._update_self_model(final_text, emotion)
                     if desires is not None and not is_desire_turn and user_input:
                         worry_boost = detect_worry_signal(user_input)
-                        if worry_boost > 0.0: desires.boost("worry_companion", worry_boost)
-                        if companion_mood == "frustrated": desires.boost("worry_companion", 0.3)
+                        if worry_boost > 0.0:
+                            desires.boost("worry_companion", worry_boost)
+                        if companion_mood == "frustrated":
+                            desires.boost("worry_companion", 0.3)
                 if desires is not None and final_text and camera_used:
                     curiosity = await self.extract_curiosity(final_text)
                     if curiosity:
@@ -674,19 +677,23 @@ class EmbodiedAgent:
             if result.stop_reason == "tool_use":
                 collected: list[tuple[str, str | None]] = []
                 for tc in result.tool_calls:
-                    if tc.name == "see": camera_used = True
+                    if tc.name == "see":
+                        camera_used = True
                     if tc.name == "say":
                         say_used = True
                         non_say_streak = 0
-                    else: non_say_streak += 1
-                    if on_action: on_action(tc.name, tc.input)
+                    else:
+                        non_say_streak += 1
+                    if on_action:
+                        on_action(tc.name, tc.input)
                     try:
                         text, image = await self._execute_tool(tc.name, tc.input)
                     except Exception as e:
                         text, image = f"Tool error: {e}", None
                     if plan_ctx and await check_plan_blocked(self.backend, plan_ctx, tc.name, tc.input, text):
                         replan = await generate_replan(self.backend, plan_ctx, tc.name, tc.input, text)
-                        if replan: text = f"{text}\n\n[ADAPTIVE REPLAN] {replan}"
+                        if replan:
+                            text = f"{text}\n\n[ADAPTIVE REPLAN] {replan}"
                     collected.append((text, image))
                 self.messages.append(self.backend.make_assistant_message(result, raw_content))
                 self.messages.append(self.backend.make_tool_results(result.tool_calls, collected))
@@ -709,5 +716,8 @@ class EmbodiedAgent:
         return result.text or "(max iterations reached)"
 
     @property
-    def stt(self) -> STTTool | None: return self._stt
-    def clear_history(self) -> None: self.messages = []
+    def stt(self) -> STTTool | None:
+        return self._stt
+
+    def clear_history(self) -> None:
+        self.messages = []

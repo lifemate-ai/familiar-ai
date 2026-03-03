@@ -5,12 +5,17 @@ from __future__ import annotations
 import asyncio
 import base64
 import logging
-import cv2
+import os
 import threading
 import time
 from datetime import datetime
 from pathlib import Path
 from typing import Any
+from urllib.parse import urlparse
+
+import cv2
+import onvif
+from onvif import ONVIFCamera
 
 logger = logging.getLogger(__name__)
 
@@ -108,10 +113,8 @@ class CameraTool:
             return False
 
         try:
-            import os
-            import onvif
-            from onvif import ONVIFCamera
-
+            # onvif-zeep-async bug: wsdl_dir defaults to site-packages/wsdl/
+            # instead of the correct site-packages/onvif/wsdl/
             onvif_dir = os.path.dirname(onvif.__file__)
             wsdl_dir = os.path.join(onvif_dir, "wsdl")
             if not os.path.isdir(wsdl_dir):
@@ -119,7 +122,6 @@ class CameraTool:
 
             hostname = self.host
             if isinstance(hostname, str) and "://" in hostname:
-                from urllib.parse import urlparse
                 parsed = urlparse(hostname)
                 hostname = parsed.hostname or self.host
 
@@ -189,10 +191,14 @@ class CameraTool:
         try:
             pan_delta = 0.0
             tilt_delta = 0.0
-            if direction == "left": pan_delta = degrees / 180.0
-            elif direction == "right": pan_delta = -degrees / 180.0
-            elif direction == "up": tilt_delta = -degrees / 90.0
-            elif direction == "down": tilt_delta = degrees / 90.0
+            if direction == "left":
+                pan_delta = degrees / 180.0
+            elif direction == "right":
+                pan_delta = -degrees / 180.0
+            elif direction == "up":
+                tilt_delta = -degrees / 90.0
+            elif direction == "down":
+                tilt_delta = degrees / 90.0
 
             await self._ptz.RelativeMove({
                 "ProfileToken": self._profile_token,
