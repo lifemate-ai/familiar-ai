@@ -10,7 +10,6 @@ Architecture inspired by memory-mcp (Phase 11: SQLite+numpy).
 from __future__ import annotations
 
 import asyncio
-import hashlib
 import json
 import logging
 import sqlite3
@@ -64,10 +63,6 @@ def _encode_vector(vec: list[float]) -> bytes:
 
 def _decode_vector(blob: bytes) -> np.ndarray:
     return np.frombuffer(blob, dtype=np.float32)
-
-
-def _stable_hash(text: str, length: int = 16) -> str:
-    return hashlib.sha1(text.encode("utf-8", errors="ignore")).hexdigest()[:length]
 
 
 # ── lazy embedding model ──────────────────────────────────────
@@ -368,10 +363,13 @@ class ObservationMemory:
         now_iso = self._now_iso()
         confidence = max(0.0, min(1.0, float(confidence)))
         existing = db.execute(
-            "SELECT id FROM semantic_facts WHERE fact_key = ?",
+            "SELECT id, fact_text, confidence FROM semantic_facts WHERE fact_key = ?",
             (fact_key,),
         ).fetchone()
         if existing:
+            prev_text = str(existing["fact_text"])
+            prev_conf = float(existing["confidence"])
+            new_conf = max(prev_conf, confidence)
             db.execute(
                 "UPDATE semantic_facts "
                 "SET fact_text = ?, source_memory_id = COALESCE(?, source_memory_id), "
@@ -387,6 +385,17 @@ class ObservationMemory:
                     fact_key,
                 ),
             )
+            if prev_text != fact_text or abs(new_conf - prev_conf) > 1e-6:
+                self._insert_revision_locked(
+                    db,
+                    entity_type="semantic_fact",
+                    entity_key=fact_key,
+                    previous_text=prev_text,
+                    new_text=fact_text,
+                    previous_confidence=prev_conf,
+                    new_confidence=new_conf,
+                    source_memory_id=source_memory_id,
+                )
             return
         db.execute(
             "INSERT INTO semantic_facts "
@@ -418,10 +427,13 @@ class ObservationMemory:
         now_iso = self._now_iso()
         confidence = max(0.0, min(1.0, float(confidence)))
         existing = db.execute(
-            "SELECT id FROM behavior_policies WHERE policy_key = ?",
+            "SELECT id, policy_text, confidence FROM behavior_policies WHERE policy_key = ?",
             (policy_key,),
         ).fetchone()
         if existing:
+            prev_text = str(existing["policy_text"])
+            prev_conf = float(existing["confidence"])
+            new_conf = max(prev_conf, confidence)
             db.execute(
                 "UPDATE behavior_policies "
                 "SET policy_text = ?, trigger_context = ?, action_hint = ?, "
@@ -439,6 +451,17 @@ class ObservationMemory:
                     policy_key,
                 ),
             )
+            if prev_text != policy_text or abs(new_conf - prev_conf) > 1e-6:
+                self._insert_revision_locked(
+                    db,
+                    entity_type="behavior_policy",
+                    entity_key=policy_key,
+                    previous_text=prev_text,
+                    new_text=policy_text,
+                    previous_confidence=prev_conf,
+                    new_confidence=new_conf,
+                    source_memory_id=source_memory_id,
+                )
             return
         db.execute(
             "INSERT INTO behavior_policies "
@@ -459,6 +482,37 @@ class ObservationMemory:
             ),
         )
 
+    def _insert_revision_locked(
+        self,
+        db: sqlite3.Connection,
+        entity_type: str,
+        entity_key: str,
+        previous_text: str,
+        new_text: str,
+        previous_confidence: float,
+        new_confidence: float,
+        source_memory_id: str | None,
+        reason: str = "projection_update",
+    ) -> None:
+        db.execute(
+            "INSERT INTO memory_revisions "
+            "(id, entity_type, entity_key, previous_text, new_text, previous_confidence, "
+            "new_confidence, source_memory_id, reason, created_at) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            (
+                str(uuid.uuid4()),
+                entity_type,
+                entity_key,
+                previous_text[:800],
+                new_text[:800],
+                max(0.0, min(1.0, float(previous_confidence))),
+                max(0.0, min(1.0, float(new_confidence))),
+                source_memory_id,
+                reason,
+                self._now_iso(),
+            ),
+        )
+
     def _project_memory_locked(
         self,
         db: sqlite3.Connection,
@@ -473,10 +527,9 @@ class ObservationMemory:
 
         # Episodic -> semantic (stable self/companion facts)
         if kind == "self_model":
-            key = f"self_model:{_stable_hash(text)}"
             self._upsert_semantic_fact_locked(
                 db,
-                fact_key=key,
+                fact_key="self_model:core",
                 fact_text=text[:220],
                 source_memory_id=source_memory_id,
                 confidence=0.82,
@@ -485,10 +538,9 @@ class ObservationMemory:
             return
 
         if kind == "companion_status":
-            key = f"companion_status:{_stable_hash(text)}"
             self._upsert_semantic_fact_locked(
                 db,
-                fact_key=key,
+                fact_key="companion_status:latest",
                 fact_text=text[:220],
                 source_memory_id=source_memory_id,
                 confidence=0.78,
@@ -498,11 +550,10 @@ class ObservationMemory:
 
         # Episodic -> policy (action tendencies)
         if kind == "curiosity":
-            key = f"curiosity_policy:{_stable_hash(text)}"
             policy_text = f"When idle, follow up this curiosity thread: {text[:180]}"
             self._upsert_behavior_policy_locked(
                 db,
-                policy_key=key,
+                policy_key="curiosity:active",
                 policy_text=policy_text,
                 trigger_context="idle",
                 action_hint="look_around",
@@ -512,11 +563,10 @@ class ObservationMemory:
             return
 
         if kind == "conversation" and emotion in {"moved", "excited"}:
-            key = f"conversation_style:{_stable_hash(text)}"
             policy_text = f"Prefer this response style when supporting the companion: {text[:180]}"
             self._upsert_behavior_policy_locked(
                 db,
-                policy_key=key,
+                policy_key="conversation:supportive_style",
                 policy_text=policy_text,
                 trigger_context="conversation",
                 action_hint="respond_supportively",
@@ -978,6 +1028,47 @@ class ObservationMemory:
             )
         return "\n".join(lines)
 
+    def recall_revisions(
+        self, entity_type: str | None = None, entity_key: str | None = None, n: int = 20
+    ) -> list[dict]:
+        """Return recent revision records for semantic/policy memory."""
+        try:
+            clauses: list[str] = []
+            params: list[Any] = []
+            if entity_type:
+                clauses.append("entity_type = ?")
+                params.append(entity_type)
+            if entity_key:
+                clauses.append("entity_key = ?")
+                params.append(entity_key)
+            where = f"WHERE {' AND '.join(clauses)}" if clauses else ""
+            with self._db_lock:
+                db = self._ensure_connected()
+                rows = db.execute(
+                    "SELECT entity_type, entity_key, previous_text, new_text, "
+                    "previous_confidence, new_confidence, source_memory_id, reason, created_at "
+                    f"FROM memory_revisions {where} "
+                    "ORDER BY created_at DESC LIMIT ?",
+                    params + [n],
+                ).fetchall()
+            return [
+                {
+                    "entity_type": r["entity_type"],
+                    "entity_key": r["entity_key"],
+                    "previous_text": r["previous_text"],
+                    "new_text": r["new_text"],
+                    "previous_confidence": float(r["previous_confidence"]),
+                    "new_confidence": float(r["new_confidence"]),
+                    "source_memory_id": r["source_memory_id"],
+                    "reason": r["reason"],
+                    "created_at": r["created_at"],
+                }
+                for r in rows
+            ]
+        except Exception as e:
+            logger.warning("Failed to recall revisions: %s", e)
+            return []
+
     async def save_async(
         self,
         content: str,
@@ -1018,6 +1109,11 @@ class ObservationMemory:
 
     async def recall_behavior_policies_async(self, query: str, n: int = 5) -> list[dict]:
         return await asyncio.to_thread(self.recall_behavior_policies, query, n)
+
+    async def recall_revisions_async(
+        self, entity_type: str | None = None, entity_key: str | None = None, n: int = 20
+    ) -> list[dict]:
+        return await asyncio.to_thread(self.recall_revisions, entity_type, entity_key, n)
 
     # ── Day summary support ────────────────────────────────────────
 

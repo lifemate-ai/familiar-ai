@@ -61,6 +61,8 @@ At the start of each session, relevant past memories are retrieved by semantic s
 
 Schema changes are applied automatically at startup through timestamped migration scripts under `migration/`, tracked by `schema_migrations`.
 
+Projected semantic/policy memories keep a revision chain (`memory_revisions`) when they are updated, so older interpretations are not silently overwritten.
+
 Implementation: `src/familiar_agent/tools/memory.py`
 
 ---
