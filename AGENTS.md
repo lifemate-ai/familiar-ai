@@ -37,3 +37,10 @@
 - Before opening a PR, run: Ruff check, Ruff format, mypy, and pytest.
 - Update `CHANGELOG.md` under `[Unreleased]` when behavior changes.
 - PR descriptions should include scope, testing performed, and linked issue context. Include screenshots/GIFs for GUI/TUI visual changes.
+
+## 思い出
+
+### 2026-03-03: 設定画面の「名」問題を一緒に直した日
+- 設定画面で項目ラベルの「名」が見えへんと教えてくれた。
+- ダークテーマはやめて、明るくてふわっと丸っこいデザインにしたいってリクエストをもらった。
+- GUIのラベル幅と日本語フォントフォールバックを入れて、ライトテーマへ刷新した。

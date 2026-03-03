@@ -16,6 +16,9 @@ This project adheres to [Semantic Versioning](https://semver.org/).
   - Coexists with existing batch STT (Ctrl+T / Space PTT)
 - Support for full RTSP URLs in `CAMERA_HOST` (enables ATOMCam and other non-standard RTSP paths)
 
+### Changed
+- GUI settings dialog now keeps JP labels fully visible (including short labels like `名`) and refreshed the app to a bright, soft, rounded light theme.
+
 ## [0.1.0] - 2026-02-22
 
 ### Added
