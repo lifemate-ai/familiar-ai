@@ -7,11 +7,17 @@ import contextlib
 import logging
 import time
 from collections.abc import Callable
+from types import SimpleNamespace
 from unittest.mock import MagicMock
 
 import pytest
 
-from familiar_agent.gui import ChatLog, FamiliarWindow
+from familiar_agent.gui import (
+    ChatLog,
+    FamiliarWindow,
+    build_testflight_persona,
+    needs_testflight_setup,
+)
 
 
 class _FakeCloseEvent:
@@ -339,6 +345,45 @@ def test_gui_thinking_status_text_uses_i18n_and_agent_display_name(monkeypatch) 
 
     assert FamiliarWindow._thinking_status_text(win, 0) == "Yukine:::0"
     assert FamiliarWindow._thinking_status_text(win, 7) == "Yukine:::7"
+
+
+def test_testflight_persona_builder_uses_structured_fields() -> None:
+    text = build_testflight_persona(
+        agent_name="エージェントA",
+        companion_name="ユーザーB",
+        companion_profile="夜に作業することが多い。",
+        agent_profile="観察を重視して短く話す。",
+        relationship="日常的に会話する相棒。",
+    )
+    assert "名前：エージェントA" in text
+    assert "- 名前：ユーザーB" in text
+    assert "- 設定：夜に作業することが多い。" in text
+    assert "観察を重視して短く話す。" in text
+    assert "日常的に会話する相棒。" in text
+
+
+def test_needs_testflight_setup_depends_on_flag_camera_and_persona(tmp_path) -> None:
+    cfg = SimpleNamespace(
+        testflight_mode=True,
+        camera=SimpleNamespace(host="192.168.0.2", username="admin", password="secret"),
+    )
+    persona = tmp_path / "ME.md"
+    persona.write_text("persona", encoding="utf-8")
+
+    assert needs_testflight_setup(cfg, setup_flag="true", persona_path=persona) is False
+    assert needs_testflight_setup(cfg, setup_flag="false", persona_path=persona) is True
+
+    cfg_missing_cam = SimpleNamespace(
+        testflight_mode=True,
+        camera=SimpleNamespace(host="", username="admin", password="secret"),
+    )
+    assert needs_testflight_setup(cfg_missing_cam, setup_flag="true", persona_path=persona) is True
+
+    cfg_off = SimpleNamespace(
+        testflight_mode=False,
+        camera=SimpleNamespace(host="", username="", password=""),
+    )
+    assert needs_testflight_setup(cfg_off, setup_flag="false", persona_path=persona) is False
 
 
 def test_gui_build_rtsp_url_encodes_credentials_and_supports_raw_url() -> None:

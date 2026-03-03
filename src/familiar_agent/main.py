@@ -348,6 +348,15 @@ def main() -> None:
     setup_logging(debug=debug)
 
     config = AgentConfig()
+    if use_gui and config.testflight_mode:
+        from .gui import run_testflight_setup_if_needed
+
+        if not run_testflight_setup_if_needed(config):
+            print("Testflight setup canceled.")
+            return
+        # Reload values written by setup dialog (.env + persona path).
+        config = AgentConfig()
+
     if not config.api_key:
         print("Error: API_KEY not set.")
         print("  Set PLATFORM=gemini|anthropic|openai and API_KEY=<your key>.")

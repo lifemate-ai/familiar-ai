@@ -15,9 +15,18 @@ This project adheres to [Semantic Versioning](https://semver.org/).
   - Opt-in via `REALTIME_STT=true` in `.env`
   - Coexists with existing batch STT (Ctrl+T / Space PTT)
 - Support for full RTSP URLs in `CAMERA_HOST` (enables ATOMCam and other non-standard RTSP paths)
+- Testflight onboarding flow for GUI (`TESTFLIGHT_MODE=true`) with a two-page setup wizard:
+  - Persona page (agent/user names, user profile, agent profile, relationship)
+  - Camera page (IP, account, password)
+  - Auto-generates `~/.familiar_ai/ME.md` from structured inputs
+- Testflight helper scripts:
+  - `scripts/prepare_testflight_env.py` to generate distributable `.env` with embedded API key from local environment
+  - `scripts/familiar_testflight_entry.py` as a PyInstaller-friendly GUI entrypoint
+- `docs/testflight.md` with practical distribution guidance (portable one-folder `.exe` flow)
 
 ### Changed
 - GUI settings dialog now keeps JP labels fully visible (including short labels like `名`), refreshed the app to a bright, soft, rounded light theme, split first-turn startup status from "thinking", and increased GUI font sizing for readability.
+- Mobility initialization now respects `MOBILITY_ENABLED`; in testflight mode it defaults to disabled.
 
 ## [0.1.0] - 2026-02-22
 
