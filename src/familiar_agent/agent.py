@@ -12,6 +12,7 @@ from .backend import create_backend, create_utility_backend
 from .config import AgentConfig
 from .desires import detect_worry_signal
 from .exploration import ExplorationTracker
+from .memory_worker import MemoryJobWorker
 from .tape import check_plan_blocked, generate_plan, generate_replan
 from .tools.camera import CameraTool
 from .tools.coding import CodingTool
@@ -376,6 +377,7 @@ class EmbodiedAgent:
         self._stt: STTTool | None = None
         self._me_md: str = self._load_me_md()  # loaded once; restart to pick up changes
         self._memory = ObservationMemory()
+        self._memory_worker = MemoryJobWorker(self._memory)
         self._memory_tool = MemoryTool(self._memory)
         self._tom_tool = ToMTool(self._memory, default_person=config.companion_name)
         self._coding = CodingTool(config.coding)
@@ -703,6 +705,7 @@ class EmbodiedAgent:
                     kind="day_summary",
                     emotion="neutral",
                     override_date=date,
+                    materialize_now=False,
                 )
                 logger.info("Day summary generated for %s: %s", date, summary[:80])
             else:
@@ -727,7 +730,11 @@ class EmbodiedAgent:
             )
             if insight and insight.lower() != "nothing":
                 await self._memory.save_async(
-                    insight, direction="内省", kind="self_model", emotion=emotion
+                    insight,
+                    direction="内省",
+                    kind="self_model",
+                    emotion=emotion,
+                    materialize_now=False,
                 )
                 logger.info("Self-model updated: %s", insight[:60])
         except Exception as e:
@@ -816,6 +823,12 @@ class EmbodiedAgent:
                 await self._generate_day_summary(today)
             except Exception as e:
                 logger.warning("Failed to generate today's day summary on shutdown: %s", e)
+        memory_worker = getattr(self, "_memory_worker", None)
+        if memory_worker:
+            try:
+                await asyncio.wait_for(memory_worker.stop(), timeout=1.5)
+            except (asyncio.TimeoutError, Exception):
+                pass
         if self._mcp:
             try:
                 await asyncio.wait_for(self._mcp.stop(), timeout=2.0)
@@ -845,6 +858,9 @@ class EmbodiedAgent:
         # Start MCP connections on first turn (lazy, idempotent)
         if self._mcp and not self._mcp.is_started:
             await self._mcp.start()
+        memory_worker = getattr(self, "_memory_worker", None)
+        if memory_worker and not memory_worker.is_running:
+            await memory_worker.start()
 
         # First turn: morning reconstruction — bridge yesterday's self to today's
         morning_ctx = ""
@@ -958,7 +974,11 @@ class EmbodiedAgent:
                     emotion = await self._infer_emotion(final_text)
                     summary = await self._summarize_exchange(user_input, final_text)
                     await self._memory.save_async(
-                        summary, direction="会話", kind="conversation", emotion=emotion
+                        summary,
+                        direction="会話",
+                        kind="conversation",
+                        emotion=emotion,
+                        materialize_now=False,
                     )
 
                     # Update self-model when something actually moved us (Conway's working self)
@@ -987,7 +1007,11 @@ class EmbodiedAgent:
                         desires.boost("look_around", 0.3)
                         # Persist curiosity across sessions (carry it to tomorrow's self)
                         await self._memory.save_async(
-                            curiosity, direction="好奇心", kind="curiosity", emotion="curious"
+                            curiosity,
+                            direction="好奇心",
+                            kind="curiosity",
+                            emotion="curious",
+                            materialize_now=False,
                         )
                         logger.info("Curiosity persisted: %s", curiosity)
 

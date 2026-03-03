@@ -10,43 +10,22 @@ Architecture inspired by memory-mcp (Phase 11: SQLite+numpy).
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
 import sqlite3
 import threading
 import uuid
-from datetime import datetime
+from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any
 
 import numpy as np
+from ..sqlite_migrations import apply_migrations, default_migration_dir
 
 logger = logging.getLogger(__name__)
 
 DB_PATH = str(Path.home() / ".familiar_ai" / "observations.db")
 EMBEDDING_MODEL = "intfloat/multilingual-e5-small"
-
-_DDL = """
-CREATE TABLE IF NOT EXISTS observations (
-    id TEXT PRIMARY KEY,
-    content TEXT NOT NULL,
-    timestamp TEXT NOT NULL,
-    date TEXT NOT NULL,
-    time TEXT NOT NULL,
-    direction TEXT NOT NULL DEFAULT 'unknown',
-    kind TEXT NOT NULL DEFAULT 'observation',
-    emotion TEXT NOT NULL DEFAULT 'neutral',
-    image_path TEXT,
-    image_data TEXT
-);
-CREATE INDEX IF NOT EXISTS idx_obs_timestamp ON observations(timestamp);
-CREATE INDEX IF NOT EXISTS idx_obs_date ON observations(date);
-CREATE INDEX IF NOT EXISTS idx_obs_kind ON observations(kind);
-
-CREATE TABLE IF NOT EXISTS obs_embeddings (
-    obs_id TEXT PRIMARY KEY REFERENCES observations(id) ON DELETE CASCADE,
-    vector BLOB NOT NULL
-);
-"""
 
 _THUMB_SIZE = (320, 240)
 
@@ -188,24 +167,272 @@ class ObservationMemory:
             self._db.execute("PRAGMA journal_mode = WAL")
             self._db.execute("PRAGMA synchronous = NORMAL")
             self._db.execute("PRAGMA foreign_keys = ON")
-            for stmt in _DDL.strip().split(";"):
-                stmt = stmt.strip()
-                if stmt:
-                    self._db.execute(stmt)
-            # Add columns if upgrading from old schema
-            for col, definition in [
-                ("kind", "TEXT NOT NULL DEFAULT 'observation'"),
-                ("emotion", "TEXT NOT NULL DEFAULT 'neutral'"),
-                ("image_path", "TEXT"),
-                ("image_data", "TEXT"),
-            ]:
-                try:
-                    self._db.execute(f"ALTER TABLE observations ADD COLUMN {col} {definition}")
-                    self._db.commit()
-                except Exception:
-                    pass
+            apply_migrations(self._db, default_migration_dir())
             self._db.commit()
         return self._db
+
+    @staticmethod
+    def _now_iso() -> str:
+        return datetime.now().isoformat()
+
+    @staticmethod
+    def _serialize_event_payload(payload: dict[str, Any]) -> str:
+        return json.dumps(payload, ensure_ascii=False, separators=(",", ":"), sort_keys=True)
+
+    def _enqueue_memory_job_locked(
+        self,
+        db: sqlite3.Connection,
+        event_id: str,
+        job_type: str,
+        now_iso: str,
+    ) -> bool:
+        """Insert a pending job for an event. Returns False when duplicate."""
+        try:
+            db.execute(
+                "INSERT INTO memory_jobs "
+                "(job_id, event_id, job_type, status, attempts, available_at, last_error, created_at, updated_at) "
+                "VALUES (?, ?, ?, 'pending', 0, ?, NULL, ?, ?)",
+                (str(uuid.uuid4()), event_id, job_type, now_iso, now_iso, now_iso),
+            )
+            return True
+        except sqlite3.IntegrityError:
+            return False
+
+    def append_memory_event(
+        self,
+        event_type: str,
+        payload: dict[str, Any],
+        dedupe_key: str | None = None,
+        queue_job: bool = True,
+        job_type: str = "materialize_observation",
+    ) -> tuple[str | None, bool]:
+        """Append a durable memory event and optional pending job.
+
+        Returns:
+            (event_id, created_new). If dedupe_key matches an existing event,
+            created_new is False and the existing event_id is returned.
+        """
+        now_iso = self._now_iso()
+        payload_json = self._serialize_event_payload(payload)
+        try:
+            with self._db_lock:
+                db = self._ensure_connected()
+                if dedupe_key:
+                    row = db.execute(
+                        "SELECT event_id FROM memory_events WHERE dedupe_key = ?",
+                        (dedupe_key,),
+                    ).fetchone()
+                    if row:
+                        event_id = str(row["event_id"])
+                        if queue_job:
+                            self._enqueue_memory_job_locked(db, event_id, job_type, now_iso)
+                        db.commit()
+                        return event_id, False
+
+                event_id = str(uuid.uuid4())
+                db.execute(
+                    "INSERT INTO memory_events (event_id, created_at, event_type, dedupe_key, payload_json) "
+                    "VALUES (?, ?, ?, ?, ?)",
+                    (event_id, now_iso, event_type, dedupe_key, payload_json),
+                )
+                if queue_job:
+                    self._enqueue_memory_job_locked(db, event_id, job_type, now_iso)
+                db.commit()
+                return event_id, True
+        except Exception as e:
+            logger.warning("Failed to append memory event (%s): %s", event_type, e)
+            return None, False
+
+    async def append_memory_event_async(
+        self,
+        event_type: str,
+        payload: dict[str, Any],
+        dedupe_key: str | None = None,
+        queue_job: bool = True,
+        job_type: str = "materialize_observation",
+    ) -> tuple[str | None, bool]:
+        return await asyncio.to_thread(
+            self.append_memory_event,
+            event_type,
+            payload,
+            dedupe_key,
+            queue_job,
+            job_type,
+        )
+
+    def claim_pending_jobs(self, limit: int = 10) -> list[dict[str, Any]]:
+        """Claim pending memory jobs and mark them as running."""
+        now_iso = self._now_iso()
+        claimed: list[dict[str, Any]] = []
+        with self._db_lock:
+            db = self._ensure_connected()
+            rows = db.execute(
+                "SELECT j.job_id, j.event_id, j.job_type, j.attempts, "
+                "e.event_type, e.payload_json "
+                "FROM memory_jobs j JOIN memory_events e ON e.event_id = j.event_id "
+                "WHERE j.status = 'pending' AND j.available_at <= ? "
+                "ORDER BY j.created_at ASC LIMIT ?",
+                (now_iso, limit),
+            ).fetchall()
+            for row in rows:
+                updated = db.execute(
+                    "UPDATE memory_jobs SET status = 'running', attempts = attempts + 1, updated_at = ? "
+                    "WHERE job_id = ? AND status = 'pending'",
+                    (now_iso, row["job_id"]),
+                )
+                if updated.rowcount != 1:
+                    continue
+                payload: dict[str, Any]
+                try:
+                    payload = json.loads(row["payload_json"])
+                except Exception:
+                    payload = {"raw_payload": row["payload_json"]}
+                claimed.append(
+                    {
+                        "job_id": row["job_id"],
+                        "event_id": row["event_id"],
+                        "job_type": row["job_type"],
+                        "attempts": int(row["attempts"]) + 1,
+                        "event_type": row["event_type"],
+                        "payload": payload,
+                    }
+                )
+            db.commit()
+        return claimed
+
+    def mark_job_done(self, job_id: str) -> bool:
+        """Mark a running job as done."""
+        now_iso = self._now_iso()
+        with self._db_lock:
+            db = self._ensure_connected()
+            updated = db.execute(
+                "UPDATE memory_jobs SET status = 'done', updated_at = ?, last_error = NULL "
+                "WHERE job_id = ?",
+                (now_iso, job_id),
+            )
+            db.commit()
+            return updated.rowcount == 1
+
+    def mark_job_failed(
+        self,
+        job_id: str,
+        error: str,
+        retry_delay_sec: float = 10.0,
+        max_attempts: int = 3,
+    ) -> str:
+        """Mark a running job as pending retry or dead_letter.
+
+        Returns the resulting status: 'pending', 'dead_letter', or 'missing'.
+        """
+        now = datetime.now()
+        now_iso = now.isoformat()
+        with self._db_lock:
+            db = self._ensure_connected()
+            row = db.execute(
+                "SELECT attempts FROM memory_jobs WHERE job_id = ?",
+                (job_id,),
+            ).fetchone()
+            if row is None:
+                return "missing"
+
+            attempts = int(row["attempts"])
+            if attempts >= max_attempts:
+                status = "dead_letter"
+                available_at = now_iso
+            else:
+                status = "pending"
+                available_at = (now + timedelta(seconds=max(retry_delay_sec, 0.0))).isoformat()
+
+            db.execute(
+                "UPDATE memory_jobs SET status = ?, available_at = ?, last_error = ?, updated_at = ? "
+                "WHERE job_id = ?",
+                (status, available_at, error[:500], now_iso, job_id),
+            )
+            db.commit()
+            return status
+
+    def _materialize_memory_save_event(self, event_id: str, payload: dict[str, Any]) -> bool:
+        """Materialize a memory.save payload into observations + embeddings."""
+        content = str(payload.get("content", "")).strip()
+        if not content:
+            logger.warning("memory.save event missing content (event_id=%s)", event_id)
+            return False
+
+        direction = str(payload.get("direction", "unknown"))
+        kind = str(payload.get("kind", "observation"))
+        emotion = str(payload.get("emotion", "neutral"))
+        image_path = payload.get("image_path")
+        override_date = payload.get("override_date")
+
+        # Compute embedding and thumbnail outside lock (CPU/IO)
+        image_data = _encode_image(image_path) if image_path else None
+        vec = self._embedder.encode_document([content])[0]
+        blob = _encode_vector(vec)
+        now = datetime.now()
+        if override_date:
+            save_date = str(override_date)
+            save_time = "23:59"
+            save_timestamp = f"{save_date}T23:59:59"
+        else:
+            save_date = now.strftime("%Y-%m-%d")
+            save_time = now.strftime("%H:%M")
+            save_timestamp = now.isoformat()
+
+        with self._db_lock:
+            db = self._ensure_connected()
+            exists = db.execute(
+                "SELECT 1 FROM observations WHERE id = ?",
+                (event_id,),
+            ).fetchone()
+            if exists:
+                return True
+            db.execute(
+                "INSERT INTO observations "
+                "(id, content, timestamp, date, time, direction, kind, emotion, image_path, image_data) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                (
+                    event_id,
+                    content,
+                    save_timestamp,
+                    save_date,
+                    save_time,
+                    direction,
+                    kind,
+                    emotion,
+                    image_path,
+                    image_data,
+                ),
+            )
+            db.execute(
+                "INSERT INTO obs_embeddings (obs_id, vector) VALUES (?, ?)",
+                (event_id, blob),
+            )
+            db.commit()
+        return True
+
+    def materialize_event(self, event_id: str) -> bool:
+        """Materialize an event into queryable memory rows."""
+        try:
+            with self._db_lock:
+                db = self._ensure_connected()
+                row = db.execute(
+                    "SELECT event_type, payload_json FROM memory_events WHERE event_id = ?",
+                    (event_id,),
+                ).fetchone()
+            if row is None:
+                logger.warning("No memory event found for event_id=%s", event_id)
+                return False
+
+            payload = json.loads(row["payload_json"])
+            event_type = row["event_type"]
+            if event_type == "memory.save":
+                return self._materialize_memory_save_event(event_id, payload)
+
+            logger.warning("Unsupported memory event type: %s", event_type)
+            return False
+        except Exception as e:
+            logger.warning("Failed to materialize event %s: %s", event_id, e)
+            return False
 
     def save(
         self,
@@ -215,6 +442,8 @@ class ObservationMemory:
         emotion: str = "neutral",
         image_path: str | None = None,
         override_date: str | None = None,
+        dedupe_key: str | None = None,
+        materialize_now: bool = True,
     ) -> bool:
         """Save memory with embedding synchronously.
 
@@ -226,48 +455,42 @@ class ObservationMemory:
             image_path: Optional path to image file (thumbnail stored as base64).
             override_date: If set, use this date (YYYY-MM-DD) instead of now.
                            Useful for backfilling day summaries for past dates.
+            dedupe_key: Optional idempotency key. When an event with the same key
+                        already exists, this write is treated as already processed.
+            materialize_now: If False, enqueue a durable job and return immediately.
+                             If event append fails, falls back to immediate save.
         """
         try:
-            # Compute embedding and image outside lock (CPU/IO, no DB access)
-            image_data = _encode_image(image_path) if image_path else None
-            vec = self._embedder.encode_document([content])[0]
-            blob = _encode_vector(vec)
-            now = datetime.now()
-            obs_id = str(uuid.uuid4())
-
-            if override_date:
-                save_date = override_date
-                save_time = "23:59"
-                save_timestamp = f"{override_date}T23:59:59"
-            else:
-                save_date = now.strftime("%Y-%m-%d")
-                save_time = now.strftime("%H:%M")
-                save_timestamp = now.isoformat()
-
-            with self._db_lock:
-                db = self._ensure_connected()
-                db.execute(
-                    "INSERT INTO observations "
-                    "(id, content, timestamp, date, time, direction, kind, emotion, image_path, image_data) "
-                    "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-                    (
-                        obs_id,
-                        content,
-                        save_timestamp,
-                        save_date,
-                        save_time,
-                        direction,
-                        kind,
-                        emotion,
-                        image_path,
-                        image_data,
-                    ),
+            event_payload = {
+                "content": content,
+                "direction": direction,
+                "kind": kind,
+                "emotion": emotion,
+                "image_path": image_path,
+                "override_date": override_date,
+            }
+            try:
+                event_id, created_new = self.append_memory_event(
+                    "memory.save",
+                    event_payload,
+                    dedupe_key=dedupe_key,
+                    queue_job=True,
+                    job_type="materialize_observation",
                 )
-                db.execute(
-                    "INSERT INTO obs_embeddings (obs_id, vector) VALUES (?, ?)",
-                    (obs_id, blob),
-                )
-                db.commit()
+            except Exception as e:
+                logger.warning("Failed to record memory event (continuing): %s", e)
+                event_id, created_new = None, False
+            if dedupe_key and event_id and not created_new:
+                logger.info("Deduped memory.save event for key=%s", dedupe_key)
+                return True
+
+            if not materialize_now and event_id:
+                logger.debug("Queued memory.save event %s for async materialization", event_id)
+                return True
+
+            obs_id = event_id or str(uuid.uuid4())
+            if not self._materialize_memory_save_event(obs_id, event_payload):
+                return False
             logger.info("Saved %s (%s): %s...", kind, emotion, content[:60])
             return True
         except Exception as e:
@@ -477,9 +700,19 @@ class ObservationMemory:
         emotion: str = "neutral",
         image_path: str | None = None,
         override_date: str | None = None,
+        dedupe_key: str | None = None,
+        materialize_now: bool = True,
     ) -> bool:
         return await asyncio.to_thread(
-            self.save, content, direction, kind, emotion, image_path, override_date
+            self.save,
+            content,
+            direction,
+            kind,
+            emotion,
+            image_path,
+            override_date,
+            dedupe_key,
+            materialize_now,
         )
 
     async def recall_async(self, query: str, n: int = 3, kind: str | None = None) -> list[dict]:

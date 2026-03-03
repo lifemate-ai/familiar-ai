@@ -30,6 +30,7 @@ def _make_agent():
     agent.backend = MagicMock()
     agent.backend.complete = AsyncMock(return_value="summary text")
     agent.backend.make_user_message = lambda t: _make_msg("user", t)
+    agent._utility_backend = agent.backend
 
     agent._memory = MagicMock()
     agent._memory.recall_async = AsyncMock(return_value=[])

@@ -112,6 +112,7 @@ class TestInferCompanionMood:
         from familiar_agent.tools.coding import CodingTool
 
         agent._memory = MagicMock(spec=ObservationMemory)
+        agent._memory.recall_day_summaries_async = AsyncMock(return_value=[])
         agent._memory_tool = MagicMock(spec=MemoryTool)
         agent._tom_tool = MagicMock(spec=ToMTool)
         agent._coding = MagicMock(spec=CodingTool)
@@ -123,6 +124,7 @@ class TestInferCompanionMood:
         mock_backend = MagicMock()
         mock_backend.complete = AsyncMock(return_value=complete_return)
         agent.backend = mock_backend
+        agent._utility_backend = mock_backend
 
         return agent
 
@@ -212,6 +214,7 @@ class TestFrustratedBoostsDesire:
         agent._memory.recent_feelings_async = AsyncMock(return_value=[])
         agent._memory.recall_self_model_async = AsyncMock(return_value=[])
         agent._memory.recall_curiosities_async = AsyncMock(return_value=[])
+        agent._memory.recall_day_summaries_async = AsyncMock(return_value=[])
         agent._memory.save_async = AsyncMock(return_value=True)
         agent._memory.format_for_context = MagicMock(return_value="")
         agent._memory.format_feelings_for_context = MagicMock(return_value="")
@@ -235,6 +238,7 @@ class TestFrustratedBoostsDesire:
         )
 
         agent.backend = mock_backend
+        agent._utility_backend = mock_backend
         agent.config = MagicMock()
         agent.config.max_tokens = 512
         agent.config.companion_name = "Kouta"
