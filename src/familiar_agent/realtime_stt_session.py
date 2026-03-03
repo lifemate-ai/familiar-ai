@@ -19,6 +19,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import os
+import re
 import time
 from collections.abc import Callable
 from typing import TYPE_CHECKING
@@ -31,6 +32,7 @@ logger = logging.getLogger(__name__)
 
 # ── Filler / short-utterance filter ──────────────────────────────────
 _FILLER_WORDS = frozenset("えー ええと えっと あの その うーん んー ま はい うん ん".split())
+_DEDUPE_WINDOW_SECS = 3.0
 
 
 def _is_only_punct_or_symbol(s: str) -> bool:
@@ -47,6 +49,13 @@ def should_skip_stt(text: str) -> bool:
     if text in _FILLER_WORDS:
         return True
     return False
+
+
+def _normalize_for_dedupe(text: str) -> str:
+    """Normalize STT text for stable duplicate detection."""
+    normalized = text.strip().lower()
+    normalized = re.sub(r"\s+", " ", normalized)
+    return normalized.strip(" 　。、！？…・「」『』（）()!?,.\"'")
 
 
 class RealtimeSttSession:
@@ -67,7 +76,7 @@ class RealtimeSttSession:
         self._committed_queue: asyncio.Queue[str | None] | None = None
 
         # Deduplication state
-        self._last_text = ""
+        self._last_normalized_text = ""
         self._last_time = 0.0
 
         # Display callbacks (set by caller before start())
@@ -131,10 +140,17 @@ class RealtimeSttSession:
             text = await self._stt_client.on_committed.get()
             if should_skip_stt(text):
                 continue
-            now = time.time()
-            if text == self._last_text and now - self._last_time < 1.2:
+            normalized = _normalize_for_dedupe(text)
+            if not normalized:
                 continue
-            self._last_text = text
+            now = time.time()
+            if (
+                normalized == self._last_normalized_text
+                and now - self._last_time < _DEDUPE_WINDOW_SECS
+            ):
+                logger.debug("Dropped duplicate realtime STT transcript: %s", text)
+                continue
+            self._last_normalized_text = normalized
             self._last_time = now
             if self.on_committed:
                 self.on_committed(text)
