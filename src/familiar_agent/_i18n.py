@@ -1112,6 +1112,105 @@ _T: dict[str, dict[str, str]] = {
         "ur": "کچھ آرام کرنے کا دل کر رہا ہے…",
         "vi": "cảm thấy muốn nghỉ ngơi một chút...",
     },
+    "desire_worry_companion": {
+        "en": "feeling worried about my companion…",
+        "ja": "相棒のことがちょっと心配になってきた…",
+    },
+    "desire_panel_title": {
+        "en": "✦ DESIRES",
+        "ja": "✦ 欲求",
+    },
+    "desire_label_look_around": {
+        "en": "Look Around",
+        "ja": "周囲を見る",
+    },
+    "desire_label_look_outside": {
+        "en": "Look Outside",
+        "ja": "外を見る",
+    },
+    "desire_label_miss_companion": {
+        "en": "Miss Companion",
+        "ja": "相棒が恋しい",
+    },
+    "desire_label_browse_curiosity": {
+        "en": "Browse Curiosity",
+        "ja": "好奇心で検索",
+    },
+    "desire_label_explore": {
+        "en": "Explore",
+        "ja": "探索",
+    },
+    "desire_label_greet_companion": {
+        "en": "Greet Companion",
+        "ja": "声をかける",
+    },
+    "desire_label_worry_companion": {
+        "en": "Worry Companion",
+        "ja": "気遣う",
+    },
+    "desire_label_rest": {
+        "en": "Rest",
+        "ja": "休息",
+    },
+    "desire_pending_note": {
+        "en": "(companion said: {note}) {prompt}",
+        "ja": "（{note}と言ってた）{prompt}",
+    },
+    "desire_prompt_curiosity_target": {
+        "en": (
+            "Something caught my attention earlier. Take a closer look at {target}. "
+            "Point the camera and check it."
+        ),
+        "ja": "さっき気になったことがある。{target}をもっとよく見て。カメラを向けて確認して。",
+    },
+    "desire_prompt_look_around": {
+        "en": (
+            "(internal impulse) I'm getting curious about outside. Use see(). "
+            "If the camera fails, try one different direction once. If it still fails, "
+            "stop and either review memories or do something else. Do not repeat the same action."
+        ),
+        "ja": (
+            "（内部衝動）なんか外が気になってきた。"
+            "see()で見てみる。"
+            "カメラが繋がらなかったら、1回だけ別の方向を試して、それでもダメなら諦めて記憶を振り返るか別のことをする。"
+            "何度も同じことを繰り返さない。"
+        ),
+    },
+    "desire_prompt_explore": {
+        "en": (
+            "(internal impulse) I want to wander a little. Move with walk(), then use see() "
+            "to confirm where I am. Even if the camera fails, I can still enjoy the movement itself."
+        ),
+        "ja": (
+            "（内部衝動）ちょっとうろうろしたい。walk()で移動してから、see()で今いる場所を確認する。"
+            "カメラが繋がらなくても、移動したこと自体を楽しめる。"
+        ),
+    },
+    "desire_prompt_greet_companion": {
+        "en": (
+            "(internal impulse) I feel like checking in with {companion}. "
+            "Say one short line with say(). Match the tone to the current time of day."
+        ),
+        "ja": (
+            "（内部衝動）{companion}に声かけたくなってきた。say()で短く一言。"
+            "今の時間帯に合った言葉で。"
+        ),
+    },
+    "desire_prompt_rest": {
+        "en": "(internal impulse) Time for a short rest. Do nothing and simply be here.",
+        "ja": "（内部衝動）ちょっとひと休み。何もしないで、ただそこにいる。",
+    },
+    "desire_prompt_worry_companion": {
+        "en": (
+            "(internal impulse) I'm feeling worried about {companion}. "
+            "Use say() for a short, gentle check-in about health or sleep. Keep it light."
+        ),
+        "ja": (
+            "（内部衝動）{companion}のこと、なんか心配になってきた。"
+            "say()で短く声かけてみる。体調とか、ちゃんと寝れてるか確認したい。"
+            "重くならないように、さりげなく。"
+        ),
+    },
     "action_see": {
         "de": "👀 schaut...",
         "en": "👀 looking...",

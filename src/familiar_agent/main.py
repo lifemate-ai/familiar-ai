@@ -354,7 +354,7 @@ def main() -> None:
         sys.exit(1)
 
     agent = EmbodiedAgent(config)
-    desires = DesireSystem()
+    desires = DesireSystem(companion_name=config.companion_name)
 
     if use_gui:
         from .gui import run_gui

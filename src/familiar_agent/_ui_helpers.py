@@ -139,6 +139,6 @@ def desire_tick_prompt(
     pending_note: str | None = None
     if input_queue_peek:
         pending_note = input_queue_peek[0]
-        prompt = f"（{pending_note}と言ってた）{prompt}"
+        prompt = _t("desire_pending_note", note=pending_note, prompt=prompt)
 
     return desire_name, prompt, pending_note

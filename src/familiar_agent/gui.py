@@ -508,7 +508,10 @@ class DesireBar(QWidget):
 
         # Header: desire name + percentage
         header = QHBoxLayout()
-        display_name = name.replace("_", " ").title()
+        try:
+            display_name = _t(f"desire_label_{name}")
+        except KeyError:
+            display_name = name.replace("_", " ").title()
         name_lbl = QLabel(display_name)
         name_lbl.setStyleSheet(
             f"color: {color}; font-size: 10px; font-weight: 600; background: transparent;"
@@ -570,7 +573,7 @@ class DesirePanel(QWidget):
         layout.setContentsMargins(12, 12, 12, 12)
         layout.setSpacing(8)
 
-        title = QLabel("✦ DESIRES")
+        title = QLabel(_t("desire_panel_title"))
         title.setStyleSheet(
             f"color: {_TEXT_SECONDARY}; font-size: 10px; font-weight: 600;"
             f" background: transparent; letter-spacing: 0.1em;"
@@ -1210,7 +1213,11 @@ class FamiliarWindow(QMainWindow):
                     if not self._input_queue.empty():
                         continue
                     desire_name, prompt, _ = tick
-                    self._log.append_line(f"… {desire_name}")
+                    try:
+                        murmur = _t(f"desire_{desire_name}")
+                    except KeyError:
+                        murmur = _t("desire_default")
+                    self._log.append_line(murmur)
                     await self._run_agent("", inner_voice=prompt)
                     self._desires.satisfy(desire_name)
                     self._desires.curiosity_target = None
