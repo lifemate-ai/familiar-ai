@@ -43,6 +43,7 @@ This project adheres to [Semantic Versioning](https://semver.org/).
 - Testflight packaged entrypoint now force-exits the process after GUI shutdown to avoid relaunch failures on Windows.
 - Windows camera subprocesses (`see` capture + GUI look preview) now run with no console window popup.
 - Windows testflight build now explicitly bundles `onvif` (`--hidden-import onvif --collect-data onvif`) so camera turn tools work in packaged builds.
+- Windows TTS/STT subprocesses (`go2rtc`, `ffmpeg`, `paplay`/`mpv`/`ffplay`) now run with no console window popup.
 
 ## [0.1.0] - 2026-02-22
 

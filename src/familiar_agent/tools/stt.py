@@ -15,7 +15,7 @@ import logging
 import tempfile
 import time
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 import contextlib
 import ctypes
@@ -30,6 +30,14 @@ logger = logging.getLogger(__name__)
 
 _CHANNELS = 1  # mono
 _ELEVENLABS_STT_URL = "https://api.elevenlabs.io/v1/speech-to-text"
+_SUBPROCESS_NO_WINDOW = 0x08000000 if os.name == "nt" else 0
+
+
+def _subprocess_exec_kwargs() -> dict[str, Any]:
+    """Return platform-specific kwargs for hidden subprocess execution."""
+    if _SUBPROCESS_NO_WINDOW:
+        return {"creationflags": _SUBPROCESS_NO_WINDOW}
+    return {}
 
 
 @contextlib.contextmanager
@@ -170,6 +178,7 @@ class STTTool:
             str(tmp),
             stdout=asyncio.subprocess.DEVNULL,
             stderr=asyncio.subprocess.PIPE,
+            **_subprocess_exec_kwargs(),
         )
 
         # Wait for stop_event

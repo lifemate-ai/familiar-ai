@@ -12,6 +12,7 @@ import sys
 import tempfile
 import urllib.request
 from pathlib import Path
+from typing import Any
 from urllib.parse import quote
 
 logger = logging.getLogger(__name__)
@@ -20,6 +21,21 @@ _GO2RTC_CACHE = Path.home() / ".cache" / "embodied-claude" / "go2rtc"
 # On Windows the binary is go2rtc.exe; on other platforms there is no extension.
 _GO2RTC_BIN = _GO2RTC_CACHE / ("go2rtc.exe" if sys.platform == "win32" else "go2rtc")
 _GO2RTC_CONFIG = _GO2RTC_CACHE / "go2rtc.yaml"
+_SUBPROCESS_NO_WINDOW = 0x08000000 if os.name == "nt" else 0
+
+
+def _subprocess_exec_kwargs() -> dict[str, Any]:
+    """Return platform-specific kwargs for hidden subprocess execution."""
+    if _SUBPROCESS_NO_WINDOW:
+        return {"creationflags": _SUBPROCESS_NO_WINDOW}
+    return {}
+
+
+def _subprocess_popen_kwargs() -> dict[str, Any]:
+    """Return platform-specific kwargs for hidden Popen execution."""
+    if _SUBPROCESS_NO_WINDOW:
+        return {"creationflags": _SUBPROCESS_NO_WINDOW}
+    return {}
 
 
 def _ensure_go2rtc(api_url: str) -> None:
@@ -42,6 +58,7 @@ def _ensure_go2rtc(api_url: str) -> None:
         [str(_GO2RTC_BIN), "-config", str(_GO2RTC_CONFIG)],
         stdout=subprocess.DEVNULL,
         stderr=subprocess.DEVNULL,
+        **_subprocess_popen_kwargs(),
     )
     import time
 
@@ -214,6 +231,7 @@ async def _play_local(tmp_path: str) -> bool:
                     wav_path,
                     stdout=asyncio.subprocess.DEVNULL,
                     stderr=asyncio.subprocess.DEVNULL,
+                    **_subprocess_exec_kwargs(),
                 )
                 await conv.communicate()
                 converted = conv.returncode == 0
@@ -230,6 +248,7 @@ async def _play_local(tmp_path: str) -> bool:
                     stdout=asyncio.subprocess.DEVNULL,
                     stderr=asyncio.subprocess.PIPE,
                     env=pulse_env,
+                    **_subprocess_exec_kwargs(),
                 )
                 _, stderr = await proc.communicate()
                 if converted:
@@ -262,6 +281,7 @@ async def _play_local(tmp_path: str) -> bool:
                 stdout=asyncio.subprocess.DEVNULL,
                 stderr=asyncio.subprocess.PIPE,
                 env=pulse_env,
+                **_subprocess_exec_kwargs(),
             )
             _, stderr = await proc.communicate()
             err = stderr.decode(errors="replace")
