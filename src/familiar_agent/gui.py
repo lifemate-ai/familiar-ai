@@ -619,7 +619,7 @@ class SettingsDialog(QDialog):
     ) -> None:
         super().__init__(parent)
         self._env_path = env_path
-        self.setWindowTitle("Settings — familiar-ai")
+        self.setWindowTitle(_t("settings_window_title"))
         self.setMinimumWidth(500)
         self.setModal(True)
 
@@ -643,15 +643,15 @@ class SettingsDialog(QDialog):
         _set_combo(self._platform, config.platform)
         self._api_key = QLineEdit(config.api_key)
         self._api_key.setEchoMode(QLineEdit.EchoMode.Password)
-        self._api_key.setPlaceholderText("(unchanged)")
+        self._api_key.setPlaceholderText(_t("settings_placeholder_unchanged"))
         self._model = QLineEdit(config.model)
 
-        af.addRow("Agent name:", self._agent_name)
-        af.addRow("Companion name:", self._companion_name)
-        af.addRow("Platform:", self._platform)
-        af.addRow("API key:", self._api_key)
-        af.addRow("Model:", self._model)
-        tabs.addTab(agent_tab, "Agent")
+        af.addRow(_t("settings_field_agent_name"), self._agent_name)
+        af.addRow(_t("settings_field_companion_name"), self._companion_name)
+        af.addRow(_t("settings_field_platform"), self._platform)
+        af.addRow(_t("settings_field_api_key"), self._api_key)
+        af.addRow(_t("settings_field_model"), self._model)
+        tabs.addTab(agent_tab, _t("settings_tab_agent"))
 
         # ── Tab 2: Voice ──────────────────────────────────────────
         voice_tab = QWidget()
@@ -661,18 +661,18 @@ class SettingsDialog(QDialog):
 
         self._el_api_key = QLineEdit(config.tts.elevenlabs_api_key)
         self._el_api_key.setEchoMode(QLineEdit.EchoMode.Password)
-        self._el_api_key.setPlaceholderText("(unchanged)")
+        self._el_api_key.setPlaceholderText(_t("settings_placeholder_unchanged"))
         self._voice_id = QLineEdit(config.tts.voice_id)
         self._tts_output = QComboBox()
         self._tts_output.addItems(["local", "remote", "both"])
         _set_combo(self._tts_output, config.tts.output)
         self._stt_language = QLineEdit(config.stt.language)
 
-        vf.addRow("ElevenLabs API key:", self._el_api_key)
-        vf.addRow("Voice ID:", self._voice_id)
-        vf.addRow("TTS output:", self._tts_output)
-        vf.addRow("STT language:", self._stt_language)
-        tabs.addTab(voice_tab, "Voice")
+        vf.addRow(_t("settings_field_elevenlabs_api_key"), self._el_api_key)
+        vf.addRow(_t("settings_field_voice_id"), self._voice_id)
+        vf.addRow(_t("settings_field_tts_output"), self._tts_output)
+        vf.addRow(_t("settings_field_stt_language"), self._stt_language)
+        tabs.addTab(voice_tab, _t("settings_tab_voice"))
 
         # ── Tab 3: Camera ─────────────────────────────────────────
         cam_tab = QWidget()
@@ -684,14 +684,14 @@ class SettingsDialog(QDialog):
         self._cam_user = QLineEdit(config.camera.username)
         self._cam_pass = QLineEdit(config.camera.password)
         self._cam_pass.setEchoMode(QLineEdit.EchoMode.Password)
-        self._cam_pass.setPlaceholderText("(unchanged)")
+        self._cam_pass.setPlaceholderText(_t("settings_placeholder_unchanged"))
         self._cam_port = QLineEdit(str(config.camera.port))
 
-        cf.addRow("Camera host:", self._cam_host)
-        cf.addRow("Username:", self._cam_user)
-        cf.addRow("Password:", self._cam_pass)
-        cf.addRow("ONVIF port:", self._cam_port)
-        tabs.addTab(cam_tab, "Camera")
+        cf.addRow(_t("settings_field_camera_host"), self._cam_host)
+        cf.addRow(_t("settings_field_camera_username"), self._cam_user)
+        cf.addRow(_t("settings_field_camera_password"), self._cam_pass)
+        cf.addRow(_t("settings_field_camera_onvif_port"), self._cam_port)
+        tabs.addTab(cam_tab, _t("settings_tab_camera"))
 
         # ── Tab 4: Advanced ───────────────────────────────────────
         adv_tab = QWidget()
@@ -707,10 +707,10 @@ class SettingsDialog(QDialog):
         _set_combo(self._thinking_effort, config.thinking_effort)
         self._memory_path = QLineEdit(config.memory.db_path)
 
-        advf.addRow("Thinking mode:", self._thinking_mode)
-        advf.addRow("Thinking effort:", self._thinking_effort)
-        advf.addRow("Memory DB path:", self._memory_path)
-        tabs.addTab(adv_tab, "Advanced")
+        advf.addRow(_t("settings_field_thinking_mode"), self._thinking_mode)
+        advf.addRow(_t("settings_field_thinking_effort"), self._thinking_effort)
+        advf.addRow(_t("settings_field_memory_db_path"), self._memory_path)
+        tabs.addTab(adv_tab, _t("settings_tab_advanced"))
 
         # Buttons
         btn_box = QDialogButtonBox(
@@ -757,13 +757,13 @@ class SettingsDialog(QDialog):
                 if value:
                     set_key(env_str, key, value)
         except Exception as exc:
-            QMessageBox.warning(self, "Save failed", str(exc))
+            QMessageBox.warning(self, _t("settings_save_failed_title"), str(exc))
             return
 
         QMessageBox.information(
             self,
-            "Settings saved",
-            "Settings saved.\nRestart familiar-ai to apply all changes.",
+            _t("settings_saved_title"),
+            _t("settings_saved_message"),
         )
         self.accept()
 
@@ -1013,12 +1013,14 @@ class FamiliarWindow(QMainWindow):
         header_layout.addWidget(title_lbl)
         header_layout.addStretch()
 
-        settings_btn = QPushButton("⚙")
-        settings_btn.setFixedSize(32, 32)
+        settings_btn = QPushButton(_t("settings_button"))
+        settings_btn.setToolTip(_t("settings_button_tooltip"))
+        settings_btn.setFixedHeight(32)
+        settings_btn.setMinimumWidth(96)
         settings_btn.setStyleSheet(
             f"QPushButton {{ background: rgba(255,255,255,0.06); border-radius: 16px;"
             f" border: 1px solid {_BORDER};"
-            f" font-size: 14px; color: {_TEXT_SECONDARY}; }}"
+            f" padding: 0 12px; font-size: 12px; color: {_TEXT_SECONDARY}; }}"
             f"QPushButton:hover {{ background: rgba(255,255,255,0.10); color: {_TEXT_PRIMARY}; }}"
         )
         settings_btn.clicked.connect(self._open_settings)
@@ -1042,7 +1044,7 @@ class FamiliarWindow(QMainWindow):
         input_row.setSpacing(8)
 
         self._input = QLineEdit()
-        self._input.setPlaceholderText("Type a message and press Enter…")
+        self._input.setPlaceholderText(_t("gui_input_placeholder"))
         self._input.setObjectName("msgInput")
         self._input.setStyleSheet(
             f"QLineEdit#msgInput {{"
@@ -1082,7 +1084,7 @@ class FamiliarWindow(QMainWindow):
         self._stop_btn = QPushButton("■")
         self._stop_btn.setFixedSize(44, 44)
         self._stop_btn.setObjectName("stopBtn")
-        self._stop_btn.setToolTip("Cancel current turn (Esc)")
+        self._stop_btn.setToolTip(_t("gui_cancel_turn_tooltip"))
         self._stop_btn.setStyleSheet(
             f"QPushButton#stopBtn {{"
             f" background: rgba(230,57,70,0.20);"
