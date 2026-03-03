@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import base64
 import logging
+import os
 import tempfile
 from datetime import datetime
 from pathlib import Path
@@ -13,6 +14,14 @@ from typing import Any
 logger = logging.getLogger(__name__)
 
 CAPTURE_DIR = Path.home() / ".familiar_ai" / "captures"
+_SUBPROCESS_NO_WINDOW = 0x08000000 if os.name == "nt" else 0
+
+
+def _subprocess_exec_kwargs() -> dict[str, Any]:
+    """Return platform-specific kwargs for hidden subprocess execution."""
+    if _SUBPROCESS_NO_WINDOW:
+        return {"creationflags": _SUBPROCESS_NO_WINDOW}
+    return {}
 
 
 class CameraTool:
@@ -26,13 +35,13 @@ class CameraTool:
         self._cam: Any = None
         self._ptz: Any = None
         self._profile_token: str | None = None
+        self._last_connect_error: str = ""
 
     async def _ensure_connected(self) -> bool:
         """Ensure ONVIF connection is established."""
         if self._cam is not None:
             return True
         try:
-            import os
             import onvif
             from onvif import ONVIFCamera
 
@@ -64,12 +73,14 @@ class CameraTool:
 
             self._ptz = await self._cam.create_ptz_service()
             logger.info("Camera connected: %s (profile: %s)", self.host, self._profile_token)
+            self._last_connect_error = ""
             return True
         except Exception as e:
             logger.warning("Camera connection failed: %s", e)
             self._cam = None
             self._ptz = None
             self._profile_token = None
+            self._last_connect_error = str(e)
             return False
 
     async def capture(self) -> tuple[str | None, str | None]:
@@ -128,6 +139,7 @@ class CameraTool:
                 *cmd,
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
+                **_subprocess_exec_kwargs(),
             )
 
             try:
@@ -172,6 +184,8 @@ class CameraTool:
     async def move(self, direction: str, degrees: int = 30) -> str:
         """Move camera using RelativeMove. direction: left/right/up/down."""
         if not await self._ensure_connected():
+            if self._last_connect_error:
+                return f"Camera not available: {self._last_connect_error}"
             return "Camera not available."
         try:
             # Normalize to ONVIF range (-1.0 to +1.0)

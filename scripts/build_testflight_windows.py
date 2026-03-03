@@ -75,6 +75,10 @@ def main() -> int:
         "--name",
         args.name,
         "--onefile" if args.mode == "onefile" else "--onedir",
+        "--hidden-import",
+        "onvif",
+        "--collect-data",
+        "onvif",
     ]
     if args.clean:
         cmd.append("--clean")

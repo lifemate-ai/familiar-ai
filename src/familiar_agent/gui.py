@@ -115,6 +115,7 @@ _GUI_LOOK_PREVIEW_MIN_SEC = 0.8
 _GUI_LOOK_PREVIEW_MAX_SEC = 2.0
 _GUI_LOOK_PREVIEW_GRACE_SEC = 0.3
 _GUI_LOOK_PREVIEW_READ_TIMEOUT_SEC = 0.35
+_SUBPROCESS_NO_WINDOW = 0x08000000 if os.name == "nt" else 0
 
 
 def _px(size: int) -> int:
@@ -172,6 +173,13 @@ def _refresh_agent_config_from_env(config: "AgentConfig") -> None:
 
     refreshed = AgentConfig()
     config.__dict__.update(refreshed.__dict__)
+
+
+def _subprocess_exec_kwargs() -> dict[str, Any]:
+    """Return platform-specific kwargs for hidden subprocess execution."""
+    if _SUBPROCESS_NO_WINDOW:
+        return {"creationflags": _SUBPROCESS_NO_WINDOW}
+    return {}
 
 
 # ---------------------------------------------------------------------------
@@ -1277,6 +1285,7 @@ class FamiliarWindow(QMainWindow):
                 *cmd,
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
+                **_subprocess_exec_kwargs(),
             )
         except FileNotFoundError:
             logger.warning("Live look preview disabled: ffmpeg not found")
