@@ -79,27 +79,33 @@ class _EmbeddingModel:
     def __init__(self, model_name: str = EMBEDDING_MODEL):
         self._model_name = model_name
         self._model: Any = None
+        self._failed = False
+        self._fallback_dim = 384
         self._lock = threading.Lock()
         self._load_event = threading.Event()
 
     def _load(self) -> None:
-        if self._model is not None:
+        if self._model is not None or self._failed:
             return  # fast path — already loaded, no lock needed
         with self._lock:
-            if self._model is None:  # double-checked locking
+            if self._model is None and not self._failed:  # double-checked locking
                 import logging as _logging
 
                 _logging.getLogger("sentence_transformers").setLevel(_logging.ERROR)
                 _logging.getLogger("huggingface_hub").setLevel(_logging.ERROR)
-                # transformers uses propagate=False so we must use its own API
-                import transformers as _transformers
+                _logging.getLogger("transformers").setLevel(_logging.ERROR)
+                try:
+                    from sentence_transformers import SentenceTransformer
 
-                _transformers.logging.set_verbosity_error()
-                from sentence_transformers import SentenceTransformer
-
-                logger.info("Loading embedding model %s...", self._model_name)
-                self._model = SentenceTransformer(self._model_name)
-                logger.info("Embedding model loaded.")
+                    logger.info("Loading embedding model %s...", self._model_name)
+                    self._model = SentenceTransformer(self._model_name)
+                    logger.info("Embedding model loaded.")
+                except Exception as e:
+                    # Keep app usable even if torch/transformers DLLs fail on packaged builds.
+                    self._failed = True
+                    logger.warning(
+                        "Failed to load embedding model; disabling semantic search: %s", e
+                    )
                 self._load_event.set()
 
     def pre_warm(self) -> None:
@@ -115,19 +121,38 @@ class _EmbeddingModel:
         """Return True once the embedding model has finished loading."""
         return self._load_event.is_set()
 
+    def _zero_vectors(self, n: int) -> list[list[float]]:
+        return [[0.0] * self._fallback_dim for _ in range(n)]
+
     def encode_document(self, texts: list[str]) -> list[list[float]]:
         self._load()
+        if self._model is None:
+            return self._zero_vectors(len(texts))
         prefixed = [f"passage: {t}" for t in texts]
-        return self._model.encode(
-            prefixed, normalize_embeddings=True, show_progress_bar=False
-        ).tolist()
+        try:
+            return self._model.encode(
+                prefixed, normalize_embeddings=True, show_progress_bar=False
+            ).tolist()
+        except Exception as e:
+            logger.warning("Embedding encode_document failed; using fallback vectors: %s", e)
+            self._model = None
+            self._failed = True
+            return self._zero_vectors(len(texts))
 
     def encode_query(self, texts: list[str]) -> list[list[float]]:
         self._load()
+        if self._model is None:
+            return self._zero_vectors(len(texts))
         prefixed = [f"query: {t}" for t in texts]
-        return self._model.encode(
-            prefixed, normalize_embeddings=True, show_progress_bar=False
-        ).tolist()
+        try:
+            return self._model.encode(
+                prefixed, normalize_embeddings=True, show_progress_bar=False
+            ).tolist()
+        except Exception as e:
+            logger.warning("Embedding encode_query failed; using fallback vectors: %s", e)
+            self._model = None
+            self._failed = True
+            return self._zero_vectors(len(texts))
 
 
 # ── ObservationMemory ─────────────────────────────────────────

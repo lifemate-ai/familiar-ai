@@ -35,6 +35,9 @@ This project adheres to [Semantic Versioning](https://semver.org/).
 - GUI settings dialog now keeps JP labels fully visible (including short labels like `名`), refreshed the app to a bright, soft, rounded light theme, split first-turn startup status from "thinking", and increased GUI font sizing for readability.
 - Mobility initialization now respects `MOBILITY_ENABLED`; in testflight mode it defaults to disabled.
 - Build wrappers now run with `uv run --with pyinstaller`, so Windows testflight packaging works without separately installing PyInstaller.
+- Setup logging no longer imports `transformers` at startup (avoids packaged Windows crash on torch DLL init).
+- Embedding model load failures now degrade to zero-vector fallback instead of crashing startup.
+- `build.sh` / `build.bat` now default to `--mode onedir` for more reliable Windows testflight builds.
 
 ## [0.1.0] - 2026-02-22
 

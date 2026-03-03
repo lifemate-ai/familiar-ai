@@ -132,6 +132,19 @@ class TestEmbeddingModelIsReady:
         # Before load: should be False
         assert mem.is_embedding_ready() is False
 
+    def test_load_failure_falls_back_to_zero_vectors(self):
+        model = _EmbeddingModel("some-model")
+        with patch(
+            "sentence_transformers.SentenceTransformer", side_effect=OSError("dll load failed")
+        ):
+            model._load()
+
+        assert model.is_ready() is True
+        vectors = model.encode_query(["hello"])
+        assert len(vectors) == 1
+        assert len(vectors[0]) == 384
+        assert all(v == 0.0 for v in vectors[0])
+
 
 class TestObservationMemoryPreWarm:
     def test_observation_memory_calls_pre_warm_on_init(self, tmp_path):

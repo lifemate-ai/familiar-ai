@@ -7,7 +7,7 @@ Ship a tester-friendly build where:
 - Mobility/vacuum controls are disabled.
 
 ## Recommended for Tonight
-Use a **portable onefile `.exe` zip** (single executable + external `.env`).
+Use a **portable onedir `.exe` zip** (folder distribution).
 
 Reasons:
 - Easiest handoff for non-technical testers.
@@ -15,7 +15,8 @@ Reasons:
 - Keeps only settings (`.env`) editable outside the executable.
 
 Note:
-- Onefile extraction can make cold startup slower than onedir. For two testers this is usually acceptable.
+- `onefile` can be unstable with heavy `torch` DLL initialization on some Windows setups.
+- `onedir` is typically more reliable for testflight.
 
 ## Build (Windows)
 
@@ -45,14 +46,14 @@ What this one command does:
 1. Generates `.testflight/.env` from your local `.env` / env vars (API key embedded).
 2. Builds Windows package with PyInstaller.
 
-If you want faster startup instead of single-file convenience:
+If you still want a single-file `.exe`:
 
 ```bash
-./build.sh --mode onedir --name familiar-testflight
+./build.sh --mode onefile --name familiar-testflight
 ```
 
 ```bat
-build.bat --mode onedir --name familiar-testflight
+build.bat --mode onefile --name familiar-testflight
 ```
 
 If you want to run each step manually:

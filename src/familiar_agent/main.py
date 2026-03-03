@@ -44,12 +44,7 @@ def setup_logging(debug: bool = False) -> None:
     logging.getLogger("google.genai").setLevel(logging.WARNING)
     logging.getLogger("sentence_transformers").setLevel(logging.ERROR)
     logging.getLogger("huggingface_hub").setLevel(logging.ERROR)
-    try:
-        import transformers as _transformers
-
-        _transformers.logging.set_verbosity_error()
-    except ImportError:
-        pass
+    logging.getLogger("transformers").setLevel(logging.ERROR)
 
     logging.info("Logging initialized. Level: %s, File: %s", logging.getLevelName(level), log_file)
 
