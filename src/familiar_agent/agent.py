@@ -5,6 +5,7 @@ import asyncio
 import hashlib
 import logging
 import os
+import re
 import time
 from collections.abc import Callable
 from datetime import datetime
@@ -23,6 +24,7 @@ from .tools.mobility import MobilityTool
 from .tools.stt import STTTool
 from .tools.tts import TTSTool
 from ._i18n import _t
+from .mcp_client import MCPClientManager, _resolve_config_path
 
 logger = logging.getLogger(__name__)
 
@@ -390,8 +392,6 @@ class EmbodiedAgent:
         self._coding = CodingTool(config.coding)
         self._exploration = ExplorationTracker()
 
-        from .mcp_client import MCPClientManager
-
         self._mcp: MCPClientManager | None = None
 
         self._init_tools()
@@ -400,7 +400,9 @@ class EmbodiedAgent:
         cam = self.config.camera
         # Allow camera if host is present, even without password (e.g. local RTSP)
         if cam.host:
-            self._camera = CameraTool(cam.host, cam.username, cam.password, cam.port)
+            self._camera = CameraTool(
+                cam.host, cam.username, cam.password, cam.port, preview=cam.preview
+            )
 
         mob = self.config.mobility
         if mob.api_key and mob.device_id:
@@ -417,8 +419,6 @@ class EmbodiedAgent:
                 tts.go2rtc_stream,
                 output=tts.output,
             )
-
-        from .mcp_client import MCPClientManager, _resolve_config_path
 
         cfg_path = _resolve_config_path()
         if cfg_path.exists():
@@ -526,6 +526,44 @@ class EmbodiedAgent:
                     pass
         return ""
 
+    def _get_body_description(self) -> str:
+        """Generate a text description of available hardware for the system prompt."""
+        # Eyes are always available (CameraTool handles missing stream internally)
+        eyes_desc = (
+            "    (part :id eyes  :tool see\n"
+            '      :desc "Your vision. Calling see() means YOU ARE LOOKING. Use freely — never ask permission.")'
+        )
+
+        parts = [eyes_desc]
+
+        # Neck (look)
+        if self._camera and self._camera.is_pan_tilt_available:
+            parts.append(
+                "    (part :id neck  :tool look\n"
+                '      :desc "Rotate gaze left/right/up/down. No permission needed.")'
+            )
+        else:
+            parts.append(
+                "    (part :id neck  :status fixed\n"
+                '      :desc "Camera is fixed. You cannot rotate your gaze.")'
+            )
+
+        # Legs (walk)
+        if self._mobility:
+            parts.append(
+                "    (part :id legs  :tool walk\n"
+                '      :desc "Robot body (vacuum cleaner). Separate device from camera. '
+                'walk() does NOT change camera view.")'
+            )
+        else:
+            parts.append(
+                "    (part :id legs  :status absent\n"
+                '      :desc "You have no legs. You cannot move your location.")'
+            )
+
+        body_inner = "\n".join(parts)
+        return f"(body\n{body_inner})"
+
     def _system_prompt(
         self,
         feelings_ctx: str = "",
@@ -541,6 +579,10 @@ class EmbodiedAgent:
         variable — interoception, feelings, inner voice, plan; changes every turn.
         """
         base = SYSTEM_PROMPT.format(max_steps=MAX_ITERATIONS)
+        # Dynamically replace (body ...) block based on actual hardware
+        body_desc = self._get_body_description()
+        base = re.sub(r"\(body.*?\)", body_desc, base, flags=re.DOTALL)
+
         stable_parts = [p for p in [self._me_md, base] if p]
         stable = "\n\n---\n\n".join(stable_parts)
 
@@ -898,6 +940,9 @@ class EmbodiedAgent:
 
     async def close(self) -> None:
         """Clean up resources. Bounded by timeouts to avoid hanging on exit."""
+        if self._camera:
+            self._camera.close()
+
         # Generate (or refresh) today's day summary before shutting down.
         # Skipped when no separate utility backend is configured.
         if self._utility_backend is not self.backend:
