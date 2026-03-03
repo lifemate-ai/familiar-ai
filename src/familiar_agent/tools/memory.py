@@ -510,7 +510,8 @@ class ObservationMemory:
 
                 if count > 0:
                     rows = db.execute(
-                        f"SELECT o.id, o.content, o.date, o.time, o.direction, o.kind, o.emotion, e.vector "
+                        f"SELECT o.id, o.content, o.timestamp, o.date, o.time, "
+                        f"o.direction, o.kind, o.emotion, o.image_path, e.vector "
                         f"FROM observations o JOIN obs_embeddings e ON o.id = e.obs_id "
                         f"WHERE 1=1 {kind_filter}",
                         kind_params,
@@ -527,20 +528,21 @@ class ObservationMemory:
                         params_like: list[Any] = [f"%{kw}%" for kw in keywords]
                         if kind:
                             fallback_rows = db.execute(
-                                f"SELECT content, date, time, direction, kind, emotion FROM observations "
-                                f"WHERE ({conditions}) AND kind = ? ORDER BY timestamp DESC LIMIT ?",
+                                f"SELECT id, content, timestamp, date, time, direction, kind, emotion, image_path "
+                                f"FROM observations WHERE ({conditions}) AND kind = ? "
+                                f"ORDER BY timestamp DESC LIMIT ?",
                                 params_like + [kind, n],
                             ).fetchall()
                         else:
                             fallback_rows = db.execute(
-                                f"SELECT content, date, time, direction, kind, emotion FROM observations "
-                                f"WHERE {conditions} ORDER BY timestamp DESC LIMIT ?",
+                                f"SELECT id, content, timestamp, date, time, direction, kind, emotion, image_path "
+                                f"FROM observations WHERE {conditions} ORDER BY timestamp DESC LIMIT ?",
                                 params_like + [n],
                             ).fetchall()
                     if not fallback_rows:
                         fallback_rows = db.execute(
-                            "SELECT content, date, time, direction, kind, emotion FROM observations "
-                            "ORDER BY timestamp DESC LIMIT ?",
+                            "SELECT id, content, timestamp, date, time, direction, kind, emotion, image_path "
+                            "FROM observations ORDER BY timestamp DESC LIMIT ?",
                             (n,),
                         ).fetchall()
 
@@ -552,26 +554,40 @@ class ObservationMemory:
                 top_indices = np.argsort(scores)[::-1][:n]
                 return [
                     {
+                        "memory_id": rows[i]["id"],
+                        "timestamp": rows[i]["timestamp"],
                         "summary": rows[i]["content"],
                         "date": rows[i]["date"],
                         "time": rows[i]["time"],
                         "direction": rows[i]["direction"],
                         "kind": rows[i]["kind"],
+                        "source_kind": rows[i]["kind"],
                         "emotion": rows[i]["emotion"],
+                        "image_path": rows[i]["image_path"],
                         "score": float(scores[i]),
+                        "confidence": max(0.0, min(1.0, (float(scores[i]) + 1.0) / 2.0)),
+                        "retrieval_method": "semantic",
                     }
                     for i in top_indices
                 ]
 
             # Fallback results
+            method = "keyword" if query and any(len(w) > 1 for w in query.split()) else "recency"
+            fallback_conf = 0.45 if method == "keyword" else 0.25
             return [
                 {
+                    "memory_id": r["id"],
+                    "timestamp": r["timestamp"],
                     "summary": r["content"],
                     "date": r["date"],
                     "time": r["time"],
                     "direction": r["direction"],
                     "kind": r["kind"],
+                    "source_kind": r["kind"],
                     "emotion": r["emotion"],
+                    "image_path": r["image_path"],
+                    "confidence": fallback_conf,
+                    "retrieval_method": method,
                 }
                 for r in fallback_rows
             ]
@@ -607,14 +623,20 @@ class ObservationMemory:
     def format_for_context(self, memories: list[dict]) -> str:
         if not memories:
             return ""
-        lines = ["[過去の記憶]:"]
+        lines = ["[過去の記憶（証拠つき）: conf<0.55 は不確か。断定しないこと]:"]
         for m in memories:
             score_str = f" (類似度:{m['score']:.2f})" if "score" in m else ""
+            conf = float(m.get("confidence", 0.0))
+            conf_str = f" conf:{conf:.2f}"
+            low_conf = " low-confidence" if conf < 0.55 else ""
             emotion_str = (
                 f" [{m['emotion']}]" if m.get("emotion") and m["emotion"] != "neutral" else ""
             )
+            source_kind = m.get("source_kind", m.get("kind", "?"))
+            memory_id = str(m.get("memory_id", ""))[:8] or "?"
             lines.append(
-                f"- {m['date']} {m['time']} ({m.get('direction', '?')}){score_str}{emotion_str}: {m['summary'][:120]}"
+                f"- {m['date']} {m['time']} id:{memory_id} src:{source_kind}{score_str}{conf_str}{low_conf}"
+                f" ({m.get('direction', '?')}){emotion_str}: {m['summary'][:120]}"
             )
         return "\n".join(lines)
 
@@ -914,10 +936,14 @@ class MemoryTool:
             lines = []
             for m in memories:
                 score = f" ({m['score']:.2f})" if "score" in m else ""
+                confidence = f" conf:{float(m.get('confidence', 0.0)):.2f}"
                 emotion = f" [{m['emotion']}]" if m.get("emotion", "neutral") != "neutral" else ""
                 img = " 📷" if m.get("image_path") else ""
+                memory_id = str(m.get("memory_id", ""))[:8] or "?"
+                source_kind = m.get("source_kind", m.get("kind", "?"))
                 lines.append(
-                    f"- {m['date']} {m['time']}{score}{emotion}{img}: {m['summary'][:120]}"
+                    f"- {m['date']} {m['time']} id:{memory_id} src:{source_kind}{score}{confidence}{emotion}{img}: "
+                    f"{m['summary'][:120]}"
                 )
             return "\n".join(lines), None
 
