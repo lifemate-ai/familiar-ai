@@ -3059,6 +3059,122 @@ _T: dict[str, dict[str, str]] = {
         "ur": "تیار ہوں",
         "vi": "Sẵn sàng",
     },
+    "settings_button": {
+        "en": "⚙ Settings",
+        "ja": "⚙ 設定",
+    },
+    "settings_button_tooltip": {
+        "en": "Open settings",
+        "ja": "設定を開く",
+    },
+    "settings_window_title": {
+        "en": "Settings — familiar-ai",
+        "ja": "設定 — familiar-ai",
+    },
+    "settings_tab_agent": {
+        "en": "Agent",
+        "ja": "エージェント",
+    },
+    "settings_tab_voice": {
+        "en": "Voice",
+        "ja": "音声",
+    },
+    "settings_tab_camera": {
+        "en": "Camera",
+        "ja": "カメラ",
+    },
+    "settings_tab_advanced": {
+        "en": "Advanced",
+        "ja": "詳細",
+    },
+    "settings_field_agent_name": {
+        "en": "Agent name:",
+        "ja": "AI名:",
+    },
+    "settings_field_companion_name": {
+        "en": "Companion name:",
+        "ja": "相棒名:",
+    },
+    "settings_field_platform": {
+        "en": "Platform:",
+        "ja": "プラットフォーム:",
+    },
+    "settings_field_api_key": {
+        "en": "API key:",
+        "ja": "APIキー:",
+    },
+    "settings_field_model": {
+        "en": "Model:",
+        "ja": "モデル:",
+    },
+    "settings_field_elevenlabs_api_key": {
+        "en": "ElevenLabs API key:",
+        "ja": "ElevenLabs APIキー:",
+    },
+    "settings_field_voice_id": {
+        "en": "Voice ID:",
+        "ja": "音声ID:",
+    },
+    "settings_field_tts_output": {
+        "en": "TTS output:",
+        "ja": "TTS出力先:",
+    },
+    "settings_field_stt_language": {
+        "en": "STT language:",
+        "ja": "STT言語:",
+    },
+    "settings_field_camera_host": {
+        "en": "Camera host:",
+        "ja": "カメラホスト:",
+    },
+    "settings_field_camera_username": {
+        "en": "Username:",
+        "ja": "ユーザー名:",
+    },
+    "settings_field_camera_password": {
+        "en": "Password:",
+        "ja": "パスワード:",
+    },
+    "settings_field_camera_onvif_port": {
+        "en": "ONVIF port:",
+        "ja": "ONVIFポート:",
+    },
+    "settings_field_thinking_mode": {
+        "en": "Thinking mode:",
+        "ja": "思考モード:",
+    },
+    "settings_field_thinking_effort": {
+        "en": "Thinking effort:",
+        "ja": "思考強度:",
+    },
+    "settings_field_memory_db_path": {
+        "en": "Memory DB path:",
+        "ja": "記憶DBパス:",
+    },
+    "settings_placeholder_unchanged": {
+        "en": "(unchanged)",
+        "ja": "（変更しない）",
+    },
+    "settings_save_failed_title": {
+        "en": "Save failed",
+        "ja": "保存に失敗",
+    },
+    "settings_saved_title": {
+        "en": "Settings saved",
+        "ja": "設定を保存しました",
+    },
+    "settings_saved_message": {
+        "en": "Settings saved.\nRestart familiar-ai to apply all changes.",
+        "ja": "設定を保存しました。\nすべての変更を反映するには familiar-ai を再起動してください。",
+    },
+    "gui_input_placeholder": {
+        "en": "Type a message and press Enter…",
+        "ja": "メッセージを入力して Enter…",
+    },
+    "gui_cancel_turn_tooltip": {
+        "en": "Cancel current turn (Esc)",
+        "ja": "現在の応答を中断 (Esc)",
+    },
     "thinking_status": {
         "en": "{name} is thinking... {seconds}s",
         "ja": "{name}が思考中... {seconds}s",
