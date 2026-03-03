@@ -17,7 +17,7 @@ This project adheres to [Semantic Versioning](https://semver.org/).
 - Support for full RTSP URLs in `CAMERA_HOST` (enables ATOMCam and other non-standard RTSP paths)
 
 ### Changed
-- GUI settings dialog now keeps JP labels fully visible (including short labels like `名`) and refreshed the app to a bright, soft, rounded light theme.
+- GUI settings dialog now keeps JP labels fully visible (including short labels like `名`), refreshed the app to a bright, soft, rounded light theme, split first-turn startup status from "thinking", and increased GUI font sizing for readability.
 
 ## [0.1.0] - 2026-02-22
 

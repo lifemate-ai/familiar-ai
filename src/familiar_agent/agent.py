@@ -929,6 +929,7 @@ class EmbodiedAgent:
         on_action: Callable[[str, dict], None] | None = None,
         on_text: Callable[[str], None] | None = None,
         on_image: Callable[[str], None] | None = None,
+        on_phase: Callable[[str], None] | None = None,
         desires=None,
         inner_voice: str = "",
         interrupt_queue=None,
@@ -938,17 +939,26 @@ class EmbodiedAgent:
         inner_voice: agent's own desire/impulse (injected into system prompt, NOT a user message).
         """
         self._turn_count += 1
+        first_turn = self._turn_count == 1
+        memory_worker = getattr(self, "_memory_worker", None)
+        startup_phase = (
+            first_turn
+            or not self._memory.is_embedding_ready()
+            or (self._mcp is not None and not self._mcp.is_started)
+            or (memory_worker is not None and not memory_worker.is_running)
+        )
+        if on_phase:
+            on_phase("startup" if startup_phase else "thinking")
 
         # Start MCP connections on first turn (lazy, idempotent)
         if self._mcp and not self._mcp.is_started:
             await self._mcp.start()
-        memory_worker = getattr(self, "_memory_worker", None)
         if memory_worker and not memory_worker.is_running:
             await memory_worker.start()
 
         # First turn: morning reconstruction — bridge yesterday's self to today's
         morning_ctx = ""
-        if self._turn_count == 1:
+        if first_turn:
             morning_ctx = await self._morning_reconstruction(desires=desires)
 
         is_desire_turn = inner_voice and not user_input
@@ -1007,6 +1017,8 @@ class EmbodiedAgent:
             plan_ctx = await generate_plan(self.backend, user_input, tool_names)
             if plan_ctx:
                 logger.debug("TAPE plan: %s", plan_ctx[:80])
+        if on_phase and startup_phase:
+            on_phase("thinking")
 
         camera_used = False
         say_used = False
