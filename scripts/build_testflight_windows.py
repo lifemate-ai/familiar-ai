@@ -4,14 +4,28 @@
 from __future__ import annotations
 
 import argparse
+import importlib.util
 import shutil
 import subprocess
+import sys
 from pathlib import Path
 
 
 def _run(cmd: list[str]) -> None:
     print("+", " ".join(cmd))
     subprocess.run(cmd, check=True)
+
+
+def _resolve_pyinstaller_cmd() -> list[str]:
+    cli = shutil.which("pyinstaller")
+    if cli:
+        return [cli]
+    if importlib.util.find_spec("PyInstaller") is not None:
+        return [sys.executable, "-m", "PyInstaller"]
+    raise SystemExit(
+        "pyinstaller not found. Run via build.bat/build.sh "
+        "or use: uv run --with pyinstaller python scripts/release_testflight_windows.py ..."
+    )
 
 
 def _write_quickstart(path: Path, exe_name: str) -> None:
@@ -54,12 +68,8 @@ def main() -> int:
     if not env_path.exists():
         raise SystemExit(f"Env file not found: {env_path}")
 
-    pyinstaller = shutil.which("pyinstaller")
-    if pyinstaller is None:
-        raise SystemExit("pyinstaller not found. Install with: uv tool install pyinstaller")
-
     cmd = [
-        pyinstaller,
+        *_resolve_pyinstaller_cmd(),
         "--noconfirm",
         "--windowed",
         "--name",

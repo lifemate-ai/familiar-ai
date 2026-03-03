@@ -7,4 +7,4 @@ if [[ $# -eq 0 ]]; then
   set -- --mode onefile --name familiar-testflight
 fi
 
-exec uv run python scripts/release_testflight_windows.py "$@"
+exec uv run --with pyinstaller python scripts/release_testflight_windows.py "$@"

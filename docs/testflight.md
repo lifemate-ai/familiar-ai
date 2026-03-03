@@ -35,6 +35,7 @@ build.bat
 ```
 
 `build-testflight.bat` でも同じ動作です。
+`build.sh` / `build.bat` は `pyinstaller` を自動で解決するため、事前の `uv tool install pyinstaller` は不要です。
 
 Outputs:
 - `.release/familiar-testflight/` (ready-to-send folder)
