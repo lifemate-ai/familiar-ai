@@ -46,6 +46,17 @@ uv run pytest -v           # tests
 
 All three must pass cleanly.
 
+## Database migrations
+
+When changing SQLite schema/data, add a new migration script under `migration/`.
+
+```bash
+scripts/new_migration.sh add_memory_jobs_table
+# => migration/YYYY-MM-DD-XXX_add_memory_jobs_table.py
+```
+
+Then implement `upgrade(conn)` in the generated file. Migrations are applied automatically at startup and tracked in `schema_migrations`.
+
 ## Commit messages
 
 Use [Conventional Commits](https://www.conventionalcommits.org/) in **English**:
