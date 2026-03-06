@@ -627,7 +627,7 @@ class OpenAICompatibleBackend:
             tool_calls.append(ToolCall(id=tc["id"], name=tc["name"], input=input_data))
 
         stop = "tool_use" if finish_reason == "tool_calls" else "end_turn"
-        raw_assistant: dict[str, Any] = {"role": "assistant", "content": text or None}
+        raw_assistant: dict[str, Any] = {"role": "assistant", "content": text or ""}
         if tool_calls:
             raw_assistant["tool_calls"] = [
                 {
