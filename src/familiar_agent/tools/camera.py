@@ -83,6 +83,9 @@ class CameraTool:
     def _capture_loop(self):
         """Background thread to keep camera buffer fresh and optionally show preview."""
         source = self._get_stream_url()
+        # Suppress ffmpeg SEI truncation warnings (Tapo-specific metadata)
+        if isinstance(source, str):
+            os.environ.setdefault("OPENCV_FFMPEG_CAPTURE_OPTIONS", "loglevel;quiet")
         self._cap = cv2.VideoCapture(source)
 
         if not self._cap.isOpened():
