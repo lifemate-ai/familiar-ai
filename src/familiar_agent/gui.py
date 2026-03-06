@@ -247,7 +247,10 @@ class ChatLog(QScrollArea):
         self._vbox = QVBoxLayout(self._container)
         self._vbox.setContentsMargins(10, 10, 10, 10)
         self._vbox.setSpacing(4)
-        self._vbox.setAlignment(Qt.AlignmentFlag.AlignTop)
+        # Top stretch pushes messages to the bottom of the viewport (chat-app style).
+        # As messages accumulate and overflow the viewport the stretch shrinks to zero
+        # and the scrollbar takes over.
+        self._vbox.addStretch(1)
 
         self.setWidget(self._container)
 
