@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import os
+import signal
 import sys
 import time
 from pathlib import Path
@@ -200,7 +201,7 @@ async def repl(agent: EmbodiedAgent, desires: DesireSystem, debug: bool = False)
                     queued_input, agent, desires, on_action, on_text, debug, input_queue
                 )
 
-    except (KeyboardInterrupt, EOFError):
+    except (KeyboardInterrupt, EOFError, asyncio.CancelledError):
         pass
     finally:
         stdin_task.cancel()
@@ -323,6 +324,39 @@ def _mcp_command(args: list[str]) -> None:
             print(f"  {name:<22} {cmd} {a}{env_hint}")
 
 
+def _run_repl(agent: EmbodiedAgent, desires: DesireSystem, debug: bool) -> None:
+    """Run the REPL with cross-platform Ctrl+C support.
+
+    asyncio.run() on Windows (ProactorEventLoop) may not deliver SIGINT to
+    the coroutine while it is blocked in an IOCP wait (e.g. HTTP streaming).
+    Using an explicit event loop + signal handler ensures Ctrl+C cancels the
+    main task reliably on both Windows and Unix.
+    """
+    loop = asyncio.new_event_loop()
+    asyncio.set_event_loop(loop)
+    main_task = loop.create_task(repl(agent, desires, debug=debug))
+
+    def _cancel() -> None:
+        if not main_task.done():
+            main_task.cancel()
+
+    if sys.platform != "win32":
+        loop.add_signal_handler(signal.SIGINT, _cancel)
+        loop.add_signal_handler(signal.SIGTERM, _cancel)
+    else:
+        signal.signal(signal.SIGINT, lambda *_: loop.call_soon_threadsafe(_cancel))
+
+    try:
+        loop.run_until_complete(main_task)
+    except (asyncio.CancelledError, KeyboardInterrupt):
+        pass
+    finally:
+        try:
+            loop.close()
+        except Exception:
+            pass
+
+
 def main() -> None:
     # Suppress noisy HuggingFace Hub / transformers output before any imports
     os.environ.setdefault("TRANSFORMERS_VERBOSITY", "error")
@@ -366,7 +400,7 @@ def main() -> None:
         app = FamiliarApp(agent, desires)
         app.run(mouse=False)
     else:
-        asyncio.run(repl(agent, desires, debug=debug))
+        _run_repl(agent, desires, debug=debug)
 
 
 if __name__ == "__main__":

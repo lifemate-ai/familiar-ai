@@ -1526,6 +1526,7 @@ class FamiliarWindow(QMainWindow):
 
 def run_gui(agent: "EmbodiedAgent", desires: "DesireSystem") -> None:
     """Launch the PySide6 GUI with qasync event loop."""
+    import signal
     import sys
 
     existing = QApplication.instance()
@@ -1538,6 +1539,16 @@ def run_gui(agent: "EmbodiedAgent", desires: "DesireSystem") -> None:
     window = FamiliarWindow(agent, desires)
     window.show()
     qt_app.aboutToQuit.connect(window._ensure_shutdown_task)
+
+    # Qt's event loop does not yield to CPython's signal-checking mechanism on its own.
+    # A periodic no-op timer wakes up the Python interpreter so that SIGINT (Ctrl+C)
+    # is processed promptly instead of being silently ignored.
+    from PySide6.QtCore import QTimer
+
+    _signal_timer = QTimer()
+    _signal_timer.start(200)
+    _signal_timer.timeout.connect(lambda: None)
+    signal.signal(signal.SIGINT, lambda *_: qt_app.quit())
 
     with loop:
         loop.run_forever()
