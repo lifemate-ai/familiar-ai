@@ -251,10 +251,22 @@ class ChatLog(QScrollArea):
 
         self.setWidget(self._container)
 
+        # Auto-scroll: follow new content unless the user has scrolled up.
+        self._auto_scroll = True
+        self.verticalScrollBar().valueChanged.connect(self._on_scroll_value_changed)
+        self.verticalScrollBar().rangeChanged.connect(self._on_scroll_range_changed)
+
+    def _on_scroll_value_changed(self, value: int) -> None:
+        sb = self.verticalScrollBar()
+        self._auto_scroll = value >= sb.maximum() - 20
+
+    def _on_scroll_range_changed(self, _min: int, maximum: int) -> None:
+        if self._auto_scroll:
+            self.verticalScrollBar().setValue(maximum)
+
     def _scroll_to_bottom(self) -> None:
-        QTimer.singleShot(
-            20, lambda: self.verticalScrollBar().setValue(self.verticalScrollBar().maximum())
-        )
+        self._auto_scroll = True
+        self.verticalScrollBar().setValue(self.verticalScrollBar().maximum())
 
     @staticmethod
     def _extract_prefixed_text(text: str, label: str) -> str | None:
