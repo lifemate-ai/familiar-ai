@@ -21,6 +21,7 @@ import base64
 import contextlib
 import html as _html
 import logging
+import os
 import time
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
@@ -1567,3 +1568,8 @@ def run_gui(agent: "EmbodiedAgent", desires: "DesireSystem") -> None:
 
     with loop:
         loop.run_forever()
+
+    # Non-daemon threads (ThreadPoolExecutor from run_in_executor, httpx connection
+    # pools, etc.) keep the process alive after the Qt event loop exits.
+    # Force-exit so the CMD window closes cleanly — same pattern as the REPL.
+    os._exit(0)
