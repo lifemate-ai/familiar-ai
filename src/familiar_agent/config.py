@@ -143,6 +143,13 @@ class AgentConfig:
     utility_api_key: str = field(default_factory=lambda: os.environ.get("UTILITY_API_KEY", ""))
     utility_model: str = field(default_factory=lambda: os.environ.get("UTILITY_MODEL", ""))
 
+    # ── Scene backend (optional) ────────────────────────────────────────
+    # Separate backend for scene entity extraction — cheaper/local model.
+    # Falls back to utility backend (then main backend) when not configured.
+    scene_platform: str = field(default_factory=lambda: os.environ.get("SCENE_PLATFORM", ""))
+    scene_api_key: str = field(default_factory=lambda: os.environ.get("SCENE_API_KEY", ""))
+    scene_model: str = field(default_factory=lambda: os.environ.get("SCENE_MODEL", ""))
+
     max_tokens: int = 4096
     camera: CameraConfig = field(default_factory=CameraConfig)
     mobility: MobilityConfig = field(default_factory=MobilityConfig)

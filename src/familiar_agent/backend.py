@@ -1408,3 +1408,45 @@ def create_utility_backend(
 
     logger.warning("Unknown UTILITY_PLATFORM: %s, falling back to main backend", platform)
     return None
+
+
+def create_scene_backend(
+    config: "AgentConfig",
+) -> AnthropicBackend | OpenAICompatibleBackend | KimiBackend | GLMBackend | GeminiBackend | None:
+    """Create a separate backend for scene entity extraction (cheap/local model).
+
+    Returns None if SCENE_PLATFORM is not configured — caller should fall back
+    to the utility backend or main backend.
+    """
+    if not config.scene_platform or not config.scene_api_key:
+        return None
+
+    platform = config.scene_platform
+    api_key = config.scene_api_key
+    model = config.scene_model
+
+    if platform == "anthropic":
+        model = model or "claude-haiku-4-5-20251001"
+        logger.info("Using Anthropic scene backend: %s", model)
+        return AnthropicBackend(api_key=api_key, model=model, thinking_mode="disabled")
+    if platform == "gemini":
+        model = model or "gemini-2.5-flash"
+        logger.info("Using Gemini scene backend: %s", model)
+        return GeminiBackend(api_key=api_key, model=model)
+    if platform == "kimi":
+        model = model or "kimi-k2.5"
+        logger.info("Using Kimi scene backend: %s", model)
+        return KimiBackend(api_key=api_key, model=model)
+    if platform == "glm":
+        model = model or "glm-4.6v"
+        logger.info("Using GLM scene backend: %s", model)
+        return GLMBackend(api_key=api_key, model=model)
+    if platform == "openai":
+        model = model or "gpt-4o-mini"
+        logger.info("Using OpenAI scene backend: %s", model)
+        return OpenAICompatibleBackend(
+            api_key=api_key, model=model, base_url="https://api.openai.com/v1"
+        )
+
+    logger.warning("Unknown SCENE_PLATFORM: %s, falling back", platform)
+    return None
