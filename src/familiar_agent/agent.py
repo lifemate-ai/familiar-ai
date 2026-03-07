@@ -14,6 +14,7 @@ from .backend import create_backend, create_utility_backend
 from .config import AgentConfig
 from .desires import detect_worry_signal
 from .exploration import ExplorationTracker
+from .scene import SceneTracker
 from .memory_worker import MemoryJobWorker
 from .tape import check_plan_blocked, generate_plan, generate_replan
 from .tools.camera import CameraTool
@@ -391,6 +392,7 @@ class EmbodiedAgent:
         self._tom_tool = ToMTool(self._memory, default_person=config.companion_name)
         self._coding = CodingTool(config.coding)
         self._exploration = ExplorationTracker()
+        self._scene: SceneTracker | None = None  # initialized after DB ready in _init_tools
 
         self._mcp: MCPClientManager | None = None
 
@@ -433,6 +435,19 @@ class EmbodiedAgent:
                 f"rtsp://{cam.username}:{cam.password}@{cam.host}:554/stream1" if cam.host else ""
             )
             self._stt = STTTool(stt_cfg.elevenlabs_api_key, stt_cfg.language, rtsp_url)
+
+        # World model: persistent scene entity tracker (Phase 1)
+        # Reuses the same SQLite DB as ObservationMemory via a separate connection.
+        import sqlite3 as _sqlite3
+        from pathlib import Path as _Path
+
+        scene_db_path = str(_Path.home() / ".familiar_ai" / "observations.db")
+        try:
+            _Path(scene_db_path).parent.mkdir(parents=True, exist_ok=True)
+            scene_conn = _sqlite3.connect(scene_db_path)
+            self._scene = SceneTracker(scene_conn)
+        except Exception as exc:
+            logger.warning("SceneTracker init failed: %s", exc)
 
     @property
     def _all_tool_defs(self) -> list[dict]:
@@ -609,6 +624,10 @@ class EmbodiedAgent:
         exploration_ctx = self._exploration_context()
         if exploration_ctx:
             variable_parts.append(exploration_ctx)
+
+        scene_ctx = self._scene.context_for_prompt() if self._scene else ""
+        if scene_ctx:
+            variable_parts.append(scene_ctx)
 
         variable = "\n\n---\n\n".join(variable_parts)
         return stable, variable
@@ -1120,6 +1139,12 @@ class EmbodiedAgent:
                         self._exploration.record_novelty(novelty)
                         if desires is not None:
                             desires.boost("look_around", novelty * 0.3)
+                        # World model: update scene entities from the agent's visual observation.
+                        # Fire-and-forget so it never delays the response.
+                        if self._scene is not None:
+                            asyncio.ensure_future(
+                                self._scene.update(final_text[:500], self._utility_backend)
+                            )
                         await self._memory.save_async(
                             final_text[:500],
                             direction="観察",

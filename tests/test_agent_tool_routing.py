@@ -26,6 +26,7 @@ def _make_agent(
     agent = EmbodiedAgent.__new__(EmbodiedAgent)
     agent.config = MagicMock()
     agent._exploration = ExplorationTracker()
+    agent._scene = None
 
     mem_tool = MagicMock()
     mem_tool.call = AsyncMock(return_value=("mem result", None))
