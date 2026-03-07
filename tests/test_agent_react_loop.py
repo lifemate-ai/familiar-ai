@@ -119,6 +119,7 @@ def _make_agent(*, with_tts: bool = False, with_camera: bool = False, with_mcp: 
         agent._mcp = mcp_client
 
     agent._exploration = ExplorationTracker()
+    agent._scene = None
     return agent
 
 

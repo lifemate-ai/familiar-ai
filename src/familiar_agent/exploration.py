@@ -13,7 +13,9 @@ The pan/tilt deltas from Tapo camera moves are:
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+import json
+import sqlite3
+from dataclasses import asdict, dataclass
 from datetime import datetime
 
 
@@ -92,6 +94,60 @@ class ExplorationTracker:
 
         directions_str = ", ".join(candidates)
         return f"Unexplored directions: {directions_str} — consider looking there."
+
+    # ------------------------------------------------------------------
+    # Persistence
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    def init_schema(conn: sqlite3.Connection) -> None:
+        """Create exploration_state table if absent (idempotent)."""
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS exploration_state (
+                id           INTEGER PRIMARY KEY CHECK (id = 1),
+                pan_accum    REAL    NOT NULL DEFAULT 0.0,
+                tilt_accum   REAL    NOT NULL DEFAULT 0.0,
+                records_json TEXT    NOT NULL DEFAULT '[]',
+                saved_at     TEXT    NOT NULL
+            )
+            """
+        )
+        conn.commit()
+
+    def save_to_db(self, conn: sqlite3.Connection) -> None:
+        """Upsert current state to the DB (single-row table, id=1)."""
+        records_json = json.dumps([asdict(r) for r in self._records])
+        conn.execute(
+            """
+            INSERT INTO exploration_state (id, pan_accum, tilt_accum, records_json, saved_at)
+            VALUES (1, ?, ?, ?, datetime('now'))
+            ON CONFLICT(id) DO UPDATE SET
+                pan_accum    = excluded.pan_accum,
+                tilt_accum   = excluded.tilt_accum,
+                records_json = excluded.records_json,
+                saved_at     = excluded.saved_at
+            """,
+            (self._pan_accum, self._tilt_accum, records_json),
+        )
+        conn.commit()
+
+    def load_from_db(self, conn: sqlite3.Connection) -> None:
+        """Restore state from DB. No-op if table is empty."""
+        row = conn.execute(
+            "SELECT pan_accum, tilt_accum, records_json FROM exploration_state WHERE id=1"
+        ).fetchone()
+        if row is None:
+            return
+        self._pan_accum = row[0]
+        self._tilt_accum = row[1]
+        try:
+            raw_records = json.loads(row[2])
+            self._records = [ExplorationRecord(**r) for r in raw_records]
+        except (json.JSONDecodeError, TypeError):
+            self._records = []
+
+    # ------------------------------------------------------------------
 
     def context_for_prompt(self, n: int = 5) -> str:
         """Return a compact exploration summary for LLM context injection."""
