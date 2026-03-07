@@ -741,9 +741,10 @@ class ObservationMemory:
                 if count > 0:
                     rows = db.execute(
                         f"SELECT o.id, o.content, o.timestamp, o.date, o.time, "
-                        f"o.direction, o.kind, o.emotion, o.image_path, e.vector "
+                        f"o.direction, o.kind, o.emotion, o.image_path, "
+                        f"COALESCE(o.importance, 1.0) AS importance, e.vector "
                         f"FROM observations o JOIN obs_embeddings e ON o.id = e.obs_id "
-                        f"WHERE 1=1 {kind_filter}",
+                        f"WHERE o.superseded_by IS NULL {kind_filter}",
                         kind_params,
                     ).fetchall()
                 else:
@@ -760,19 +761,21 @@ class ObservationMemory:
                             fallback_rows = db.execute(
                                 f"SELECT id, content, timestamp, date, time, direction, kind, emotion, image_path "
                                 f"FROM observations WHERE ({conditions}) AND kind = ? "
+                                f"AND superseded_by IS NULL "
                                 f"ORDER BY timestamp DESC LIMIT ?",
                                 params_like + [kind, n],
                             ).fetchall()
                         else:
                             fallback_rows = db.execute(
                                 f"SELECT id, content, timestamp, date, time, direction, kind, emotion, image_path "
-                                f"FROM observations WHERE {conditions} ORDER BY timestamp DESC LIMIT ?",
+                                f"FROM observations WHERE ({conditions}) AND superseded_by IS NULL "
+                                f"ORDER BY timestamp DESC LIMIT ?",
                                 params_like + [n],
                             ).fetchall()
                     if not fallback_rows:
                         fallback_rows = db.execute(
                             "SELECT id, content, timestamp, date, time, direction, kind, emotion, image_path "
-                            "FROM observations ORDER BY timestamp DESC LIMIT ?",
+                            "FROM observations WHERE superseded_by IS NULL ORDER BY timestamp DESC LIMIT ?",
                             (n,),
                         ).fetchall()
 
@@ -1109,6 +1112,112 @@ class ObservationMemory:
 
     async def recall_behavior_policies_async(self, query: str, n: int = 5) -> list[dict]:
         return await asyncio.to_thread(self.recall_behavior_policies, query, n)
+
+    # ------------------------------------------------------------------
+    # Phase 2-2: importance decay
+    # ------------------------------------------------------------------
+
+    def decay_importance(self, before_date: str, factor: float = 0.95) -> int:
+        """Multiply importance by factor for all observations older than before_date.
+
+        Args:
+            before_date: ISO date string (exclusive upper bound). Records with
+                         date < before_date are decayed.
+            factor: Decay multiplier (default 0.95 = 5% decay per cycle).
+
+        Returns:
+            Number of rows updated.
+        """
+        with self._db_lock:
+            db = self._ensure_connected()
+            try:
+                cur = db.execute(
+                    "UPDATE observations SET importance = importance * ? "
+                    "WHERE date < ? AND superseded_by IS NULL",
+                    (factor, before_date),
+                )
+                db.commit()
+                return cur.rowcount
+            except Exception:
+                # Column may not exist on older DBs — safe to ignore
+                logger.debug("decay_importance: column missing, skipping")
+                return 0
+
+    async def decay_importance_async(self, before_date: str, factor: float = 0.95) -> int:
+        return await asyncio.to_thread(self.decay_importance, before_date, factor)
+
+    # ------------------------------------------------------------------
+    # Phase 2-3: near-duplicate detection and supersession
+    # ------------------------------------------------------------------
+
+    def mark_superseded(self, old_id: str, new_id: str) -> None:
+        """Mark old_id as superseded by new_id.
+
+        Superseded observations are excluded from recall() results.
+        """
+        with self._db_lock:
+            db = self._ensure_connected()
+            db.execute(
+                "UPDATE observations SET superseded_by = ? WHERE id = ?",
+                (new_id, old_id),
+            )
+            db.commit()
+
+    def find_near_duplicates(
+        self, threshold: float = 0.95, max_candidates: int = 500
+    ) -> list[tuple[str, str, float]]:
+        """Find pairs of non-superseded observations with cosine similarity >= threshold.
+
+        Returns list of (id_older, id_newer, similarity) tuples, sorted by similarity desc.
+        Older = earlier timestamp is marked as the one to supersede.
+        """
+        with self._db_lock:
+            db = self._ensure_connected()
+            rows = db.execute(
+                """
+                SELECT o.id, o.timestamp, e.vector
+                FROM observations o
+                JOIN obs_embeddings e ON o.id = e.obs_id
+                WHERE o.superseded_by IS NULL
+                ORDER BY o.timestamp DESC
+                LIMIT ?
+                """,
+                (max_candidates,),
+            ).fetchall()
+
+        if len(rows) < 2:
+            return []
+
+        ids = [r[0] for r in rows]
+        timestamps = [r[1] for r in rows]
+        vecs = np.stack([_decode_vector(bytes(r[2])) for r in rows])
+
+        # Normalise
+        norms = np.linalg.norm(vecs, axis=1, keepdims=True)
+        vecs_norm = vecs / (norms + 1e-10)
+
+        # Pairwise cosine similarity (upper triangle only)
+        sim_matrix = vecs_norm @ vecs_norm.T
+
+        pairs: list[tuple[str, str, float]] = []
+        n = len(ids)
+        for i in range(n):
+            for j in range(i + 1, n):
+                sim = float(sim_matrix[i, j])
+                if sim >= threshold:
+                    # Older record (earlier timestamp) is superseded by newer
+                    if timestamps[i] < timestamps[j]:
+                        pairs.append((ids[i], ids[j], sim))
+                    else:
+                        pairs.append((ids[j], ids[i], sim))
+
+        pairs.sort(key=lambda x: x[2], reverse=True)
+        return pairs
+
+    async def find_near_duplicates_async(
+        self, threshold: float = 0.95
+    ) -> list[tuple[str, str, float]]:
+        return await asyncio.to_thread(self.find_near_duplicates, threshold)
 
     async def recall_revisions_async(
         self, entity_type: str | None = None, entity_key: str | None = None, n: int = 20
