@@ -993,86 +993,68 @@ class FamiliarWindow(QMainWindow):
         self._look_preview_task = self._create_task(self._run_look_preview(stream_url))
 
     async def _run_look_preview(self, stream_url: str) -> None:
-        """Render low-FPS RTSP frames while look() is in progress."""
-        cmd = [
-            "ffmpeg",
-            "-loglevel",
-            "error",
-            "-rtsp_transport",
-            "tcp",
-            "-fflags",
-            "nobuffer",
-            "-flags",
-            "low_delay",
-            "-probesize",
-            "32",
-            "-analyzeduration",
-            "0",
-            "-i",
-            stream_url,
-            "-an",
-            "-sn",
-            "-vf",
-            "scale=640:-1",
-            "-r",
-            str(_GUI_LOOK_PREVIEW_FPS),
-            "-f",
-            "image2pipe",
-            "-vcodec",
-            "mjpeg",
-            "-q:v",
-            "7",
-            "-",
-        ]
+        """Render low-FPS RTSP frames while look() is in progress.
 
-        proc: asyncio.subprocess.Process | None = None
+        Uses cv2.VideoCapture (bundled in the opencv-python wheel) instead of
+        shelling out to ffmpeg — no system ffmpeg required.
+        """
         try:
-            proc = await asyncio.create_subprocess_exec(
-                *cmd,
-                stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.PIPE,
-                **_subprocess_exec_kwargs(),
-            )
-        except FileNotFoundError:
-            logger.warning("Live look preview disabled: ffmpeg not found")
+            import cv2
+        except ImportError:
+            logger.warning("Live look preview disabled: opencv-python not installed")
             self._look_preview_disabled = True
             return
-        except Exception as exc:
-            logger.debug("Live look preview unavailable: %s", exc)
-            return
 
-        assert proc.stdout is not None
-        buf = bytearray()
-        last_emit = 0.0
+        loop = asyncio.get_event_loop()
+        frame_queue: asyncio.Queue[bytes | None] = asyncio.Queue(maxsize=2)
         min_interval = 1.0 / max(1, _GUI_LOOK_PREVIEW_FPS)
+
+        def _capture() -> None:
+            cap = cv2.VideoCapture(stream_url)
+            cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
+            if not cap.isOpened():
+                loop.call_soon_threadsafe(frame_queue.put_nowait, None)
+                return
+            try:
+                while not self._closing and time.perf_counter() < self._look_preview_until:
+                    ret, frame = cap.read()
+                    if not ret:
+                        break
+                    h, w = frame.shape[:2]
+                    new_w = 640
+                    new_h = int(h * new_w / w) if w > 0 else h
+                    frame = cv2.resize(frame, (new_w, new_h))
+                    _, jpg = cv2.imencode(".jpg", frame, [cv2.IMWRITE_JPEG_QUALITY, 70])
+                    try:
+                        loop.call_soon_threadsafe(frame_queue.put_nowait, jpg.tobytes())
+                    except Exception:
+                        pass
+                    time.sleep(min_interval)
+            finally:
+                cap.release()
+                loop.call_soon_threadsafe(frame_queue.put_nowait, None)
+
+        capture_future = loop.run_in_executor(None, _capture)
+        last_emit = 0.0
 
         try:
             while not self._closing and time.perf_counter() < self._look_preview_until:
                 try:
-                    chunk = await asyncio.wait_for(
-                        proc.stdout.read(4096),
-                        timeout=_GUI_LOOK_PREVIEW_READ_TIMEOUT_SEC,
+                    jpg_bytes = await asyncio.wait_for(
+                        frame_queue.get(), timeout=_GUI_LOOK_PREVIEW_READ_TIMEOUT_SEC
                     )
                 except asyncio.TimeoutError:
                     continue
-                if not chunk:
-                    if proc.returncode is not None:
-                        break
-                    await asyncio.sleep(0.01)
+                if jpg_bytes is None:
+                    break
+                now = time.perf_counter()
+                if now - last_emit < min_interval:
                     continue
-
-                buf.extend(chunk)
-                for frame in self._extract_jpeg_frames(buf, max_frames=2):
-                    now = time.perf_counter()
-                    if now - last_emit < min_interval:
-                        continue
-                    self._camera.update_image(base64.b64encode(frame).decode("ascii"))
-                    last_emit = now
+                self._camera.update_image(base64.b64encode(jpg_bytes).decode("ascii"))
+                last_emit = now
         finally:
-            if proc.returncode is None:
-                proc.kill()
-                with contextlib.suppress(Exception):
-                    await proc.wait()
+            with contextlib.suppress(Exception):
+                await capture_future
             self._look_preview_task = None
 
     # ------------------------------------------------------------------

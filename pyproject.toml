@@ -33,6 +33,7 @@ voice = [
     "openai-whisper",
     "sounddevice>=0.5.5",
     "soundfile>=0.13.1",
+    "av>=14.0.0",
 ]
 all = [
     "familiar-ai[gui,camera,voice]",
