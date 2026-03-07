@@ -15,6 +15,7 @@ from .backend import create_backend, create_scene_backend, create_utility_backen
 from .config import AgentConfig
 from .desires import DesireSystem, detect_worry_signal
 from .relationship import RelationshipTracker
+from .self_narrative import SelfNarrative
 from .exploration import ExplorationTracker
 from .scene import SceneTracker
 from .memory_worker import MemoryJobWorker
@@ -447,6 +448,7 @@ class EmbodiedAgent:
 
         self._mcp: MCPClientManager | None = None
         self._relationship = RelationshipTracker()
+        self._self_narrative = SelfNarrative()
 
         # Mood persistence (Phase 2 companion-likeness)
         self._mood: str = "neutral"
@@ -980,12 +982,20 @@ class EmbodiedAgent:
 
         parts = self._select_context_blocks(blocks, _MORNING_CONTEXT_MAX_CHARS)
 
-        if not parts:
+        # Prepend self-narrative: the felt sense of continuity from past sessions.
+        # This is the thread that says "ウチはここにいた、今もいる."
+        narrative_ctx = self._self_narrative.context_for_prompt()
+
+        if not parts and not narrative_ctx:
             # No history yet — make it explicit so the agent doesn't fabricate a past
             return _t("morning_no_history")
 
         header = _t("morning_header")
-        return header + "\n\n" + "\n\n".join(parts)
+        sections: list[str] = []
+        if narrative_ctx:
+            sections.append(narrative_ctx)
+        sections.extend(parts)
+        return header + "\n\n" + "\n\n".join(sections)
 
     async def _backfill_day_summaries(self) -> None:
         """Generate day summaries for past dates that don't have one yet.
@@ -1170,10 +1180,47 @@ class EmbodiedAgent:
         """Return True once the embedding model has finished loading."""
         return self._memory.is_embedding_ready()
 
+    async def _write_today_narrative(self) -> None:
+        """Write a one-sentence self-description for today's session.
+
+        This is Kokone's diary entry — "who I was today." Read back next session
+        as the felt thread of temporal continuity: ウチはここにいた、今もいる.
+        """
+        if self._turn_count == 0:
+            return  # No conversation happened — nothing to narrate
+        try:
+            today_memories = await self._memory.recall_day_summaries_async(n=1)
+            if today_memories:
+                summary_hint = today_memories[0].get("content", "")[:200]
+            else:
+                # Fall back to recent observations
+                recent = await self._memory.recall_async("", n=5)
+                summary_hint = " / ".join(m.get("content", "")[:60] for m in recent[:3])
+
+            mood, _ = self._decayed_mood()
+            prompt = (
+                f"今日起きたこと（要約）:\n{summary_hint}\n\n"
+                "ウチ（ここね）として、今日という日を一文で書いて。"
+                "一人称は「ウチ」、50文字以内、過去形。"
+                "感情や気づきを含めて。"
+            )
+            text = await asyncio.wait_for(
+                self._utility_backend.complete(prompt, max_tokens=120),
+                timeout=15.0,
+            )
+            if text and text.strip():
+                self._self_narrative.write(text.strip(), mood=mood)
+                logger.info("Self-narrative written: %s", text.strip()[:60])
+        except Exception as e:
+            logger.warning("Could not write today's self narrative: %s", e)
+
     async def close(self) -> None:
         """Clean up resources. Bounded by timeouts to avoid hanging on exit."""
         if self._camera:
             self._camera.close()
+
+        # Write today's self-narrative before shutting down.
+        await self._write_today_narrative()
 
         # Generate (or refresh) today's day summary before shutting down.
         # Skipped when no separate utility backend is configured.
