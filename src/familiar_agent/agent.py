@@ -1254,6 +1254,7 @@ class EmbodiedAgent:
         on_text: Callable[[str], None] | None = None,
         on_image: Callable[[str], None] | None = None,
         on_phase: Callable[[str], None] | None = None,
+        on_tool_result: Callable[[str, dict, str], None] | None = None,
         desires=None,
         inner_voice: str = "",
         interrupt_queue=None,
@@ -1515,6 +1516,8 @@ class EmbodiedAgent:
                     logger.info("Tool result: %s", text[:100])
                     if image and on_image is not None:
                         on_image(image)
+                    if on_tool_result is not None:
+                        on_tool_result(tc.name, tc.input, text)
                     collected.append((text, image))
 
                 # Append assistant + tool results atomically: never leave tool_calls unresolved

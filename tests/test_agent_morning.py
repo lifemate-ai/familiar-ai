@@ -57,6 +57,10 @@ def _make_agent():
     mem.get_dates_with_summaries = MagicMock(return_value=[])
     agent._memory = mem
 
+    from familiar_agent.self_narrative import SelfNarrative
+
+    agent._self_narrative = SelfNarrative()
+
     return agent
 
 

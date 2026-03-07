@@ -58,6 +58,7 @@ from ._ui_helpers import (
     IDLE_CHECK_INTERVAL,
     desire_tick_prompt,
     format_action,
+    format_tool_result,
     should_fire_idle_desire,
 )
 from .realtime_stt_session import create_realtime_stt_session
@@ -1423,6 +1424,11 @@ class FamiliarWindow(QMainWindow):
             if name == "look":
                 self._request_look_preview(tool_input.get("degrees"))
 
+        def on_tool_result(name: str, tool_input: dict, result: str) -> None:
+            formatted = format_tool_result(name, tool_input, result)
+            if formatted:
+                self._log.append_line(formatted)
+
         def on_image(b64: str) -> None:
             self._camera.update_image(b64)
 
@@ -1434,6 +1440,7 @@ class FamiliarWindow(QMainWindow):
                     on_text=on_text,
                     on_image=on_image,
                     on_phase=on_phase,
+                    on_tool_result=on_tool_result,
                     desires=self._desires,
                     inner_voice=inner_voice,
                     interrupt_queue=self._input_queue,

@@ -120,6 +120,19 @@ def _make_agent(*, with_tts: bool = False, with_camera: bool = False, with_mcp: 
 
     agent._exploration = ExplorationTracker()
     agent._scene = None
+
+    from familiar_agent.self_narrative import SelfNarrative
+    from familiar_agent.relationship import RelationshipTracker
+    import time as _time
+
+    agent._self_narrative = SelfNarrative()
+    agent._relationship = RelationshipTracker()
+    agent._memory_worker = MagicMock()
+    agent._memory_worker.is_running = True
+    agent._mood = "neutral"
+    agent._mood_intensity = 0.0
+    agent._mood_set_at = _time.time()
+
     return agent
 
 

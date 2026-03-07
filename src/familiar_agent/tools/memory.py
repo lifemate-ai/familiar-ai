@@ -1097,6 +1097,54 @@ class ObservationMemory:
             logger.warning("Failed to recall revisions: %s", e)
             return []
 
+    def save_with_id(
+        self,
+        content: str,
+        direction: str = "unknown",
+        kind: str = "observation",
+        emotion: str = "neutral",
+        image_path: str | None = None,
+        override_date: str | None = None,
+        dedupe_key: str | None = None,
+        materialize_now: bool = True,
+    ) -> tuple[str | None, bool]:
+        """Like save(), but returns (memory_id, success) instead of just bool."""
+        try:
+            event_payload = {
+                "content": content,
+                "direction": direction,
+                "kind": kind,
+                "emotion": emotion,
+                "image_path": image_path,
+                "override_date": override_date,
+            }
+            try:
+                event_id, created_new = self.append_memory_event(
+                    "memory.save",
+                    event_payload,
+                    dedupe_key=dedupe_key,
+                    queue_job=True,
+                    job_type="materialize_observation",
+                )
+            except Exception as e:
+                logger.warning("Failed to record memory event (continuing): %s", e)
+                event_id, created_new = None, False
+
+            if dedupe_key and event_id and not created_new:
+                return event_id, True
+
+            if not materialize_now and event_id:
+                return event_id, True
+
+            obs_id = event_id or str(uuid.uuid4())
+            ok = self._materialize_memory_save_event(obs_id, event_payload)
+            if ok:
+                logger.info("Saved %s (%s): %s...", kind, emotion, content[:60])
+            return (obs_id if ok else None), ok
+        except Exception as e:
+            logger.warning("Failed to save memory: %s", e)
+            return None, False
+
     async def save_async(
         self,
         content: str,
@@ -1110,6 +1158,29 @@ class ObservationMemory:
     ) -> bool:
         return await asyncio.to_thread(
             self.save,
+            content,
+            direction,
+            kind,
+            emotion,
+            image_path,
+            override_date,
+            dedupe_key,
+            materialize_now,
+        )
+
+    async def save_async_with_id(
+        self,
+        content: str,
+        direction: str = "unknown",
+        kind: str = "observation",
+        emotion: str = "neutral",
+        image_path: str | None = None,
+        override_date: str | None = None,
+        dedupe_key: str | None = None,
+        materialize_now: bool = True,
+    ) -> tuple[str | None, bool]:
+        return await asyncio.to_thread(
+            self.save_with_id,
             content,
             direction,
             kind,
@@ -1390,6 +1461,87 @@ class ObservationMemory:
             lines.append(f"- {s['date']}: {s['summary'][:200]}")
         return "\n".join(lines)
 
+    # ------------------------------------------------------------------
+    # Associative links
+    # ------------------------------------------------------------------
+
+    def link_memories(
+        self,
+        source_id: str,
+        target_id: str,
+        link_type: str = "related",
+        note: str | None = None,
+    ) -> bool:
+        """Create a typed link between two memories. Returns True on success.
+
+        link_type: "related" | "similar" | "caused_by" | "leads_to"
+        """
+        link_id = str(uuid.uuid4())
+        now = datetime.utcnow().isoformat()
+        try:
+            with self._db_lock:
+                db = self._ensure_connected()
+                db.execute(
+                    "INSERT OR IGNORE INTO memory_links "
+                    "(id, source_id, target_id, link_type, note, created_at) "
+                    "VALUES (?, ?, ?, ?, ?, ?)",
+                    (link_id, source_id, target_id, link_type, note, now),
+                )
+                db.commit()
+            return True
+        except Exception as e:
+            logger.warning("link_memories failed: %s", e)
+            return False
+
+    async def link_memories_async(
+        self,
+        source_id: str,
+        target_id: str,
+        link_type: str = "related",
+        note: str | None = None,
+    ) -> bool:
+        return await asyncio.to_thread(self.link_memories, source_id, target_id, link_type, note)
+
+    def get_linked_memories(self, memory_id: str, direction: str = "both") -> list[dict]:
+        """Return memories linked to/from the given memory_id.
+
+        direction: "out" (source→target), "in" (target→source), "both"
+        """
+        try:
+            db = self._ensure_connected()
+            results: list[dict] = []
+
+            if direction in ("out", "both"):
+                rows = db.execute(
+                    "SELECT o.id, o.content, o.date, o.time, o.emotion, o.kind, "
+                    "       ml.link_type, ml.note "
+                    "FROM memory_links ml "
+                    "JOIN observations o ON o.id = ml.target_id "
+                    "WHERE ml.source_id = ? AND o.superseded_by IS NULL",
+                    (memory_id,),
+                ).fetchall()
+                results.extend({**dict(r), "link_direction": "→"} for r in rows)
+
+            if direction in ("in", "both"):
+                rows = db.execute(
+                    "SELECT o.id, o.content, o.date, o.time, o.emotion, o.kind, "
+                    "       ml.link_type, ml.note "
+                    "FROM memory_links ml "
+                    "JOIN observations o ON o.id = ml.source_id "
+                    "WHERE ml.target_id = ? AND o.superseded_by IS NULL",
+                    (memory_id,),
+                ).fetchall()
+                results.extend({**dict(r), "link_direction": "←"} for r in rows)
+            return results
+        except Exception as e:
+            logger.warning("get_linked_memories failed: %s", e)
+            return []
+
+    async def get_linked_memories_async(
+        self, memory_id: str, direction: str = "both"
+    ) -> list[dict]:
+        return await asyncio.to_thread(self.get_linked_memories, memory_id, direction)
+
 
 class MemoryTool:
     """Agent-callable memory tools: remember + recall (with optional image)."""
@@ -1404,7 +1556,8 @@ class MemoryTool:
                 "description": (
                     "Save something to long-term memory. Use this to remember important things: "
                     "what you saw, what happened, how you felt, conversations. "
-                    "If you just took a photo with see(), pass the image_path to attach it."
+                    "If you just took a photo with see(), pass the image_path to attach it. "
+                    "Use link_to to associate this memory with a related one (pass its memory_id)."
                 ),
                 "input_schema": {
                     "type": "object",
@@ -1422,6 +1575,15 @@ class MemoryTool:
                             "type": "string",
                             "description": "Optional path to an image file to attach (e.g. from see()).",
                         },
+                        "link_to": {
+                            "type": "string",
+                            "description": "Optional memory_id to link this memory to (associative link).",
+                        },
+                        "link_type": {
+                            "type": "string",
+                            "enum": ["related", "similar", "caused_by", "leads_to"],
+                            "description": "Type of link (default: related).",
+                        },
                     },
                     "required": ["content"],
                 },
@@ -1430,7 +1592,7 @@ class MemoryTool:
                 "name": "recall",
                 "description": (
                     "Search long-term memory for things related to a topic. "
-                    "Use this to remember past observations, conversations, or feelings."
+                    "Returns memories with their IDs, emotions, and any linked memories."
                 ),
                 "input_schema": {
                     "type": "object",
@@ -1454,13 +1616,30 @@ class MemoryTool:
             content = tool_input["content"]
             emotion = tool_input.get("emotion", "neutral")
             image_path = tool_input.get("image_path")
-            ok = await self._store.save_async(
+            link_to = tool_input.get("link_to")
+            link_type = tool_input.get("link_type", "related")
+
+            memory_id, ok = await self._store.save_async_with_id(
                 content, kind="observation", emotion=emotion, image_path=image_path
             )
-            if ok:
-                suffix = " (with image)" if image_path else ""
-                return f"Remembered{suffix}: {content[:60]}", None
-            return "Failed to save memory.", None
+            if not ok:
+                return "Failed to save memory.", None
+
+            # Create associative link if requested
+            link_info = ""
+            if link_to and memory_id:
+                linked = await self._store.link_memories_async(
+                    memory_id, link_to, link_type=link_type
+                )
+                if linked:
+                    link_info = f" [linked:{link_type}→{link_to[:8]}]"
+
+            suffix = " (with image)" if image_path else ""
+            id_tag = f" [id:{memory_id[:8]}]" if memory_id else ""
+            return (
+                f"Remembered{suffix}{id_tag}{link_info}: {content[:80]}\n"
+                f"emotion={emotion} | id={memory_id or '?'}"
+            ), None
 
         if tool_name == "recall":
             query = tool_input["query"]
@@ -1468,18 +1647,33 @@ class MemoryTool:
             memories = await self._store.recall_async(query, n=n)
             if not memories:
                 return "No relevant memories found.", None
+
             lines = []
             for m in memories:
                 score = f" ({m['score']:.2f})" if "score" in m else ""
                 confidence = f" conf:{float(m.get('confidence', 0.0)):.2f}"
-                emotion = f" [{m['emotion']}]" if m.get("emotion", "neutral") != "neutral" else ""
+                emo = m.get("emotion", "neutral")
                 img = " 📷" if m.get("image_path") else ""
-                memory_id = str(m.get("memory_id", ""))[:8] or "?"
+                memory_id = str(m.get("memory_id", ""))
+                short_id = memory_id[:8] if memory_id else "?"
                 source_kind = m.get("source_kind", m.get("kind", "?"))
                 lines.append(
-                    f"- {m['date']} {m['time']} id:{memory_id} src:{source_kind}{score}{confidence}{emotion}{img}: "
-                    f"{m['summary'][:120]}"
+                    f"- [{emo}] {m['date']} {m['time']} id:{short_id} src:{source_kind}"
+                    f"{score}{confidence}{img}\n"
+                    f"  {m['summary'][:150]}"
                 )
+
+                # Fetch links for this memory and show them
+                if memory_id:
+                    links = await self._store.get_linked_memories_async(memory_id)
+                    for lm in links[:2]:
+                        lt = lm.get("link_type", "related")
+                        ld = lm.get("link_direction", "→")
+                        lines.append(
+                            f"  {ld} [{lt}] {lm.get('date', '')} [{lm.get('emotion', 'neutral')}]: "
+                            f"{lm.get('content', '')[:80]}"
+                        )
+
             return "\n".join(lines), None
 
         return f"Unknown memory tool: {tool_name}", None

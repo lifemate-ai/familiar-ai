@@ -191,9 +191,9 @@ class STTTool:
                         break
                     if time.time() - start > 60:
                         break
-                    if not isinstance(frame, av.AudioFrame):
+                    if not hasattr(frame, "to_ndarray"):
                         continue
-                    for resampled in resampler.resample(frame):
+                    for resampled in resampler.resample(frame):  # type: ignore[arg-type]
                         chunks.append(resampled.to_ndarray())
             except Exception as e:
                 logger.warning("STT: RTSP decode error: %s", e)
