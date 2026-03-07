@@ -389,7 +389,11 @@ class EmbodiedAgent:
         self._memory = ObservationMemory()
         self._memory_worker = MemoryJobWorker(self._memory)
         self._memory_tool = MemoryTool(self._memory)
-        self._tom_tool = ToMTool(self._memory, default_person=config.companion_name)
+        self._tom_tool = ToMTool(
+            self._memory,
+            default_person=config.companion_name,
+            backend=self._utility_backend,
+        )
         self._coding = CodingTool(config.coding)
         self._exploration = ExplorationTracker()
         self._scene: SceneTracker | None = None  # initialized after DB ready in _init_tools
