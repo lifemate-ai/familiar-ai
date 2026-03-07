@@ -852,6 +852,11 @@ class EmbodiedAgent:
                     materialize_now=False,
                 )
                 logger.info("Day summary generated for %s: %s", date, summary[:80])
+                # Phase 2-2: decay importance of older observations now that the day is summarised.
+                # Run in background to avoid stalling the backfill loop.
+                asyncio.ensure_future(
+                    self._memory.decay_importance_async(before_date=date, factor=0.95)
+                )
             else:
                 logger.warning("Day summary for %s: LLM returned empty response", date)
         except asyncio.TimeoutError:
