@@ -22,6 +22,7 @@ import contextlib
 import html as _html
 import logging
 import os
+import sys
 import time
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
@@ -29,7 +30,7 @@ from urllib.parse import quote
 
 import qasync
 from PySide6.QtCore import QEasingCurve, QPropertyAnimation, QSize, Qt, QTimer
-from PySide6.QtGui import QImage, QPixmap
+from PySide6.QtGui import QIcon, QImage, QPixmap
 from PySide6.QtWidgets import (
     QApplication,
     QComboBox,
@@ -113,6 +114,42 @@ _GUI_LOOK_PREVIEW_MIN_SEC = 0.8
 _GUI_LOOK_PREVIEW_MAX_SEC = 2.0
 _GUI_LOOK_PREVIEW_GRACE_SEC = 0.3
 _GUI_LOOK_PREVIEW_READ_TIMEOUT_SEC = 0.35
+_SUBPROCESS_NO_WINDOW = 0x08000000 if os.name == "nt" else 0
+_APP_ICON_ENV = "FAMILIAR_APP_ICON"
+
+
+def _runtime_base_dir() -> Path:
+    """Return runtime base dir (frozen exe dir for PyInstaller builds, else cwd)."""
+    if getattr(sys, "frozen", False):
+        return Path(sys.executable).resolve().parent
+    return Path.cwd()
+
+
+def resolve_app_icon_path() -> Path | None:
+    """Find app icon: env override → exe dir → assets/ fallback."""
+    base_dir = _runtime_base_dir()
+    env_icon = (os.environ.get(_APP_ICON_ENV, "") or "").strip()
+    candidates: list[Path] = []
+    if env_icon:
+        p = Path(env_icon)
+        candidates.append(p if p.is_absolute() else base_dir / p)
+    candidates.extend(
+        [
+            base_dir / "app.ico",
+            Path(__file__).resolve().parents[2] / "assets" / "app.ico",
+        ]
+    )
+    for path in candidates:
+        if path.exists():
+            return path
+    return None
+
+
+def _subprocess_exec_kwargs() -> dict[str, Any]:
+    """Return platform-specific kwargs to hide console windows on Windows."""
+    if _SUBPROCESS_NO_WINDOW:
+        return {"creationflags": _SUBPROCESS_NO_WINDOW}
+    return {}
 
 
 def _px(size: int) -> int:
@@ -994,6 +1031,7 @@ class FamiliarWindow(QMainWindow):
                 *cmd,
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
+                **_subprocess_exec_kwargs(),
             )
         except FileNotFoundError:
             logger.warning("Live look preview disabled: ffmpeg not found")
@@ -1543,16 +1581,24 @@ class FamiliarWindow(QMainWindow):
 def run_gui(agent: "EmbodiedAgent", desires: "DesireSystem") -> None:
     """Launch the PySide6 GUI with qasync event loop."""
     import signal
-    import sys
 
     existing = QApplication.instance()
     qt_app = existing if isinstance(existing, QApplication) else QApplication(sys.argv)
     _apply_global_style(qt_app)
+    icon_path = resolve_app_icon_path()
+    if icon_path:
+        icon = QIcon(str(icon_path))
+        if not icon.isNull():
+            qt_app.setWindowIcon(icon)
 
     loop = qasync.QEventLoop(qt_app)
     asyncio.set_event_loop(loop)
 
     window = FamiliarWindow(agent, desires)
+    if icon_path:
+        icon = QIcon(str(icon_path))
+        if not icon.isNull():
+            window.setWindowIcon(icon)
     window.show()
     qt_app.aboutToQuit.connect(window._ensure_shutdown_task)
 
