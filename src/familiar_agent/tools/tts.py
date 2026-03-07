@@ -246,15 +246,14 @@ async def _play_via_sounddevice(audio_path: str) -> bool:
     """
 
     def _play() -> bool:
-        try:
-            import sounddevice as sd
-        except ImportError:
-            return False
-
         if audio_path.lower().endswith(".mp3"):
+            # On Windows prefer MCI (reliable, built-in) over PyAV+sounddevice
+            if sys.platform == "win32" and _play_mp3_mci(audio_path):
+                return True
             return _play_mp3_via_pyav(audio_path)
         else:
             try:
+                import sounddevice as sd
                 import soundfile as sf
             except ImportError:
                 return False
@@ -268,6 +267,30 @@ async def _play_via_sounddevice(audio_path: str) -> bool:
                 return False
 
     return await asyncio.to_thread(_play)
+
+
+def _play_mp3_mci(mp3_path: str) -> bool:
+    """Play MP3 using Windows MCI (Media Control Interface) via ctypes. Windows only.
+
+    MCI is built into Windows — no extra dependencies, supports MP3 natively.
+    """
+    try:
+        import ctypes
+
+        winmm = ctypes.windll.winmm  # type: ignore[attr-defined]
+        alias = "familiar_tts"
+        abs_path = os.path.abspath(mp3_path)
+        winmm.mciSendStringW(f"close {alias}", None, 0, None)  # clean up any prior
+        ret = winmm.mciSendStringW(f'open "{abs_path}" type mpegvideo alias {alias}', None, 0, None)
+        if ret != 0:
+            logger.warning("MCI open failed (ret=%d)", ret)
+            return False
+        winmm.mciSendStringW(f"play {alias} wait", None, 0, None)
+        winmm.mciSendStringW(f"close {alias}", None, 0, None)
+        return True
+    except Exception as e:
+        logger.warning("MCI playback failed: %s", e)
+        return False
 
 
 def _play_mp3_via_pyav(mp3_path: str) -> bool:
@@ -290,27 +313,26 @@ def _play_mp3_via_pyav(mp3_path: str) -> bool:
             container.close()
             return False
 
-        # Resample to s16 stereo @ 44100 Hz — single plane, easy to convert to numpy
-        resampler = av.AudioResampler(format="s16", layout="stereo", rate=TARGET_RATE)
-        raw_chunks: list[bytes] = []
+        # Resample to s16p mono @ TARGET_RATE — planar mono avoids stereo packing ambiguity
+        resampler = av.AudioResampler(format="s16p", layout="mono", rate=TARGET_RATE)
+        chunks_nd: list = []
 
         for frame in container.decode(audio_stream):
             if not isinstance(frame, av.AudioFrame):
                 continue
             for rf in resampler.resample(frame):
-                raw_chunks.append(bytes(rf.planes[0]))
+                chunks_nd.append(rf.to_ndarray())  # shape: (1, n_samples)
 
         # Flush resampler
         for rf in resampler.resample(None):
-            raw_chunks.append(bytes(rf.planes[0]))
+            chunks_nd.append(rf.to_ndarray())
 
         container.close()
-        if not raw_chunks:
+        if not chunks_nd:
             return False
 
-        raw = b"".join(raw_chunks)
-        # s16 stereo interleaved: L0 R0 L1 R1 … → shape (N, 2), float32 for sounddevice
-        audio = np.frombuffer(raw, dtype=np.int16).reshape(-1, 2).astype(np.float32) / 32768.0
+        # Concatenate along samples axis → (1, total_samples) → flatten to (total_samples,)
+        audio = np.concatenate(chunks_nd, axis=1).flatten().astype(np.float32) / 32768.0
         sd.play(audio, TARGET_RATE)
         sd.wait()
         return True
