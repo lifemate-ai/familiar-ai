@@ -627,21 +627,39 @@ dependencies = [
     { name = "mcp" },
     { name = "numpy", version = "2.2.6", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.11'" },
     { name = "numpy", version = "2.4.2", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.11'" },
-    { name = "onvif-zeep-async" },
     { name = "openai" },
-    { name = "openai-whisper" },
-    { name = "opencv-python" },
-    { name = "pillow" },
-    { name = "pyside6" },
     { name = "python-dotenv" },
-    { name = "qasync" },
     { name = "sentence-transformers" },
-    { name = "sounddevice" },
-    { name = "soundfile" },
     { name = "textual" },
     { name = "textual-autocomplete" },
     { name = "tinytuya" },
     { name = "uvloop", marker = "sys_platform != 'win32'" },
+]
+
+[package.optional-dependencies]
+all = [
+    { name = "onvif-zeep-async" },
+    { name = "openai-whisper" },
+    { name = "opencv-python" },
+    { name = "pillow" },
+    { name = "pyside6" },
+    { name = "qasync" },
+    { name = "sounddevice" },
+    { name = "soundfile" },
+]
+camera = [
+    { name = "onvif-zeep-async" },
+    { name = "opencv-python" },
+    { name = "pillow" },
+]
+gui = [
+    { name = "pyside6" },
+    { name = "qasync" },
+]
+voice = [
+    { name = "openai-whisper" },
+    { name = "sounddevice" },
+    { name = "soundfile" },
 ]
 
 [package.dev-dependencies]
@@ -656,26 +674,28 @@ dev = [
 requires-dist = [
     { name = "aiohttp", specifier = ">=3.9.0" },
     { name = "anthropic", specifier = ">=0.40.0" },
+    { name = "familiar-ai", extras = ["gui", "camera", "voice"], marker = "extra == 'all'" },
     { name = "google-genai", specifier = ">=1.0" },
     { name = "google-generativeai", specifier = ">=0.8.6" },
     { name = "mcp", specifier = ">=1.0.0" },
     { name = "numpy", specifier = ">=1.24.0" },
-    { name = "onvif-zeep-async", specifier = ">=4.0.0" },
+    { name = "onvif-zeep-async", marker = "extra == 'camera'", specifier = ">=4.0.0" },
     { name = "openai", specifier = ">=1.0.0" },
-    { name = "openai-whisper" },
-    { name = "opencv-python", specifier = ">=4.0" },
-    { name = "pillow", specifier = ">=10.0.0" },
-    { name = "pyside6", specifier = ">=6.7.0" },
+    { name = "openai-whisper", marker = "extra == 'voice'" },
+    { name = "opencv-python", marker = "extra == 'camera'", specifier = ">=4.0" },
+    { name = "pillow", marker = "extra == 'camera'", specifier = ">=10.0.0" },
+    { name = "pyside6", marker = "extra == 'gui'", specifier = ">=6.7.0" },
     { name = "python-dotenv", specifier = ">=1.0.0" },
-    { name = "qasync", specifier = ">=0.27.0" },
+    { name = "qasync", marker = "extra == 'gui'", specifier = ">=0.27.0" },
     { name = "sentence-transformers", specifier = ">=3.0.0" },
-    { name = "sounddevice", specifier = ">=0.5.5" },
-    { name = "soundfile", specifier = ">=0.13.1" },
+    { name = "sounddevice", marker = "extra == 'voice'", specifier = ">=0.5.5" },
+    { name = "soundfile", marker = "extra == 'voice'", specifier = ">=0.13.1" },
     { name = "textual", specifier = ">=8.0.0" },
     { name = "textual-autocomplete", specifier = ">=4.0.6" },
     { name = "tinytuya", specifier = ">=1.15.0" },
     { name = "uvloop", marker = "sys_platform != 'win32'", specifier = ">=0.22.1" },
 ]
+provides-extras = ["gui", "camera", "voice", "all"]
 
 [package.metadata.requires-dev]
 dev = [
