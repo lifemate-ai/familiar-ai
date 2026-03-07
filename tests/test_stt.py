@@ -442,76 +442,77 @@ class TestRecordMic:
 
 
 class TestRecordRtsp:
-    """Test RTSP recording via ffmpeg."""
+    """Test RTSP recording via PyAV."""
 
     @pytest.mark.asyncio
     async def test_rtsp_recording_returns_bytes(self) -> None:
-        """Happy path: ffmpeg writes a file, we read it back."""
+        """Happy path: PyAV decodes frames and returns WAV bytes."""
+        import numpy as np
+
         tool = STTTool(api_key="fake-key", rtsp_url="rtsp://cam/stream")
         stop = asyncio.Event()
 
-        mock_proc = AsyncMock()
-        mock_proc.terminate = MagicMock()
-        mock_proc.communicate = AsyncMock(return_value=(b"", b""))
-        mock_proc.kill = MagicMock()
+        mock_frame = MagicMock()
+        mock_frame.to_ndarray.return_value = np.zeros((1, 160), dtype="int16")
+        mock_frame.to_ndarray.return_value.shape  # ensure it's accessible
 
-        async def set_stop_soon():
-            await asyncio.sleep(0.05)
-            stop.set()
+        mock_resampler = MagicMock()
+        mock_resampler.resample.return_value = [mock_frame]
 
-        with (
-            patch("asyncio.create_subprocess_exec", new_callable=AsyncMock, return_value=mock_proc),
-            patch("pathlib.Path.read_bytes", return_value=b"rtsp-wav-data"),
-            patch("pathlib.Path.unlink"),
-        ):
-            asyncio.get_event_loop().create_task(set_stop_soon())
+        mock_audio_stream = MagicMock()
+        mock_audio_stream.type = "audio"
+
+        mock_container = MagicMock()
+        mock_container.streams = [mock_audio_stream]
+        mock_container.decode.return_value = [mock_frame]
+
+        mock_av = MagicMock()
+        mock_av.open.return_value = mock_container
+        mock_av.AudioResampler.return_value = mock_resampler
+
+        with patch.dict("sys.modules", {"av": mock_av}):
             result = await tool._record_rtsp(stop)
 
-        assert result == b"rtsp-wav-data"
-        mock_proc.terminate.assert_called_once()
+        assert isinstance(result, bytes)
+        assert len(result) > 0
 
     @pytest.mark.asyncio
     async def test_rtsp_no_output_file_returns_empty(self) -> None:
-        """ffmpeg produces no output file -> returns empty bytes."""
+        """PyAV connection error -> returns empty bytes."""
         tool = STTTool(api_key="fake-key", rtsp_url="rtsp://cam/stream")
         stop = asyncio.Event()
-        stop.set()  # stop immediately
+        stop.set()
 
-        mock_proc = AsyncMock()
-        mock_proc.terminate = MagicMock()
-        mock_proc.communicate = AsyncMock(return_value=(b"", b""))
-        mock_proc.kill = MagicMock()
+        mock_av = MagicMock()
+        mock_av.open.side_effect = Exception("Connection refused")
 
-        with (
-            patch("asyncio.create_subprocess_exec", new_callable=AsyncMock, return_value=mock_proc),
-            patch("pathlib.Path.read_bytes", side_effect=FileNotFoundError("no file")),
-            patch("pathlib.Path.unlink"),
-        ):
+        with patch.dict("sys.modules", {"av": mock_av}):
             result = await tool._record_rtsp(stop)
 
         assert result == b""
 
     @pytest.mark.asyncio
     async def test_rtsp_communicate_timeout_kills_process(self) -> None:
-        """If proc.communicate times out, process is killed."""
+        """PyAV decode error -> returns empty bytes gracefully."""
         tool = STTTool(api_key="fake-key", rtsp_url="rtsp://cam/stream")
         stop = asyncio.Event()
-        stop.set()  # stop immediately
+        stop.set()
 
-        mock_proc = AsyncMock()
-        mock_proc.terminate = MagicMock()
-        mock_proc.communicate = AsyncMock(side_effect=asyncio.TimeoutError())
-        mock_proc.kill = MagicMock()
+        mock_audio_stream = MagicMock()
+        mock_audio_stream.type = "audio"
 
-        with (
-            patch("asyncio.create_subprocess_exec", new_callable=AsyncMock, return_value=mock_proc),
-            patch("pathlib.Path.read_bytes", return_value=b"data"),
-            patch("pathlib.Path.unlink"),
-        ):
+        mock_container = MagicMock()
+        mock_container.streams = [mock_audio_stream]
+        mock_container.decode.side_effect = RuntimeError("decode failed")
+
+        mock_av = MagicMock()
+        mock_av.open.return_value = mock_container
+        mock_av.AudioResampler.return_value = MagicMock()
+
+        with patch.dict("sys.modules", {"av": mock_av}):
             result = await tool._record_rtsp(stop)
 
-        mock_proc.kill.assert_called_once()
-        assert result == b"data"
+        assert result == b""
 
 
 # ── STTTool constructor ──────────────────────────────────────────────────────

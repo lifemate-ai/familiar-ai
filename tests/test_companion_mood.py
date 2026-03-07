@@ -122,9 +122,18 @@ class TestInferCompanionMood:
         agent._coding = MagicMock(spec=CodingTool)
 
         from familiar_agent.exploration import ExplorationTracker
+        from familiar_agent.self_narrative import SelfNarrative
+        from familiar_agent.relationship import RelationshipTracker
 
         agent._exploration = ExplorationTracker()
         agent._scene = None
+        agent._self_narrative = SelfNarrative()
+        agent._relationship = RelationshipTracker()
+        agent._memory_worker = MagicMock()
+        agent._memory_worker.is_running = True
+        agent._mood = "neutral"
+        agent._mood_intensity = 0.0
+        agent._mood_set_at = time.time()
 
         mock_backend = MagicMock()
         mock_backend.complete = AsyncMock(return_value=complete_return)
@@ -277,9 +286,18 @@ class TestFrustratedBoostsDesire:
         agent._coding.get_tool_definitions = MagicMock(return_value=[])
 
         from familiar_agent.exploration import ExplorationTracker
+        from familiar_agent.self_narrative import SelfNarrative
+        from familiar_agent.relationship import RelationshipTracker
 
         agent._exploration = ExplorationTracker()
         agent._scene = None
+        agent._self_narrative = SelfNarrative()
+        agent._relationship = RelationshipTracker()
+        agent._memory_worker = MagicMock()
+        agent._memory_worker.is_running = True
+        agent._mood = "neutral"
+        agent._mood_intensity = 0.0
+        agent._mood_set_at = time.time()
 
         desires = MagicMock(spec=DesireSystem)
         desires.curiosity_target = None

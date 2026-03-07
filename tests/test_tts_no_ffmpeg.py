@@ -95,6 +95,7 @@ async def test_tts_payload_requests_pcm_format() -> None:
 
     class FakeResp:
         status = 200
+        headers: dict = {"Content-Type": "audio/pcm"}
 
         async def read(self):
             return _make_pcm(1600)

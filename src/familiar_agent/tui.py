@@ -26,6 +26,7 @@ from ._ui_helpers import (
     IDLE_CHECK_INTERVAL as _IDLE_CHECK_INTERVAL,
     desire_tick_prompt,
     format_action as _format_action,
+    format_tool_result as _format_tool_result,
     should_fire_idle_desire,
 )
 from .realtime_stt_session import create_realtime_stt_session, RealtimeSttSession
@@ -434,6 +435,13 @@ class FamiliarApp(App):
             # Restart spinner while waiting for the next LLM response
             _restart_spinner()
 
+        def on_tool_result(name: str, tool_input: dict, result: str) -> None:
+            formatted = _format_tool_result(name, tool_input, result)
+            if formatted:
+                _stop_spinner()
+                log.write(f"[dim]{formatted}[/dim]")
+                _restart_spinner()
+
         def on_text(chunk: str) -> None:
             _stop_spinner()
             text_buf.append(chunk)
@@ -451,6 +459,7 @@ class FamiliarApp(App):
                     user_input,
                     on_action=on_action,
                     on_text=on_text,
+                    on_tool_result=on_tool_result,
                     desires=self.desires,
                     inner_voice=inner_voice,
                     interrupt_queue=self._input_queue,
