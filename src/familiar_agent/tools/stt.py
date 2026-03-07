@@ -2,7 +2,7 @@
 
 Records audio from:
 1. Local PC microphone (via sounddevice) — primary
-2. Camera RTSP stream (via ffmpeg) — fallback when no mic is available
+2. Camera RTSP stream (via PyAV) — fallback when no mic is available
 
 Transcription is done via the ElevenLabs /v1/speech-to-text endpoint.
 """
@@ -12,9 +12,7 @@ from __future__ import annotations
 import asyncio
 import io
 import logging
-import tempfile
 import time
-from pathlib import Path
 from typing import TYPE_CHECKING
 
 import contextlib
@@ -149,57 +147,69 @@ class STTTool:
         return buf.getvalue()
 
     async def _record_rtsp(self, stop_event: asyncio.Event) -> bytes:
-        """Record audio from the RTSP stream using ffmpeg until stop_event is set."""
-        tmp = Path(tempfile.mktemp(suffix=".wav"))
-        start = asyncio.get_event_loop().time()
+        """Record audio from the RTSP stream using PyAV until stop_event is set.
 
-        # Start ffmpeg recording in the background
-        proc = await asyncio.create_subprocess_exec(
-            "ffmpeg",
-            "-loglevel",
-            "error",
-            "-rtsp_transport",
-            "tcp",
-            "-i",
-            self._rtsp_url,
-            "-ar",
-            "16000",
-            "-ac",
-            str(_CHANNELS),
-            "-y",
-            str(tmp),
-            stdout=asyncio.subprocess.DEVNULL,
-            stderr=asyncio.subprocess.PIPE,
-        )
+        PyAV (pip install av) ships pre-built wheels with bundled ffmpeg libs —
+        no system ffmpeg installation required.
+        """
 
-        # Wait for stop_event
-        while not stop_event.is_set():
-            await asyncio.sleep(0.1)
-
-        duration = asyncio.get_event_loop().time() - start
-        logger.info("STT: RTSP recording stopped after %.1fs", duration)
-
-        try:
-            proc.terminate()
-        except ProcessLookupError:
-            pass  # ffmpeg already exited on its own
-        try:
-            await asyncio.wait_for(proc.communicate(), timeout=5.0)
-        except asyncio.TimeoutError:
+        def _record_sync() -> bytes:
             try:
-                proc.kill()
-            except ProcessLookupError:
-                pass
+                import av
+            except ImportError:
+                logger.warning("STT: PyAV (av) not installed — RTSP audio unavailable")
+                return b""
 
-        try:
-            data = tmp.read_bytes()
-        except FileNotFoundError:
-            logger.warning("STT: RTSP ffmpeg produced no output")
-            data = b""
-        finally:
-            tmp.unlink(missing_ok=True)
+            try:
+                import numpy as np
+                import soundfile as sf
+            except ImportError:
+                logger.warning("STT: numpy/soundfile not installed")
+                return b""
 
-        return data
+            try:
+                container = av.open(
+                    self._rtsp_url,
+                    options={"rtsp_transport": "tcp"},
+                )
+            except Exception as e:
+                logger.warning("STT: RTSP connection failed: %s", e)
+                return b""
+
+            try:
+                audio_stream = next((s for s in container.streams if s.type == "audio"), None)
+                if audio_stream is None:
+                    logger.warning("STT: RTSP stream has no audio track")
+                    return b""
+
+                resampler = av.AudioResampler(format="s16", layout="mono", rate=16000)
+                chunks: list = []
+                start = time.time()
+
+                for frame in container.decode(audio_stream):
+                    if stop_event.is_set():
+                        break
+                    if time.time() - start > 60:
+                        break
+                    for resampled in resampler.resample(frame):
+                        chunks.append(resampled.to_ndarray())
+            except Exception as e:
+                logger.warning("STT: RTSP decode error: %s", e)
+                return b""
+            finally:
+                container.close()
+
+            if not chunks:
+                return b""
+
+            audio = np.concatenate(chunks, axis=0)
+            buf = io.BytesIO()
+            sf.write(buf, audio.flatten(), 16000, format="WAV", subtype="PCM_16")
+            duration = len(audio.flatten()) / 16000
+            logger.info("STT: RTSP recording captured %.1fs of audio", duration)
+            return buf.getvalue()
+
+        return await asyncio.to_thread(_record_sync)
 
     # ── transcription ─────────────────────────────────────────────────────
 

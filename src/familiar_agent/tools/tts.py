@@ -7,6 +7,7 @@ import json
 import logging
 import os
 import shutil
+import struct
 import subprocess
 import sys
 import tempfile
@@ -15,6 +16,48 @@ from pathlib import Path
 from urllib.parse import quote
 
 logger = logging.getLogger(__name__)
+
+
+def _write_pcm_as_wav(
+    pcm_bytes: bytes, sample_rate: int = 16000, tmp_dir: str | None = None
+) -> str:
+    """Write raw 16-bit mono PCM bytes to a temp WAV file and return the path.
+
+    Builds the 44-byte WAV/RIFF header without any external dependency.
+    """
+    num_channels = 1
+    bits_per_sample = 16
+    byte_rate = sample_rate * num_channels * bits_per_sample // 8
+    block_align = num_channels * bits_per_sample // 8
+    data_size = len(pcm_bytes)
+    file_size = 36 + data_size  # RIFF chunk size = file_size - 8
+
+    header = struct.pack(
+        "<4sI4s4sIHHIIHH4sI",
+        b"RIFF",
+        file_size,
+        b"WAVE",
+        b"fmt ",
+        16,  # fmt chunk size
+        1,  # PCM format
+        num_channels,
+        sample_rate,
+        byte_rate,
+        block_align,
+        bits_per_sample,
+        b"data",
+        data_size,
+    )
+
+    suffix = ".wav"
+    kwargs: dict = {"suffix": suffix, "delete": False}
+    if tmp_dir:
+        kwargs["dir"] = tmp_dir
+    with tempfile.NamedTemporaryFile(**kwargs) as f:
+        f.write(header)
+        f.write(pcm_bytes)
+        return f.name
+
 
 _GO2RTC_CACHE = Path.home() / ".cache" / "embodied-claude" / "go2rtc"
 # On Windows the binary is go2rtc.exe; on other platforms there is no extension.
@@ -98,6 +141,7 @@ class TTSTool:
         payload = {
             "text": text,
             "model_id": "eleven_v3",
+            "output_format": "pcm_16000",  # raw 16-bit mono PCM — no ffmpeg conversion needed
             "voice_settings": {"stability": 0.5, "similarity_boost": 0.75},
         }
 
@@ -109,9 +153,8 @@ class TTSTool:
                         return f"TTS API failed ({resp.status}): {err[:80]}"
                     audio_data = await resp.read()
 
-            with tempfile.NamedTemporaryFile(suffix=".mp3", delete=False) as f:
-                f.write(audio_data)
-                tmp_path = f.name
+            # Write as WAV (with header) — no ffmpeg MP3→WAV conversion needed
+            tmp_path = _write_pcm_as_wav(audio_data, sample_rate=16000)
 
             try:
                 played_via: list[str] = []
@@ -168,9 +211,6 @@ class TTSTool:
         return f"Unknown tool: {tool_name}", None
 
 
-_FFPLAY_AUDIO_FAILURE = "audio open failed"
-
-
 def _pulse_env() -> dict[str, str] | None:
     """Build env dict with PULSE_SERVER/PULSE_SINK if set. Returns None if neither is set."""
     server = os.environ.get("PULSE_SERVER")
@@ -185,96 +225,81 @@ def _pulse_env() -> dict[str, str] | None:
     return env
 
 
+async def _play_via_sounddevice(wav_path: str) -> bool:
+    """Play WAV file using sounddevice (pure Python, no system dependency)."""
+
+    def _play() -> bool:
+        try:
+            import sounddevice as sd
+            import soundfile as sf
+        except ImportError:
+            return False
+        try:
+            data, samplerate = sf.read(wav_path)
+            sd.play(data, samplerate)
+            sd.wait()
+            return True
+        except Exception as e:
+            logger.warning("sounddevice playback failed: %s", e)
+            return False
+
+    return await asyncio.to_thread(_play)
+
+
 async def _play_local(tmp_path: str) -> bool:
     """Play audio file on the local PC speaker. Returns True on success.
 
     Try order:
     1. paplay (PulseAudio native — most reliable on WSL2/WSLg when PULSE_SERVER is set)
     2. mpv (auto audio backend selection)
-    3. ffplay (last resort — note: exits 0 even on audio failure, checked via stderr)
+    3. sounddevice (pure Python fallback, no system tools required)
+
+    Note: file is always WAV (pcm_16000) so paplay needs no ffmpeg conversion.
     """
     pulse_env = _pulse_env()
 
-    # --- paplay (PulseAudio native, needs WAV) ---
+    # --- paplay (PulseAudio native, WAV only — file is already WAV) ---
     paplay = shutil.which("paplay")
-    if paplay:
-        ffmpeg = shutil.which("ffmpeg")
-        wav_path = tmp_path
-        converted = False
-        if not tmp_path.lower().endswith((".wav", ".wave")) and ffmpeg:
-            wav_path = tmp_path.replace(".mp3", ".wav").replace(".ogg", ".wav")
-            if wav_path == tmp_path:
-                wav_path = tmp_path + ".wav"
-            try:
-                conv = await asyncio.create_subprocess_exec(
-                    ffmpeg,
-                    "-y",
-                    "-i",
-                    tmp_path,
-                    wav_path,
-                    stdout=asyncio.subprocess.DEVNULL,
-                    stderr=asyncio.subprocess.DEVNULL,
-                )
-                await conv.communicate()
-                converted = conv.returncode == 0
-            except OSError:
-                converted = False
-        if not tmp_path.lower().endswith((".wav", ".wave")) and not converted:
-            wav_path = None  # type: ignore[assignment]
-
-        if wav_path:
-            try:
-                proc = await asyncio.create_subprocess_exec(
-                    paplay,
-                    wav_path,
-                    stdout=asyncio.subprocess.DEVNULL,
-                    stderr=asyncio.subprocess.PIPE,
-                    env=pulse_env,
-                )
-                _, stderr = await proc.communicate()
-                if converted:
-                    try:
-                        os.unlink(wav_path)
-                    except OSError:
-                        pass
-                if proc.returncode == 0:
-                    return True
-                err = stderr.decode(errors="replace").strip()
-                logger.warning("paplay failed (exit %d): %s", proc.returncode, err[:120])
-            except (FileNotFoundError, OSError) as e:
-                logger.warning("Could not launch paplay: %s", e)
-
-    # --- mpv / ffplay ---
-    candidates = [
-        ["mpv", "--no-terminal", tmp_path],
-        ["ffplay", "-nodisp", "-autoexit", "-loglevel", "warning", tmp_path],
-    ]
-    for player_args in candidates:
-        player_name = player_args[0]
-        player_path = shutil.which(player_name)
-        if player_path is None:
-            logger.debug("Player not found in PATH, skipping: %s", player_name)
-            continue
-        resolved_args = [player_path, *player_args[1:]]
+    if paplay and tmp_path.lower().endswith((".wav", ".wave")):
         try:
             proc = await asyncio.create_subprocess_exec(
-                *resolved_args,
+                paplay,
+                tmp_path,
                 stdout=asyncio.subprocess.DEVNULL,
                 stderr=asyncio.subprocess.PIPE,
                 env=pulse_env,
             )
             _, stderr = await proc.communicate()
-            err = stderr.decode(errors="replace")
-            # ffplay exits 0 even when audio fails — check stderr explicitly
-            if _FFPLAY_AUDIO_FAILURE in err:
-                logger.warning("%s: audio open failed: %s", player_name, err[:200])
-                continue
             if proc.returncode == 0:
                 return True
-            logger.warning("%s failed (exit %d): %s", player_name, proc.returncode, err[:120])
+            err = stderr.decode(errors="replace").strip()
+            logger.warning("paplay failed (exit %d): %s", proc.returncode, err[:120])
         except (FileNotFoundError, OSError) as e:
-            logger.warning("Could not launch %s: %s", player_name, e)
-    return False
+            logger.warning("Could not launch paplay: %s", e)
+
+    # --- mpv ---
+    mpv = shutil.which("mpv")
+    if mpv:
+        try:
+            proc = await asyncio.create_subprocess_exec(
+                mpv,
+                "--no-terminal",
+                tmp_path,
+                stdout=asyncio.subprocess.DEVNULL,
+                stderr=asyncio.subprocess.PIPE,
+                env=pulse_env,
+            )
+            _, stderr = await proc.communicate()
+            if proc.returncode == 0:
+                return True
+            logger.warning(
+                "mpv failed (exit %d): %s", proc.returncode, stderr.decode(errors="replace")[:120]
+            )
+        except (FileNotFoundError, OSError) as e:
+            logger.warning("Could not launch mpv: %s", e)
+
+    # --- sounddevice (pure Python, no system dependency) ---
+    return await _play_via_sounddevice(tmp_path)
 
 
 def _play_via_go2rtc(file_path: str, go2rtc_url: str, stream_name: str) -> tuple[bool, str]:
