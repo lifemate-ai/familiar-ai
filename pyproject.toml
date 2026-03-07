@@ -4,27 +4,38 @@ version = "0.2.0"
 description = "AI that lives alongside you — with eyes, voice, and memory"
 requires-python = ">=3.10"
 dependencies = [
-    "opencv-python>=4.00",
     "anthropic>=0.40.0",
     "openai>=1.0.0",
-    "onvif-zeep-async>=4.0.0",
-    "Pillow>=10.0.0",
     "tinytuya>=1.15.0",
     "python-dotenv>=1.0.0",
     "aiohttp>=3.9.0",
-    "openai-whisper",
     "sentence-transformers>=3.0.0",
     "numpy>=1.24.0",
     "google-genai>=1.0",
     "textual>=8.0.0",
-    "sounddevice>=0.5.5",
-    "soundfile>=0.13.1",
     "textual-autocomplete>=4.0.6",
     "mcp>=1.0.0",
     "google-generativeai>=0.8.6",
     "uvloop>=0.22.1; sys_platform != 'win32'",
+]
+
+[project.optional-dependencies]
+gui = [
     "PySide6>=6.7.0",
     "qasync>=0.27.0",
+]
+camera = [
+    "opencv-python>=4.00",
+    "onvif-zeep-async>=4.0.0",
+    "Pillow>=10.0.0",
+]
+voice = [
+    "openai-whisper",
+    "sounddevice>=0.5.5",
+    "soundfile>=0.13.1",
+]
+all = [
+    "familiar-ai[gui,camera,voice]",
 ]
 
 [project.scripts]
