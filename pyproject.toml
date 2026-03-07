@@ -58,6 +58,7 @@ explicit = true
 
 [tool.ruff]
 line-length = 100
+extend-exclude = ["*.iss"]
 
 [tool.mypy]
 ignore_missing_imports = true
