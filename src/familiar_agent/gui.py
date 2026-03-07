@@ -22,6 +22,7 @@ import contextlib
 import html as _html
 import logging
 import os
+import sys
 import time
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
@@ -29,7 +30,7 @@ from urllib.parse import quote
 
 import qasync
 from PySide6.QtCore import QEasingCurve, QPropertyAnimation, QSize, Qt, QTimer
-from PySide6.QtGui import QImage, QPixmap
+from PySide6.QtGui import QIcon, QImage, QPixmap
 from PySide6.QtWidgets import (
     QApplication,
     QComboBox,
@@ -41,6 +42,7 @@ from PySide6.QtWidgets import (
     QLineEdit,
     QMainWindow,
     QMessageBox,
+    QPlainTextEdit,
     QProgressBar,
     QPushButton,
     QScrollArea,
@@ -113,6 +115,7 @@ _GUI_LOOK_PREVIEW_MIN_SEC = 0.8
 _GUI_LOOK_PREVIEW_MAX_SEC = 2.0
 _GUI_LOOK_PREVIEW_GRACE_SEC = 0.3
 _GUI_LOOK_PREVIEW_READ_TIMEOUT_SEC = 0.35
+_SUBPROCESS_NO_WINDOW = 0x08000000 if os.name == "nt" else 0
 
 
 def _px(size: int) -> int:
@@ -124,6 +127,59 @@ def _px(size: int) -> int:
 _ENV_PATH: Path = Path(__file__).resolve().parents[2] / ".env"
 if not _ENV_PATH.exists():
     _ENV_PATH = Path.cwd() / ".env"
+
+_TESTFLIGHT_SETUP_FLAG = "TESTFLIGHT_SETUP_DONE"
+_TESTFLIGHT_PERSONA_PATH = Path.home() / ".familiar_ai" / "ME.md"
+_APP_ICON_ENV = "FAMILIAR_APP_ICON"
+
+
+def _runtime_base_dir() -> Path:
+    """Return runtime base directory (frozen exe dir or cwd in dev)."""
+    if getattr(sys, "frozen", False):
+        return Path(sys.executable).resolve().parent
+    return Path.cwd()
+
+
+def resolve_app_icon_path() -> Path | None:
+    """Resolve app icon path from env override and common runtime locations."""
+    base_dir = _runtime_base_dir()
+    env_icon = (os.environ.get(_APP_ICON_ENV, "") or "").strip()
+    candidates: list[Path] = []
+    if env_icon:
+        p = Path(env_icon)
+        candidates.append(p if p.is_absolute() else base_dir / p)
+    candidates.extend(
+        [
+            base_dir / "app.ico",
+            base_dir / ".testflight" / "app.ico",
+            Path(__file__).resolve().parents[2] / "assets" / "app.ico",
+        ]
+    )
+    for path in candidates:
+        if path.exists():
+            return path
+    return None
+
+
+def _apply_runtime_env_overrides(pairs: list[tuple[str, str]]) -> None:
+    """Apply key/value overrides to current process environment."""
+    for key, value in pairs:
+        os.environ[key] = value
+
+
+def _refresh_agent_config_from_env(config: "AgentConfig") -> None:
+    """Refresh an existing AgentConfig instance from current environment."""
+    from .config import AgentConfig
+
+    refreshed = AgentConfig()
+    config.__dict__.update(refreshed.__dict__)
+
+
+def _subprocess_exec_kwargs() -> dict[str, Any]:
+    """Return platform-specific kwargs for hidden subprocess execution."""
+    if _SUBPROCESS_NO_WINDOW:
+        return {"creationflags": _SUBPROCESS_NO_WINDOW}
+    return {}
 
 
 # ---------------------------------------------------------------------------
@@ -166,7 +222,16 @@ def _apply_global_style(app: QApplication) -> None:
             border: 1px solid {_BORDER}; border-radius: 15px; padding: 10px 14px;
             selection-background-color: {_ACCENT_DIM};
         }}
+        QPlainTextEdit {{
+            background: {_BG_SURFACE}; color: {_TEXT_PRIMARY};
+            border: 1px solid {_BORDER}; border-radius: 15px; padding: 10px 14px;
+            selection-background-color: {_ACCENT_DIM};
+        }}
         QLineEdit:focus {{
+            border-color: {_ACCENT};
+            background: #fffaff;
+        }}
+        QPlainTextEdit:focus {{
             border-color: {_ACCENT};
             background: #fffaff;
         }}
@@ -648,6 +713,239 @@ class DesirePanel(QWidget):
 
 
 # ---------------------------------------------------------------------------
+# Testflight Setup
+# ---------------------------------------------------------------------------
+
+
+def _is_truthy(value: str | None) -> bool:
+    return (value or "").strip().lower() in {"1", "true", "yes", "on"}
+
+
+def build_testflight_persona(
+    *,
+    agent_name: str,
+    companion_name: str,
+    companion_profile: str,
+    agent_profile: str,
+    relationship: str,
+) -> str:
+    """Build ME.md content from structured first-run setup fields."""
+    a_name = (agent_name or "AI").strip() or "AI"
+    c_name = (companion_name or "あなた").strip() or "あなた"
+    c_profile = companion_profile.strip()
+    a_profile = agent_profile.strip()
+    relation = relationship.strip()
+    return (
+        "# 私について\n\n"
+        f"名前：{a_name}\n\n"
+        f"{a_profile}\n\n"
+        "## 一緒に暮らす人\n\n"
+        f"- 名前：{c_name}\n"
+        f"- 設定：{c_profile}\n\n"
+        "## 二人の関係性\n\n"
+        f"{relation}\n"
+    )
+
+
+def needs_testflight_setup(
+    config: "AgentConfig",
+    *,
+    setup_flag: str | None = None,
+    persona_path: Path | None = None,
+) -> bool:
+    """Return True when testflight first-run setup should be shown."""
+    if not getattr(config, "testflight_mode", False):
+        return False
+
+    done = _is_truthy(
+        setup_flag if setup_flag is not None else os.environ.get(_TESTFLIGHT_SETUP_FLAG)
+    )
+    cam = config.camera
+    has_camera = bool(cam.host.strip() and cam.username.strip() and cam.password.strip())
+    persona_target = persona_path or _TESTFLIGHT_PERSONA_PATH
+    try:
+        has_persona = persona_target.exists() and bool(
+            persona_target.read_text(encoding="utf-8").strip()
+        )
+    except Exception:
+        has_persona = False
+    return not (done and has_camera and has_persona)
+
+
+class TestflightSetupDialog(QDialog):
+    """Minimal first-run setup for external testflight users."""
+
+    def __init__(
+        self,
+        config: "AgentConfig",
+        env_path: Path,
+        persona_path: Path = _TESTFLIGHT_PERSONA_PATH,
+        parent: QWidget | None = None,
+    ) -> None:
+        super().__init__(parent)
+        self._config = config
+        self._env_path = env_path
+        self._persona_path = persona_path
+
+        self.setWindowTitle("テスト版 初回セットアップ")
+        self.setModal(True)
+        self.setMinimumWidth(880)
+
+        root = QVBoxLayout(self)
+        root.setContentsMargins(18, 18, 18, 14)
+        root.setSpacing(12)
+
+        intro = QLabel(
+            "今晩のテスト向けに、最初に必要な項目だけ入力してね。\n入力後は自動で設定保存されます。"
+        )
+        intro.setWordWrap(True)
+        intro.setStyleSheet(f"color: {_TEXT_SECONDARY}; background: transparent;")
+        root.addWidget(intro)
+
+        def _label(text: str) -> QLabel:
+            lbl = QLabel(text)
+            lbl.setMinimumWidth(210)
+            lbl.setStyleSheet(
+                f"color: {_TEXT_PRIMARY}; font-size: {_px(13)}px; font-weight: 600; background: transparent;"
+            )
+            return lbl
+
+        tabs = QTabWidget()
+        root.addWidget(tabs)
+
+        persona_tab = QWidget()
+        persona_form = QFormLayout(persona_tab)
+        persona_form.setHorizontalSpacing(16)
+        persona_form.setVerticalSpacing(10)
+        persona_form.setFieldGrowthPolicy(QFormLayout.FieldGrowthPolicy.ExpandingFieldsGrow)
+
+        self._agent_name = QLineEdit((config.agent_name or "AI").strip() or "AI")
+        self._companion_name = QLineEdit((config.companion_name or "").strip())
+        self._companion_profile = QPlainTextEdit()
+        self._companion_profile.setPlaceholderText("例: 眼鏡をかけてる、夜型、コーヒー好き など")
+        self._companion_profile.setFixedHeight(110)
+        self._agent_profile = QPlainTextEdit()
+        self._agent_profile.setPlaceholderText("例: 明るい関西弁、観察好き、短く率直に話す など")
+        self._agent_profile.setFixedHeight(110)
+        self._relationship = QPlainTextEdit()
+        self._relationship.setPlaceholderText("例: 幼馴染。深夜によく一緒に作業する相棒。")
+        self._relationship.setFixedHeight(110)
+
+        persona_form.addRow(_label("エージェント名"), self._agent_name)
+        persona_form.addRow(_label("ユーザー名"), self._companion_name)
+        persona_form.addRow(_label("ユーザー設定"), self._companion_profile)
+        persona_form.addRow(_label("エージェント設定"), self._agent_profile)
+        persona_form.addRow(_label("二人の関係性"), self._relationship)
+        tabs.addTab(persona_tab, "1. ペルソナ")
+
+        other_tab = QWidget()
+        other_form = QFormLayout(other_tab)
+        other_form.setHorizontalSpacing(16)
+        other_form.setVerticalSpacing(10)
+        other_form.setFieldGrowthPolicy(QFormLayout.FieldGrowthPolicy.ExpandingFieldsGrow)
+
+        self._cam_host = QLineEdit(config.camera.host)
+        self._cam_host.setPlaceholderText("例: 192.168.0.100")
+        self._cam_user = QLineEdit((config.camera.username or "admin").strip() or "admin")
+        self._cam_pass = QLineEdit(config.camera.password)
+        self._cam_pass.setEchoMode(QLineEdit.EchoMode.Password)
+
+        other_form.addRow(_label("カメラIP"), self._cam_host)
+        other_form.addRow(_label("カメラアカウント"), self._cam_user)
+        other_form.addRow(_label("カメラパスワード"), self._cam_pass)
+        tabs.addTab(other_tab, "2. カメラ")
+
+        btns = QDialogButtonBox(
+            QDialogButtonBox.StandardButton.Save | QDialogButtonBox.StandardButton.Cancel
+        )
+        btns.accepted.connect(self._save)
+        btns.rejected.connect(self.reject)
+        root.addWidget(btns)
+
+    def _save(self) -> None:
+        from dotenv import set_key
+
+        agent_name = self._agent_name.text().strip()
+        companion_name = self._companion_name.text().strip()
+        companion_profile = self._companion_profile.toPlainText().strip()
+        agent_profile = self._agent_profile.toPlainText().strip()
+        relationship = self._relationship.toPlainText().strip()
+        cam_host = self._cam_host.text().strip()
+        cam_user = self._cam_user.text().strip() or "admin"
+        cam_pass = self._cam_pass.text().strip()
+
+        missing = []
+        if not agent_name:
+            missing.append("エージェント名")
+        if not companion_name:
+            missing.append("ユーザー名")
+        if not companion_profile:
+            missing.append("ユーザー設定")
+        if not agent_profile:
+            missing.append("エージェント設定")
+        if not relationship:
+            missing.append("二人の関係性")
+        if not cam_host:
+            missing.append("カメラIP")
+        if not cam_user:
+            missing.append("カメラアカウント")
+        if not cam_pass:
+            missing.append("カメラパスワード")
+        if missing:
+            QMessageBox.warning(
+                self, "入力不足", "次の項目を埋めてください:\n- " + "\n- ".join(missing)
+            )
+            return
+
+        persona_text = build_testflight_persona(
+            agent_name=agent_name,
+            companion_name=companion_name,
+            companion_profile=companion_profile,
+            agent_profile=agent_profile,
+            relationship=relationship,
+        )
+
+        try:
+            self._persona_path.parent.mkdir(parents=True, exist_ok=True)
+            self._persona_path.write_text(persona_text, encoding="utf-8")
+
+            env_str = str(self._env_path)
+            self._env_path.touch(exist_ok=True)
+            pairs = [
+                ("AGENT_NAME", agent_name),
+                ("COMPANION_NAME", companion_name),
+                ("CAMERA_HOST", cam_host),
+                ("CAMERA_USERNAME", cam_user),
+                ("CAMERA_PASSWORD", cam_pass),
+                ("CAMERA_ONVIF_PORT", "2020"),
+                ("MOBILITY_ENABLED", "false"),
+                (_TESTFLIGHT_SETUP_FLAG, "true"),
+            ]
+            for key, value in pairs:
+                set_key(env_str, key, value)
+            _apply_runtime_env_overrides(pairs)
+            _refresh_agent_config_from_env(self._config)
+        except Exception as exc:
+            QMessageBox.warning(self, "保存失敗", str(exc))
+            return
+
+        QMessageBox.information(self, "保存完了", "セットアップ完了。アプリを起動します。")
+        self.accept()
+
+
+def run_testflight_setup_if_needed(config: "AgentConfig", env_path: Path = _ENV_PATH) -> bool:
+    """Run first-run setup dialog in testflight mode when needed."""
+    if not needs_testflight_setup(config):
+        return True
+
+    existing = QApplication.instance()
+    qt_app = existing if isinstance(existing, QApplication) else QApplication(sys.argv)
+    _apply_global_style(qt_app)
+    dlg = TestflightSetupDialog(config, env_path)
+    return dlg.exec() == int(QDialog.DialogCode.Accepted)
+
+
+# ---------------------------------------------------------------------------
 # SettingsDialog
 # ---------------------------------------------------------------------------
 
@@ -662,6 +960,7 @@ class SettingsDialog(QDialog):
         parent: QWidget | None = None,
     ) -> None:
         super().__init__(parent)
+        self._config = config
         self._env_path = env_path
         self.setWindowTitle(_t("settings_window_title"))
         self.setMinimumWidth(760)
@@ -810,12 +1109,17 @@ class SettingsDialog(QDialog):
 
         try:
             self._env_path.touch(exist_ok=True)
+            applied_pairs: list[tuple[str, str]] = []
             for key, value in plain_pairs:
                 if value:
                     set_key(env_str, key, value)
+                    applied_pairs.append((key, value))
             for key, value in masked_pairs:
                 if value:
                     set_key(env_str, key, value)
+                    applied_pairs.append((key, value))
+            _apply_runtime_env_overrides(applied_pairs)
+            _refresh_agent_config_from_env(self._config)
         except Exception as exc:
             QMessageBox.warning(self, _t("settings_save_failed_title"), str(exc))
             return
@@ -994,6 +1298,7 @@ class FamiliarWindow(QMainWindow):
                 *cmd,
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
+                **_subprocess_exec_kwargs(),
             )
         except FileNotFoundError:
             logger.warning("Live look preview disabled: ffmpeg not found")
@@ -1543,16 +1848,24 @@ class FamiliarWindow(QMainWindow):
 def run_gui(agent: "EmbodiedAgent", desires: "DesireSystem") -> None:
     """Launch the PySide6 GUI with qasync event loop."""
     import signal
-    import sys
 
     existing = QApplication.instance()
     qt_app = existing if isinstance(existing, QApplication) else QApplication(sys.argv)
     _apply_global_style(qt_app)
+    icon_path = resolve_app_icon_path()
+    if icon_path:
+        icon = QIcon(str(icon_path))
+        if not icon.isNull():
+            qt_app.setWindowIcon(icon)
 
     loop = qasync.QEventLoop(qt_app)
     asyncio.set_event_loop(loop)
 
     window = FamiliarWindow(agent, desires)
+    if icon_path:
+        icon = QIcon(str(icon_path))
+        if not icon.isNull():
+            window.setWindowIcon(icon)
     window.show()
     qt_app.aboutToQuit.connect(window._ensure_shutdown_task)
 

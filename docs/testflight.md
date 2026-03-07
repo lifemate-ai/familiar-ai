@@ -1,0 +1,79 @@
+# Testflight Distribution Guide
+
+## Goal
+Ship a tester-friendly build where:
+- First run asks only minimal setup items (persona + camera credentials).
+- Testers do not need to obtain API keys.
+- Mobility/vacuum controls are disabled.
+
+## Recommended for Tonight
+Use a **portable onedir `.exe` zip** (folder distribution).
+
+Reasons:
+- Easiest handoff for non-technical testers.
+- No installer friction/UAC surprises.
+- Keeps only settings (`.env`) editable outside the executable.
+
+Note:
+- `onefile` can be unstable with heavy `torch` DLL initialization on some Windows setups.
+- `onedir` is typically more reliable for testflight.
+
+## Build (Windows)
+
+Optional icon asset:
+- `assets/app.ico` (already prepared)
+- `assets/app.bmp` (preview/reference)
+- Override icon path at runtime with env var: `FAMILIAR_APP_ICON=app.ico`
+
+Build package zip in one command:
+
+```bash
+./build.sh
+```
+
+```bat
+build.bat
+```
+
+`build-testflight.bat` でも同じ動作です。
+`build.sh` / `build.bat` は `pyinstaller` を自動で解決するため、事前の `uv tool install pyinstaller` は不要です。
+
+Outputs:
+- `.release/familiar-testflight/` (ready-to-send folder)
+- `.release/familiar-testflight.zip` (send this file)
+
+What this one command does:
+1. Generates `.testflight/.env` from your local `.env` / env vars.
+   It embeds `API_KEY`, `ELEVENLABS_API_KEY`, and `ELEVENLABS_VOICE_ID`.
+2. Builds Windows package with PyInstaller.
+
+If you still want a single-file `.exe`:
+
+```bash
+./build.sh --mode onefile --name familiar-testflight
+```
+
+```bat
+build.bat --mode onefile --name familiar-testflight
+```
+
+If you want to run each step manually:
+
+```bash
+uv run python scripts/prepare_testflight_env.py --output .testflight/.env
+uv run python scripts/build_testflight_windows.py --mode onefile --name familiar-testflight
+```
+
+## First-run Setup Flow (in app)
+When `TESTFLIGHT_MODE=true`, GUI shows a setup wizard with two pages:
+1. Persona
+2. Camera
+
+On save, it writes:
+- `.env` camera/name fields
+- `TESTFLIGHT_SETUP_DONE=true`
+- `MOBILITY_ENABLED=false`
+- Persona markdown to `~/.familiar_ai/ME.md`
+
+## After Pilot Stabilizes
+If distribution is stable and updates are less frequent, consider moving to an installer (Inno Setup / NSIS).

@@ -12,6 +12,7 @@ import sys
 import tempfile
 import urllib.request
 from pathlib import Path
+from typing import Any
 from urllib.parse import quote
 
 logger = logging.getLogger(__name__)
@@ -20,6 +21,14 @@ _GO2RTC_CACHE = Path.home() / ".cache" / "embodied-claude" / "go2rtc"
 # On Windows the binary is go2rtc.exe; on other platforms there is no extension.
 _GO2RTC_BIN = _GO2RTC_CACHE / ("go2rtc.exe" if sys.platform == "win32" else "go2rtc")
 _GO2RTC_CONFIG = _GO2RTC_CACHE / "go2rtc.yaml"
+_SUBPROCESS_NO_WINDOW = 0x08000000 if os.name == "nt" else 0
+
+
+def _subprocess_exec_kwargs() -> dict[str, Any]:
+    """Return platform-specific kwargs for hidden subprocess execution."""
+    if _SUBPROCESS_NO_WINDOW:
+        return {"creationflags": _SUBPROCESS_NO_WINDOW}
+    return {}
 
 
 def _ensure_go2rtc(api_url: str) -> None:

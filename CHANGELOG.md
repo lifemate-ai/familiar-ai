@@ -15,9 +15,35 @@ This project adheres to [Semantic Versioning](https://semver.org/).
   - Opt-in via `REALTIME_STT=true` in `.env`
   - Coexists with existing batch STT (Ctrl+T / Space PTT)
 - Support for full RTSP URLs in `CAMERA_HOST` (enables ATOMCam and other non-standard RTSP paths)
+- Testflight onboarding flow for GUI (`TESTFLIGHT_MODE=true`) with a two-page setup wizard:
+  - Persona page (agent/user names, user profile, agent profile, relationship)
+  - Camera page (IP, account, password)
+  - Auto-generates `~/.familiar_ai/ME.md` from structured inputs
+- Testflight helper scripts:
+  - `scripts/prepare_testflight_env.py` to generate distributable `.env` with embedded API key from local environment
+  - `scripts/familiar_testflight_entry.py` as a PyInstaller-friendly GUI entrypoint
+  - `scripts/build_testflight_windows.py` to package onefile/onedir testflight zips with external `.env`
+  - `scripts/release_testflight_windows.py` to run env preparation + build in one command
+- Root build wrappers for easier invocation:
+  - `build.sh`
+  - `build.bat`
+  - `build-testflight.bat`
+- `docs/testflight.md` with practical distribution guidance (portable onefile/onedir `.exe` flows)
+- Owl-style app icon assets for Windows packaging/runtime (`assets/app.ico`, `assets/app.bmp`)
 
 ### Changed
 - GUI settings dialog now keeps JP labels fully visible (including short labels like `名`), refreshed the app to a bright, soft, rounded light theme, split first-turn startup status from "thinking", and increased GUI font sizing for readability.
+- Mobility initialization now respects `MOBILITY_ENABLED`; in testflight mode it defaults to disabled.
+- Build wrappers now run with `uv run --with pyinstaller`, so Windows testflight packaging works without separately installing PyInstaller.
+- Setup logging no longer imports `transformers` at startup (avoids packaged Windows crash on torch DLL init).
+- Embedding model load failures now degrade to zero-vector fallback instead of crashing startup.
+- `build.sh` / `build.bat` now default to `--mode onedir` for more reliable Windows testflight builds.
+- Testflight env generation now also carries over `ELEVENLABS_API_KEY` and `ELEVENLABS_VOICE_ID` from local `.env`/environment.
+- Testflight setup/settings saves now update process env + runtime config immediately, so saved values appear in GUI without restart.
+- Testflight packaged entrypoint now force-exits the process after GUI shutdown to avoid relaunch failures on Windows.
+- Windows camera subprocesses (`see` capture + GUI look preview) now run with no console window popup.
+- Windows testflight build now explicitly bundles `onvif` (`--hidden-import onvif --collect-data onvif`) so camera turn tools work in packaged builds.
+- Windows TTS/STT subprocesses (`go2rtc`, `ffmpeg`, `paplay`/`mpv`/`ffplay`) now run with no console window popup.
 
 ## [0.1.0] - 2026-02-22
 

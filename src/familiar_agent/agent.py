@@ -412,7 +412,7 @@ class EmbodiedAgent:
             )
 
         mob = self.config.mobility
-        if mob.api_key and mob.device_id:
+        if self.config.mobility_enabled and mob.api_key and mob.device_id:
             self._mobility = MobilityTool(
                 mob.api_region, mob.api_key, mob.api_secret, mob.device_id
             )

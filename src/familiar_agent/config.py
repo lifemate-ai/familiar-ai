@@ -17,6 +17,14 @@ def _default_companion_name() -> str:
     return _t("default_companion_name")
 
 
+def _env_bool(name: str, default: bool = False) -> bool:
+    """Parse an environment variable as bool with common truthy values."""
+    raw = os.environ.get(name)
+    if raw is None:
+        return default
+    return raw.strip().lower() in {"1", "true", "yes", "on"}
+
+
 @dataclass
 class CameraConfig:
     host: str = field(
@@ -114,6 +122,16 @@ class AgentConfig:
 
     # Model name — platform-specific defaults applied in create_backend()
     model: str = field(default_factory=lambda: os.environ.get("MODEL", ""))
+
+    # Testflight mode: enables first-run setup flow optimized for external testers.
+    testflight_mode: bool = field(default_factory=lambda: _env_bool("TESTFLIGHT_MODE", False))
+
+    # Body mobility tool toggle. In testflight mode, default to disabled unless explicitly enabled.
+    mobility_enabled: bool = field(
+        default_factory=lambda: _env_bool(
+            "MOBILITY_ENABLED", default=not _env_bool("TESTFLIGHT_MODE", False)
+        )
+    )
 
     # OpenAI-compatible only: base URL and tool-calling mode
     # TOOLS_MODE: "native" = use function-calling API, "prompt" = inject into system prompt
