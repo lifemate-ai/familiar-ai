@@ -191,6 +191,8 @@ class STTTool:
                         break
                     if time.time() - start > 60:
                         break
+                    if not isinstance(frame, av.AudioFrame):
+                        continue
                     for resampled in resampler.resample(frame):
                         chunks.append(resampled.to_ndarray())
             except Exception as e:

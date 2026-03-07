@@ -59,6 +59,13 @@ def _write_pcm_as_wav(
         return f.name
 
 
+def _write_tmp_audio(data: bytes, suffix: str = ".mp3") -> str:
+    """Write raw audio bytes to a temp file and return the path."""
+    with tempfile.NamedTemporaryFile(suffix=suffix, delete=False) as f:
+        f.write(data)
+        return f.name
+
+
 _GO2RTC_CACHE = Path.home() / ".cache" / "embodied-claude" / "go2rtc"
 # On Windows the binary is go2rtc.exe; on other platforms there is no extension.
 _GO2RTC_BIN = _GO2RTC_CACHE / ("go2rtc.exe" if sys.platform == "win32" else "go2rtc")
@@ -151,10 +158,16 @@ class TTSTool:
                     if resp.status != 200:
                         err = await resp.text()
                         return f"TTS API failed ({resp.status}): {err[:80]}"
+                    content_type = resp.headers.get("Content-Type", "")
                     audio_data = await resp.read()
 
-            # Write as WAV (with header) — no ffmpeg MP3→WAV conversion needed
-            tmp_path = _write_pcm_as_wav(audio_data, sample_rate=16000)
+            # ElevenLabs may return MP3 even when PCM was requested (model-dependent).
+            # Detect by content-type and save to the correct format.
+            is_mp3 = "mpeg" in content_type or audio_data[:3] in (b"ID3", b"\xff\xfb", b"\xff\xf3")
+            if is_mp3:
+                tmp_path = _write_tmp_audio(audio_data, suffix=".mp3")
+            else:
+                tmp_path = _write_pcm_as_wav(audio_data, sample_rate=16000)
 
             try:
                 played_via: list[str] = []
@@ -225,25 +238,70 @@ def _pulse_env() -> dict[str, str] | None:
     return env
 
 
-async def _play_via_sounddevice(wav_path: str) -> bool:
-    """Play WAV file using sounddevice (pure Python, no system dependency)."""
+async def _play_via_sounddevice(audio_path: str) -> bool:
+    """Play WAV or MP3 file using sounddevice (pure Python, no system dependency).
+
+    WAV: decoded by soundfile directly.
+    MP3: decoded frame-by-frame with PyAV (av package), then played via sounddevice.
+    """
 
     def _play() -> bool:
         try:
             import sounddevice as sd
-            import soundfile as sf
         except ImportError:
             return False
-        try:
-            data, samplerate = sf.read(wav_path)
-            sd.play(data, samplerate)
-            sd.wait()
-            return True
-        except Exception as e:
-            logger.warning("sounddevice playback failed: %s", e)
-            return False
+
+        if audio_path.lower().endswith(".mp3"):
+            return _play_mp3_via_pyav(audio_path)
+        else:
+            try:
+                import soundfile as sf
+            except ImportError:
+                return False
+            try:
+                data, samplerate = sf.read(audio_path)
+                sd.play(data, samplerate)
+                sd.wait()
+                return True
+            except Exception as e:
+                logger.warning("sounddevice/soundfile WAV playback failed: %s", e)
+                return False
 
     return await asyncio.to_thread(_play)
+
+
+def _play_mp3_via_pyav(mp3_path: str) -> bool:
+    """Decode MP3 with PyAV and play via sounddevice. Returns True on success."""
+    try:
+        import av
+        import numpy as np
+        import sounddevice as sd
+    except ImportError:
+        logger.warning("PyAV, numpy, or sounddevice not available for MP3 decoding")
+        return False
+    try:
+        container = av.open(mp3_path)
+        audio_stream = next((s for s in container.streams if s.type == "audio"), None)
+        if audio_stream is None:
+            return False
+        sample_rate = int(getattr(audio_stream, "sample_rate", None) or 44100)
+        resampler = av.AudioResampler(format="fltp", layout="stereo", rate=sample_rate)
+        chunks: list = []
+        for frame in container.decode(audio_stream):
+            if not isinstance(frame, av.AudioFrame):
+                continue
+            for rf in resampler.resample(frame):
+                chunks.append(rf.to_ndarray())
+        container.close()
+        if not chunks:
+            return False
+        audio = np.concatenate(chunks, axis=1).T  # (samples, channels)
+        sd.play(audio, sample_rate)
+        sd.wait()
+        return True
+    except Exception as e:
+        logger.warning("PyAV MP3 playback failed: %s", e)
+        return False
 
 
 async def _play_local(tmp_path: str) -> bool:
@@ -258,7 +316,7 @@ async def _play_local(tmp_path: str) -> bool:
     """
     pulse_env = _pulse_env()
 
-    # --- paplay (PulseAudio native, WAV only — file is already WAV) ---
+    # --- paplay (PulseAudio native, WAV only) ---
     paplay = shutil.which("paplay")
     if paplay and tmp_path.lower().endswith((".wav", ".wave")):
         try:
