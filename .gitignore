@@ -12,3 +12,10 @@ __pycache__/
 
 # Data
 ~/.familiar_ai/
+
+# Build artifacts
+dist/
+build/
+.release/
+*.spec
+__pycache__/
