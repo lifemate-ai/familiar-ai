@@ -271,7 +271,10 @@ async def _play_via_sounddevice(audio_path: str) -> bool:
 
 
 def _play_mp3_via_pyav(mp3_path: str) -> bool:
-    """Decode MP3 with PyAV and play via sounddevice. Returns True on success."""
+    """Decode MP3 with PyAV to s16 PCM, play via sounddevice.
+
+    Uses s16 interleaved stereo (simpler than fltp planar) for cross-platform reliability.
+    """
     try:
         import av
         import numpy as np
@@ -280,23 +283,35 @@ def _play_mp3_via_pyav(mp3_path: str) -> bool:
         logger.warning("PyAV, numpy, or sounddevice not available for MP3 decoding")
         return False
     try:
+        TARGET_RATE = 44100
         container = av.open(mp3_path)
         audio_stream = next((s for s in container.streams if s.type == "audio"), None)
         if audio_stream is None:
+            container.close()
             return False
-        sample_rate = int(getattr(audio_stream, "sample_rate", None) or 44100)
-        resampler = av.AudioResampler(format="fltp", layout="stereo", rate=sample_rate)
-        chunks: list = []
+
+        # Resample to s16 stereo @ 44100 Hz — single plane, easy to convert to numpy
+        resampler = av.AudioResampler(format="s16", layout="stereo", rate=TARGET_RATE)
+        raw_chunks: list[bytes] = []
+
         for frame in container.decode(audio_stream):
             if not isinstance(frame, av.AudioFrame):
                 continue
             for rf in resampler.resample(frame):
-                chunks.append(rf.to_ndarray())
+                raw_chunks.append(bytes(rf.planes[0]))
+
+        # Flush resampler
+        for rf in resampler.resample(None):
+            raw_chunks.append(bytes(rf.planes[0]))
+
         container.close()
-        if not chunks:
+        if not raw_chunks:
             return False
-        audio = np.concatenate(chunks, axis=1).T  # (samples, channels)
-        sd.play(audio, sample_rate)
+
+        raw = b"".join(raw_chunks)
+        # s16 stereo interleaved: L0 R0 L1 R1 … → shape (N, 2), float32 for sounddevice
+        audio = np.frombuffer(raw, dtype=np.int16).reshape(-1, 2).astype(np.float32) / 32768.0
+        sd.play(audio, TARGET_RATE)
         sd.wait()
         return True
     except Exception as e:
