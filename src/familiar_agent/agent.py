@@ -10,7 +10,7 @@ import time
 from collections.abc import Callable
 from datetime import datetime
 
-from .backend import create_backend, create_utility_backend
+from .backend import create_backend, create_scene_backend, create_utility_backend
 from .config import AgentConfig
 from .desires import detect_worry_signal
 from .exploration import ExplorationTracker
@@ -373,6 +373,7 @@ class EmbodiedAgent:
         self.config = config
         self.backend = create_backend(config)
         self._utility_backend = create_utility_backend(config) or self.backend
+        self._scene_backend = create_scene_backend(config) or self._utility_backend
         self.messages: list = []
         self._started_at = time.time()
         self._turn_count = 0
@@ -1152,7 +1153,7 @@ class EmbodiedAgent:
                         # Fire-and-forget so it never delays the response.
                         if self._scene is not None:
                             asyncio.ensure_future(
-                                self._scene.update(final_text[:500], self._utility_backend)
+                                self._scene.update(final_text[:500], self._scene_backend)
                             )
                         await self._memory.save_async(
                             final_text[:500],
