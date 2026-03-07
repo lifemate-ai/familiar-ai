@@ -55,22 +55,7 @@ powershell -ExecutionPolicy ByPass -c "irm https://astral.sh/uv/install.ps1 | ie
 ```
 Or: `winget install astral-sh.uv`
 
-### 2. Install ffmpeg
-
-ffmpeg is **required** for camera image capture and audio playback.
-
-| OS | Command |
-|----|---------|
-| macOS | `brew install ffmpeg` |
-| Ubuntu / Debian | `sudo apt install ffmpeg` |
-| Fedora / RHEL | `sudo dnf install ffmpeg` |
-| Arch Linux | `sudo pacman -S ffmpeg` |
-| Windows | `winget install ffmpeg` — or download from [ffmpeg.org](https://ffmpeg.org/download.html) and add to PATH |
-| Raspberry Pi | `sudo apt install ffmpeg` |
-
-Verify: `ffmpeg -version`
-
-### 3. Clone and install
+### 2. Clone and install
 
 ```bash
 git clone https://github.com/lifemate-ai/familiar-ai
@@ -298,16 +283,16 @@ Set `TTS_OUTPUT=remote` (or `both`). Requires [go2rtc](https://github.com/AlexxI
 
 #### B) Local PC speaker
 
-The default (`TTS_OUTPUT=local`). Tries players in order: **paplay** → **mpv** → **ffplay**. Also used as a fallback when `TTS_OUTPUT=remote` and go2rtc is unavailable.
+The default (`TTS_OUTPUT=local`). Tries players in order: **paplay** → **mpv** → **sounddevice** (pure Python fallback — no system tools required). Also used as a fallback when `TTS_OUTPUT=remote` and go2rtc is unavailable.
 
-| OS | Install |
-|----|---------|
-| macOS | `brew install mpv` |
-| Ubuntu / Debian | `sudo apt install mpv` (or `paplay` via `pulseaudio-utils`) |
+| OS | Recommended |
+|----|-------------|
+| macOS | `brew install mpv` (optional — sounddevice works without it) |
+| Ubuntu / Debian | `sudo apt install mpv` or `pulseaudio-utils` for paplay |
 | WSL2 / WSLg | `sudo apt install pulseaudio-utils` — set `PULSE_SERVER=unix:/mnt/wslg/PulseServer` in `.env` |
-| Windows | [mpv.io/installation](https://mpv.io/installation/) — download and add to PATH, **or** `winget install ffmpeg` |
+| Windows | mpv optional — sounddevice fallback works out of the box |
 
-> If no audio player is available, speech is still generated — it just won't play.
+> If no audio player is found, speech falls back to sounddevice automatically.
 
 ### Voice input (Realtime STT)
 
