@@ -19,6 +19,7 @@ DEFAULT_DESIRES = {
     "greet_companion": 0.0,
     "rest": 0.0,
     "worry_companion": 0.0,  # grows only via detect_worry_signal(), not over time
+    "share_memory": 0.0,  # spontaneous "remember when..." sharing; fires every ~3 min idle
 }
 
 # How fast each desire grows per second of inactivity
@@ -27,6 +28,7 @@ GROWTH_RATES = {
     "explore": 0.008,  # reaches 0.6 after ~75 sec — explore should fire more often
     "greet_companion": 0.002,  # slow build; fires after ~5 min of silence
     "rest": 0.002,  # baseline; night modulation (×1.8) makes it grow meaningfully only at night
+    "share_memory": 0.003,  # reaches 0.6 after ~3.3 min idle; evening ×1.4 makes it ~2.4 min
     # worry_companion intentionally omitted — only grows via boost()
 }
 
@@ -136,10 +138,10 @@ class DesireSystem:
     def _time_modulation(hour: int) -> dict[str, float]:
         """Return per-desire growth-rate multipliers based on time of day.
 
-        Night  (22–6):  rest ×1.8, explore ×0.4, look_around ×0.4
+        Night  (22–6):  rest ×1.8, explore ×0.4, look_around ×0.4, share_memory ×0.3
         Morning (6–10): greet_companion ×1.3, explore ×1.2
         Day   (10–18):  all default (×1.0)
-        Evening(18–22): no special modulation (worry sensitivity rises naturally via boost)
+        Evening(18–22): share_memory ×1.4 (nostalgic hour)
         """
         if 22 <= hour or hour < 6:  # night
             return {
@@ -148,6 +150,7 @@ class DesireSystem:
                 "look_around": 0.4,
                 "greet_companion": 1.0,
                 "worry_companion": 1.0,
+                "share_memory": 0.3,  # late night: quiet, not the time for reminiscing
             }
         if 6 <= hour < 10:  # morning
             return {
@@ -156,6 +159,11 @@ class DesireSystem:
                 "look_around": 1.0,
                 "greet_companion": 1.3,
                 "worry_companion": 1.0,
+                "share_memory": 1.0,
+            }
+        if 18 <= hour < 22:  # evening — nostalgic hour
+            return {
+                "share_memory": 1.4,
             }
         return {}  # default: no modulation (all ×1.0)
 
@@ -255,6 +263,10 @@ class DesireSystem:
             "rest": _t("desire_prompt_rest"),
             "worry_companion": _t(
                 "desire_prompt_worry_companion",
+                companion=self._companion_name,
+            ),
+            "share_memory": _t(
+                "desire_prompt_share_memory",
                 companion=self._companion_name,
             ),
         }

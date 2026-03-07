@@ -4,6 +4,7 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import logging
+import math
 import os
 import re
 import time
@@ -12,7 +13,7 @@ from datetime import datetime
 
 from .backend import create_backend, create_scene_backend, create_utility_backend
 from .config import AgentConfig
-from .desires import detect_worry_signal
+from .desires import DesireSystem, detect_worry_signal
 from .exploration import ExplorationTracker
 from .scene import SceneTracker
 from .memory_worker import MemoryJobWorker
@@ -306,7 +307,13 @@ Write in third person. Be concise.
 Write just the summary paragraph."""
 
 
-def _interoception(started_at: float, turn_count: int, companion_mood: str = "engaged") -> str:
+def _interoception(
+    started_at: float,
+    turn_count: int,
+    companion_mood: str = "engaged",
+    agent_mood: str = "neutral",
+    agent_mood_intensity: float = 0.0,
+) -> str:
     """Generate a felt-sense of internal state from objective signals.
 
     Like human interoception — raw signals become a felt quality, not a report.
@@ -357,13 +364,47 @@ def _interoception(started_at: float, turn_count: int, companion_mood: str = "en
     }
     companion_feel = mood_feel_map.get(companion_mood, "They're here with me.")
 
-    return (
+    base = (
         f"(interoception :private true\n"
         f'  (time-of-day :feel "{time_feel}")\n'
         f'  (uptime      :feel "{uptime_feel}")\n'
         f'  (social      :feel "{social_feel}")\n'
-        f'  (companion   :feel "{companion_feel}"))'
+        f'  (companion   :feel "{companion_feel}")'
     )
+
+    # Agent mood: persistent emotional inertia from prior turns
+    if agent_mood != "neutral" and agent_mood_intensity > 0.0:
+        _agent_mood_feels = {
+            "excited": "Still buzzing a little from earlier.",
+            "moved": "A warm feeling lingers.",
+            "happy": "There's a quiet happiness underneath.",
+            "curious": "Something's still catching my attention.",
+            "sad": "A faint heaviness carries over.",
+            "surprised": "Still slightly taken aback.",
+            "nostalgic": "A gentle wave of remembering.",
+        }
+        agent_feel = _agent_mood_feels.get(agent_mood, "Something lingers from before.")
+        base += f'\n  (mood        :feel "{agent_feel}")'
+
+    return base + ")"
+
+
+def _react_to_scene_events(events: list[dict], desires: DesireSystem | None) -> None:
+    """Translate SceneTracker events into desire boosts.
+
+    Called after scene.update() to wire physical presence detection into
+    the desire system.  desires may be None (no-op).
+    """
+    if desires is None or not events:
+        return
+    for event in events:
+        event_type = event.get("event_type", "")
+        label = (event.get("entity_label") or "").lower()
+        if "person" in label:
+            if event_type == "appeared":
+                desires.boost("greet_companion", 0.6)
+            elif event_type == "disappeared":
+                desires.boost("worry_companion", 0.2)
 
 
 class EmbodiedAgent:
@@ -400,6 +441,11 @@ class EmbodiedAgent:
         self._scene: SceneTracker | None = None  # initialized after DB ready in _init_tools
 
         self._mcp: MCPClientManager | None = None
+
+        # Mood persistence (Phase 2 companion-likeness)
+        self._mood: str = "neutral"
+        self._mood_intensity: float = 0.0
+        self._mood_set_at: float = time.time()
 
         self._init_tools()
 
@@ -606,7 +652,14 @@ class EmbodiedAgent:
         stable_parts = [p for p in [self._me_md, base] if p]
         stable = "\n\n---\n\n".join(stable_parts)
 
-        intero = _interoception(self._started_at, self._turn_count, companion_mood)
+        agent_mood, agent_mood_intensity = self._decayed_mood()
+        intero = _interoception(
+            self._started_at,
+            self._turn_count,
+            companion_mood,
+            agent_mood=agent_mood,
+            agent_mood_intensity=agent_mood_intensity,
+        )
         variable_parts: list[str] = [intero]
         # Morning reconstruction takes precedence on first turn; otherwise use feelings
         if morning_ctx:
@@ -676,6 +729,95 @@ class EmbodiedAgent:
         label = label.lower()
         valid = {"happy", "sad", "curious", "excited", "moved", "neutral"}
         return label if label in valid else "neutral"
+
+    # Emotion intensity by label (higher = stronger felt quality)
+    _MOOD_INTENSITY: dict[str, float] = {
+        "excited": 0.8,
+        "moved": 0.8,
+        "happy": 0.6,
+        "curious": 0.6,
+        "sad": 0.7,
+        "surprised": 0.5,
+        "nostalgic": 0.5,
+    }
+
+    def _update_mood(self, emotion: str) -> None:
+        """Update persistent mood state from the latest inferred emotion.
+
+        Neutral emotion is ignored (mood fades on its own via decay).
+        Same emotion reinforces intensity; different strong emotion replaces.
+        """
+        if emotion == "neutral" or emotion not in self._MOOD_INTENSITY:
+            return
+        new_intensity = self._MOOD_INTENSITY[emotion]
+        if emotion == self._mood:
+            self._mood_intensity = min(1.0, self._mood_intensity + 0.1)
+        else:
+            self._mood = emotion
+            self._mood_intensity = new_intensity
+            self._mood_set_at = time.time()
+
+    def _decayed_mood(self) -> tuple[str, float]:
+        """Return (mood, intensity) after applying exponential decay.
+
+        Half-life ≈ 138 seconds (~2.3 min).  Below 0.1 → treated as neutral.
+        """
+        if self._mood == "neutral" or self._mood_intensity <= 0.0:
+            return ("neutral", 0.0)
+        elapsed = time.time() - self._mood_set_at
+        intensity = self._mood_intensity * math.exp(-0.005 * elapsed)
+        if intensity < 0.1:
+            return ("neutral", 0.0)
+        return (self._mood, intensity)
+
+    async def _proactive_memory_context(self) -> str | None:
+        """Recall a contextually relevant past memory for spontaneous sharing.
+
+        Returns a short hint string (the memory content) to prepend to a
+        share_memory desire turn, or None if no suitable memory is found.
+        Only memories older than 24 hours are surfaced to avoid repeating
+        recent events.
+        """
+        from datetime import datetime, timedelta
+
+        now = datetime.now()
+        # Build a time-of-day context hint for the recall query
+        hour = now.hour
+        if 5 <= hour < 10:
+            hint = f"morning {now.strftime('%B')}"
+        elif 18 <= hour < 22:
+            hint = f"evening {now.strftime('%B')}"
+        else:
+            hint = now.strftime("%B")
+
+        try:
+            memories = await self._memory.recall_async(hint, n=5)
+        except Exception:
+            return None
+
+        if not memories:
+            return None
+
+        cutoff = now - timedelta(hours=24)
+        old_enough = []
+        for m in memories:
+            created_at = m.get("created_at")
+            if not created_at:
+                continue
+            try:
+                ts = datetime.fromisoformat(created_at)
+                if ts < cutoff:
+                    old_enough.append(m)
+            except (ValueError, TypeError):
+                continue
+
+        if not old_enough:
+            return None
+
+        # Pick the highest-scoring old memory
+        best = max(old_enough, key=lambda m: m.get("score", 0.0))
+        content = best.get("content", "")
+        return content if content else None
 
     async def _infer_companion_mood(self, text: str) -> str:
         """Classify companion's emotional state from their message. Returns mood label."""
@@ -1150,11 +1292,11 @@ class EmbodiedAgent:
                         if desires is not None:
                             desires.boost("look_around", novelty * 0.3)
                         # World model: update scene entities from the agent's visual observation.
-                        # Fire-and-forget so it never delays the response.
                         if self._scene is not None:
-                            asyncio.ensure_future(
-                                self._scene.update(final_text[:500], self._scene_backend)
+                            scene_events = await self._scene.update(
+                                final_text[:500], self._scene_backend
                             )
+                            _react_to_scene_events(scene_events, desires)
                         await self._memory.save_async(
                             final_text[:500],
                             direction="観察",
@@ -1165,6 +1307,7 @@ class EmbodiedAgent:
 
                     # Save emotional memory of this conversation exchange
                     emotion = await self._infer_emotion(final_text)
+                    self._update_mood(emotion)
                     summary = await self._summarize_exchange(user_input, final_text)
                     await self._memory.save_async(
                         summary,
