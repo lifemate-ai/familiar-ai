@@ -124,6 +124,7 @@ class TestInferCompanionMood:
         from familiar_agent.exploration import ExplorationTracker
 
         agent._exploration = ExplorationTracker()
+        agent._scene = None
 
         mock_backend = MagicMock()
         mock_backend.complete = AsyncMock(return_value=complete_return)
@@ -278,6 +279,7 @@ class TestFrustratedBoostsDesire:
         from familiar_agent.exploration import ExplorationTracker
 
         agent._exploration = ExplorationTracker()
+        agent._scene = None
 
         desires = MagicMock(spec=DesireSystem)
         desires.curiosity_target = None

@@ -7,6 +7,7 @@ from pathlib import Path
 import pytest
 
 from familiar_agent.desires import (
+    DECAY_ON_SATISFY,
     DEFAULT_DESIRES,
     GROWTH_RATES,
     TRIGGER_THRESHOLD,
@@ -141,10 +142,12 @@ def test_worry_does_not_fire_below_threshold(desires: DesireSystem) -> None:
         assert name != "worry_companion"
 
 
-def test_worry_satisfy_resets_to_zero(desires: DesireSystem) -> None:
+def test_worry_satisfy_decays_by_decay_factor(desires: DesireSystem) -> None:
+    """satisfy() decays worry_companion by DECAY_ON_SATISFY, not a full reset."""
     desires.boost("worry_companion", 0.8)
     desires.satisfy("worry_companion")
-    assert desires.level("worry_companion") == 0.0
+    expected = 0.8 * DECAY_ON_SATISFY
+    assert abs(desires.level("worry_companion") - expected) < 1e-6
 
 
 def test_worry_prompt_returned_when_dominant(desires: DesireSystem) -> None:

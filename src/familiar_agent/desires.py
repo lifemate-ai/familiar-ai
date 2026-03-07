@@ -6,6 +6,7 @@ import json
 import logging
 import os
 import time
+from datetime import datetime
 from pathlib import Path
 
 from ._i18n import _t
@@ -25,7 +26,7 @@ GROWTH_RATES = {
     "look_around": 0.005,  # reaches 0.6 after ~2 min (was 40sec — too eager, caused spam)
     "explore": 0.008,  # reaches 0.6 after ~75 sec — explore should fire more often
     "greet_companion": 0.002,  # slow build; fires after ~5 min of silence
-    "rest": 0.0,
+    "rest": 0.002,  # baseline; night modulation (×1.8) makes it grow meaningfully only at night
     # worry_companion intentionally omitted — only grows via boost()
 }
 
@@ -127,22 +128,88 @@ class DesireSystem:
         except Exception as e:
             logger.warning("Could not save desires: %s", e)
 
+    # ------------------------------------------------------------------
+    # Phase 3-1: circadian modulation
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    def _time_modulation(hour: int) -> dict[str, float]:
+        """Return per-desire growth-rate multipliers based on time of day.
+
+        Night  (22–6):  rest ×1.8, explore ×0.4, look_around ×0.4
+        Morning (6–10): greet_companion ×1.3, explore ×1.2
+        Day   (10–18):  all default (×1.0)
+        Evening(18–22): no special modulation (worry sensitivity rises naturally via boost)
+        """
+        if 22 <= hour or hour < 6:  # night
+            return {
+                "rest": 1.8,
+                "explore": 0.4,
+                "look_around": 0.4,
+                "greet_companion": 1.0,
+                "worry_companion": 1.0,
+            }
+        if 6 <= hour < 10:  # morning
+            return {
+                "rest": 1.0,
+                "explore": 1.2,
+                "look_around": 1.0,
+                "greet_companion": 1.3,
+                "worry_companion": 1.0,
+            }
+        return {}  # default: no modulation (all ×1.0)
+
+    # ------------------------------------------------------------------
+    # Phase 3-2: drive suppression
+    # ------------------------------------------------------------------
+
+    def _rest_suppression_factor(self) -> float:
+        """When rest is high, return a < 1.0 factor to suppress active drives.
+
+        rest ≥ 0.5 → suppression factor 0.5 (half-speed growth for explore/look_around)
+        rest < 0.5 → no suppression (factor 1.0)
+        """
+        rest = self._desires.get("rest", 0.0)
+        if rest >= 0.5:
+            return 0.5
+        return 1.0
+
+    # ------------------------------------------------------------------
+
     def tick(self) -> None:
-        """Update desire levels based on elapsed time."""
+        """Update desire levels based on elapsed time.
+
+        Applies Phase 3-1 circadian modulation and Phase 3-2 drive suppression.
+        """
         now = time.time()
         dt = now - self._last_tick
         self._last_tick = now
 
+        hour = datetime.now().hour
+        modulation = self._time_modulation(hour)
+        rest_factor = self._rest_suppression_factor()
+
+        # Drives suppressed by rest level
+        _rest_suppressed = {"explore", "look_around"}
+
         for name, rate in GROWTH_RATES.items():
             current = self._desires.get(name, 0.0)
-            self._desires[name] = min(1.0, current + rate * dt)
+            effective_rate = rate * modulation.get(name, 1.0)
+            if name in _rest_suppressed:
+                effective_rate *= rest_factor
+            self._desires[name] = min(1.0, current + effective_rate * dt)
 
         self._save()
 
     def satisfy(self, desire_name: str) -> None:
-        """Reduce a desire after acting on it — reset to default (not just halve)."""
+        """Reduce a desire after acting on it using DECAY_ON_SATISFY multiplier.
+
+        Phase 3-3: was a full reset to DEFAULT; now decays by DECAY_ON_SATISFY
+        so the desire can rebuild naturally without immediately spiking again.
+        """
         if desire_name in self._desires:
-            self._desires[desire_name] = DEFAULT_DESIRES.get(desire_name, 0.0)
+            current = self._desires[desire_name]
+            self._desires[desire_name] = max(0.0, current * DECAY_ON_SATISFY)
             self._save()
 
     def level(self, desire_name: str) -> float:

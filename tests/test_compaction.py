@@ -48,6 +48,7 @@ def _make_agent():
     from familiar_agent.exploration import ExplorationTracker
 
     agent._exploration = ExplorationTracker()
+    agent._scene = None
 
     return agent
 
