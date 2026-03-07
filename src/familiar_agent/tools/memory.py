@@ -1277,6 +1277,41 @@ class ObservationMemory:
     async def recall_day_summaries_async(self, n: int = 5) -> list[dict]:
         return await asyncio.to_thread(self.recall_day_summaries, n)
 
+    def recall_on_this_day(self, month: int, day: int, n: int = 3) -> list[dict]:
+        """Return memories from the same month-day in past years.
+
+        Excludes today so only true anniversaries are surfaced.
+        """
+        md = f"{month:02d}-{day:02d}"
+        try:
+            db = self._ensure_connected()
+            rows = db.execute(
+                "SELECT content, date, emotion, kind FROM observations "
+                "WHERE strftime('%m-%d', date) = ? AND date < date('now') "
+                "ORDER BY date DESC LIMIT ?",
+                (md, n),
+            ).fetchall()
+            return [dict(r) for r in rows]
+        except Exception as e:
+            logger.warning("recall_on_this_day failed: %s", e)
+            return []
+
+    async def recall_on_this_day_async(self, month: int, day: int, n: int = 3) -> list[dict]:
+        return await asyncio.to_thread(self.recall_on_this_day, month, day, n)
+
+    def get_earliest_date(self) -> str | None:
+        """Return the earliest date in the observations table, or None if empty."""
+        try:
+            db = self._ensure_connected()
+            row = db.execute("SELECT MIN(date) AS earliest FROM observations").fetchone()
+            return row["earliest"] if row and row["earliest"] else None
+        except Exception as e:
+            logger.warning("get_earliest_date failed: %s", e)
+            return None
+
+    async def get_earliest_date_async(self) -> str | None:
+        return await asyncio.to_thread(self.get_earliest_date)
+
     def get_dates_with_observations(self, limit: int = 7) -> list[str]:
         """Return distinct dates that have observations, most recent first."""
         try:

@@ -14,6 +14,7 @@ from datetime import datetime
 from .backend import create_backend, create_scene_backend, create_utility_backend
 from .config import AgentConfig
 from .desires import DesireSystem, detect_worry_signal
+from .relationship import RelationshipTracker
 from .exploration import ExplorationTracker
 from .scene import SceneTracker
 from .memory_worker import MemoryJobWorker
@@ -234,7 +235,7 @@ SYSTEM_PROMPT = """
 # Emotion inference prompt — short, cheap to run
 _EMOTION_PROMPT = """\
 Read this text and pick the single best emotion label:
-happy / sad / curious / excited / moved / neutral
+happy / sad / curious / excited / moved / surprised / nostalgic / relieved / tender / playful / proud / neutral
 
 Text:
 {text}
@@ -382,6 +383,10 @@ def _interoception(
             "sad": "A faint heaviness carries over.",
             "surprised": "Still slightly taken aback.",
             "nostalgic": "A gentle wave of remembering.",
+            "relieved": "A quiet relief settles in.",
+            "tender": "Feeling gentle and open.",
+            "playful": "A lightness, like wanting to play.",
+            "proud": "Something worth being proud of.",
         }
         agent_feel = _agent_mood_feels.get(agent_mood, "Something lingers from before.")
         base += f'\n  (mood        :feel "{agent_feel}")'
@@ -441,6 +446,7 @@ class EmbodiedAgent:
         self._scene: SceneTracker | None = None  # initialized after DB ready in _init_tools
 
         self._mcp: MCPClientManager | None = None
+        self._relationship = RelationshipTracker()
 
         # Mood persistence (Phase 2 companion-likeness)
         self._mood: str = "neutral"
@@ -660,7 +666,10 @@ class EmbodiedAgent:
             agent_mood=agent_mood,
             agent_mood_intensity=agent_mood_intensity,
         )
+        relationship_ctx = self._relationship.context_for_prompt()
         variable_parts: list[str] = [intero]
+        if relationship_ctx:
+            variable_parts.append(relationship_ctx)
         # Morning reconstruction takes precedence on first turn; otherwise use feelings
         if morning_ctx:
             variable_parts.append(morning_ctx)
@@ -727,7 +736,20 @@ class EmbodiedAgent:
             _EMOTION_PROMPT.format(text=text[:400]), max_tokens=10
         )
         label = label.lower()
-        valid = {"happy", "sad", "curious", "excited", "moved", "neutral"}
+        valid = {
+            "happy",
+            "sad",
+            "curious",
+            "excited",
+            "moved",
+            "surprised",
+            "nostalgic",
+            "relieved",
+            "tender",
+            "playful",
+            "proud",
+            "neutral",
+        }
         return label if label in valid else "neutral"
 
     # Emotion intensity by label (higher = stronger felt quality)
@@ -739,6 +761,10 @@ class EmbodiedAgent:
         "sad": 0.7,
         "surprised": 0.5,
         "nostalgic": 0.5,
+        "relieved": 0.5,
+        "tender": 0.7,
+        "playful": 0.5,
+        "proud": 0.6,
     }
 
     def _update_mood(self, emotion: str) -> None:
@@ -818,6 +844,41 @@ class EmbodiedAgent:
         best = max(old_enough, key=lambda m: m.get("score", 0.0))
         content = best.get("content", "")
         return content if content else None
+
+    async def _anniversary_context(self) -> str | None:
+        """Return a calendar-aware context string for today, or None if nothing notable.
+
+        Surfaces "on this day" memories from past years and weekly/round milestones.
+        Designed to be injected into morning reconstruction with high priority.
+        """
+        today = datetime.now().date()
+        lines: list[str] = []
+
+        # On-this-day memories (same month-day, past years)
+        try:
+            anniversaries = await self._memory.recall_on_this_day_async(today.month, today.day)
+            for mem in anniversaries[:2]:
+                content = mem.get("content", "")
+                mem_date = mem.get("date", "")
+                if content and mem_date:
+                    lines.append(f"[On this day]: {content} ({mem_date})")
+        except Exception:
+            pass
+
+        # Milestone: days since first memory
+        try:
+            earliest = await self._memory.get_earliest_date_async()
+            if earliest:
+                first_date = datetime.fromisoformat(earliest).date()
+                days = (today - first_date).days
+                if days >= 7:
+                    # Fire on weekly boundaries and round numbers
+                    if days % 7 == 0 or days in (30, 60, 90, 100, 180, 365):
+                        lines.append(f"[Milestone]: {days} days since first memory.")
+        except Exception:
+            pass
+
+        return "\n".join(lines) if lines else None
 
     async def _infer_companion_mood(self, text: str) -> str:
         """Classify companion's emotional state from their message. Returns mood label."""
@@ -1175,6 +1236,7 @@ class EmbodiedAgent:
         # First turn: morning reconstruction — bridge yesterday's self to today's
         morning_ctx = ""
         if first_turn:
+            self._relationship.record_session()
             morning_ctx = await self._morning_reconstruction(desires=desires)
 
         is_desire_turn = inner_voice and not user_input
@@ -1320,6 +1382,10 @@ class EmbodiedAgent:
 
                     # Update self-model when something actually moved us (Conway's working self)
                     await self._update_self_model(final_text, emotion)
+
+                    # Track conversation count for relationship modeling
+                    if not is_desire_turn and user_input:
+                        self._relationship.record_conversation()
 
                     # Worry signal: detect concern-triggering content in user input.
                     # Only during real conversation turns (not desire-driven turns).
