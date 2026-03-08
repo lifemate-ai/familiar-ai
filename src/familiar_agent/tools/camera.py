@@ -103,7 +103,11 @@ class CameraTool:
                 pass  # Non-critical; warnings will still appear but app continues
 
         try:
-            self._cap = cv2.VideoCapture(source)
+            if isinstance(source, str) and source.startswith("rtsp://"):
+                os.environ["OPENCV_FFMPEG_CAPTURE_OPTIONS"] = "rtsp_transport;tcp"
+            self._cap = cv2.VideoCapture(
+                source, cv2.CAP_FFMPEG if isinstance(source, str) else cv2.CAP_ANY
+            )
 
             if not self._cap.isOpened():
                 logger.error("Failed to open camera source: %s", source)
