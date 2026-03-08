@@ -208,7 +208,7 @@ Familiar AI 可以用任何你拥有的硬件运行 — 或者根本不需要。
 
 | 部件 | 功能 | 示例 | 必需？ |
 |-----|------|------|-------|
-| Wi-Fi 云台摄像头 | 眼睛 + 脖子 | Tapo C220（约 $30） | **推荐** |
+| Wi-Fi 云台摄像头 | 眼睛 + 脖子 | Tapo C220（约 $30） , Eufy C220| **推荐** |
 | USB 网络摄像头 | 眼睛（固定） | 任何 UVC 摄像头 | **推荐** |
 | 扫地机器人 | 腿 | 任何兼容涂鸦的型号 | 否 |
 | PC / 树莓派 | 大脑 | 任何能运行 Python 的设备 | **是** |
@@ -236,6 +236,27 @@ API_KEY=sk-...
    CAMERA_USER=your-local-user
    CAMERA_PASS=your-local-pass
    ```
+
+### Wi-Fi Camera (Eufy C220)
+
+[Eufy C220 on Amazon Japan](https://www.amazon.co.jp/dp/B0CQQQ5NZ1/)
+
+> **Tested and confirmed working.** Follow these steps carefully — a few settings differ from Tapo.
+
+1. In the Eufy Security app: go to the camera → **Settings → NAS(RTSP)** and enable it
+2. Set **Authentication** to **Basic** (Digest authentication does NOT work)
+3. Set a streaming username and password
+4. Note the RTSP URL shown in the app (format: `rtsp://username:password@ip/live0`)
+5. Set in `.env` — use the **full RTSP URL** as `CAMERA_HOST`:
+   ```env
+   CAMERA_HOST=rtsp://your-username:your-password@192.168.1.xxx/live0
+   CAMERA_USERNAME=
+   CAMERA_PASSWORD=
+   ```
+   Leave `CAMERA_USERNAME` and `CAMERA_PASSWORD` empty — credentials are already in the URL.
+
+> **Note:** Eufy C220 allows only **one simultaneous RTSP connection**. Stop other apps connected to the camera before starting familiar-ai.
+
 
 ### 语音（ElevenLabs）
 

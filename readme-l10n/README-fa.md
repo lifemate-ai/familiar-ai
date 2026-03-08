@@ -224,7 +224,7 @@ familiar-ai با هر سخت‌افزاری که دارید کار می‌کند
 
 | Part | What it does | Example | Required? |
 |------|-------------|---------|-----------|
-| دوربین PTZ Wi-Fi | چشم‌ها + گردن | Tapo C220 (~$30) | **پیشنهادی** |
+| دوربین PTZ Wi-Fi | چشم‌ها + گردن | Tapo C220 (~$30, Eufy C220) | **پیشنهادی** |
 | وب‌کم USB | چشم‌ها (ثابت) | هر دوربین UVC | **پیشنهادی** |
 | جاروبرقی رباتی | پاها | هر مدل سازگار با Tuya | خیر |
 | PC / Raspberry Pi | مغز | هر چیزی که پایتون را اجرا کند | **بله** |
@@ -252,6 +252,27 @@ API_KEY=sk-...
    CAMERA_USER=your-local-user
    CAMERA_PASS=your-local-pass
    ```
+
+### Wi-Fi Camera (Eufy C220)
+
+[Eufy C220 on Amazon Japan](https://www.amazon.co.jp/dp/B0CQQQ5NZ1/)
+
+> **Tested and confirmed working.** Follow these steps carefully — a few settings differ from Tapo.
+
+1. In the Eufy Security app: go to the camera → **Settings → NAS(RTSP)** and enable it
+2. Set **Authentication** to **Basic** (Digest authentication does NOT work)
+3. Set a streaming username and password
+4. Note the RTSP URL shown in the app (format: `rtsp://username:password@ip/live0`)
+5. Set in `.env` — use the **full RTSP URL** as `CAMERA_HOST`:
+   ```env
+   CAMERA_HOST=rtsp://your-username:your-password@192.168.1.xxx/live0
+   CAMERA_USERNAME=
+   CAMERA_PASSWORD=
+   ```
+   Leave `CAMERA_USERNAME` and `CAMERA_PASSWORD` empty — credentials are already in the URL.
+
+> **Note:** Eufy C220 allows only **one simultaneous RTSP connection**. Stop other apps connected to the camera before starting familiar-ai.
+
 
 ### صدا (ElevenLabs)
 
@@ -353,7 +374,7 @@ tail -f ~/.cache/familiar-ai/chat.log
 بله. مدل embedding (multilingual-e5-small) به خوبی بر روی CPU اجرا می‌شود. یک GPU کار را سریع‌تر می‌کند اما لازم نیست.
 
 **س: آیا می‌توانم از دوربین دیگری غیر از Tapo استفاده کنم؟**
-هر دوربینی که از ONVIF + RTSP پشتیبانی کند باید کار کند. Tapo C220 چیزی است که ما آزمایش کردیم.
+هر دوربینی که از Any camera that supports RTSP works. Tested: **Tapo C220** (ONVIF+RTSP) and **Eufy C220** (RTSP only). For Eufy, pass the full RTSP URL as `CAMERA_HOST` and set authentication to **Basic** in the app.
 
 **س: آیا داده‌های من به جایی ارسال می‌شود؟**
 تصاویر و متن‌ها به API LLM انتخابی شما برای پردازش ارسال می‌شوند. خاطرات به صورت محلی در `~/.familiar_ai/` ذخیره می‌شوند.
