@@ -223,7 +223,7 @@ familiar-ai akoki kozala na hardware nyonso okoki — to okosengaka.
 
 | Part | Oyo ezali | Exemple | Osengaka? |
 |------|-------------|---------|-----------|
-| Wi-Fi PTZ camera | Miso + risanga | Tapo C220 (~$30) | **Obenga** |
+| Wi-Fi PTZ camera | Miso + risanga | Tapo C220 (~$30, Eufy C220) | **Obenga** |
 | USB webcam | Miso (simaki) | Nyonso UVC kamera | **Obenga** |
 | Robot vacuum | Makabo | Nyonso milayi ya Tuya | Te |
 | PC / Raspberry Pi | Motema | Eloko nionso eza na Python | **Ee** |
@@ -251,6 +251,27 @@ Salaka `./run.sh` (macOS/Linux/WSL2) to `run.bat` (Windows) mpe tanga akongisa. 
    CAMERA_USER=naam-na-yo
    CAMERA_PASS=lozoi-na-yo
    ```
+
+### Wi-Fi Camera (Eufy C220)
+
+[Eufy C220 on Amazon Japan](https://www.amazon.co.jp/dp/B0CQQQ5NZ1/)
+
+> **Tested and confirmed working.** Follow these steps carefully — a few settings differ from Tapo.
+
+1. In the Eufy Security app: go to the camera → **Settings → NAS(RTSP)** and enable it
+2. Set **Authentication** to **Basic** (Digest authentication does NOT work)
+3. Set a streaming username and password
+4. Note the RTSP URL shown in the app (format: `rtsp://username:password@ip/live0`)
+5. Set in `.env` — use the **full RTSP URL** as `CAMERA_HOST`:
+   ```env
+   CAMERA_HOST=rtsp://your-username:your-password@192.168.1.xxx/live0
+   CAMERA_USERNAME=
+   CAMERA_PASSWORD=
+   ```
+   Leave `CAMERA_USERNAME` and `CAMERA_PASSWORD` empty — credentials are already in the URL.
+
+> **Note:** Eufy C220 allows only **one simultaneous RTSP connection**. Stop other apps connected to the camera before starting familiar-ai.
+
 
 ### Sawa (ElevenLabs)
 
@@ -352,7 +373,7 @@ Tanga [`persona-template/en.md`](./persona-template/en.md) mpo na exemple, to [`
 Ee. Model embedding (multilingual-e5-small) ebenda ko malela nzela ya CPU. GPU ekosi makasi kasi ezali te.
 
 **Q: Nakoki koya na kamera mosusu?**
-Eloko nionso ekoki konyuka ONVIF + RTSP esalaka. Tapo C220 ezalaka na ewuti na model.
+Eloko nionso ekoki konyuka Any camera that supports RTSP works. Tested: **Tapo C220** (ONVIF+RTSP) and **Eufy C220** (RTSP only). For Eufy, pass the full RTSP URL as `CAMERA_HOST` and set authentication to **Basic** in the app.
 
 **Q: Datos na ngai ekotaka esika moko?**
 Mabakisa na likambo na yebisi ya LLM API oyo osalaka na processing. Mbango ebandi na local na `~/.familiar_ai/`.

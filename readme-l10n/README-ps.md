@@ -224,7 +224,7 @@ familiar-ai د هر هارډویر سره کار کوي — یا هیڅ نه.
 
 | برخه | څه کوي | مثال | اړتیا؟ |
 |------|-------------|---------|-----------|
-| Wi-Fi PTZ کامره | سترګې + غاړه | Tapo C220 (~$30) | **پیشنهاد شوی** |
+| Wi-Fi PTZ کامره | سترګې + غاړه | Tapo C220 (~$30, Eufy C220) | **پیشنهاد شوی** |
 | USB ویب کیمره | سترګې (ثابت) | کوم UVC کامره | **پیشنهاد شوی** |
 | روباټ ویکیوم | پښې | د Tuya-compatible هر ماډل | نه |
 | پی سی / Raspberry Pi | دماغ | هر څه چې پایتون چلوي | **هو** |
@@ -252,6 +252,27 @@ API_KEY=sk-...
    CAMERA_USER=your-local-user
    CAMERA_PASS=your-local-pass
    ```
+
+### Wi-Fi Camera (Eufy C220)
+
+[Eufy C220 on Amazon Japan](https://www.amazon.co.jp/dp/B0CQQQ5NZ1/)
+
+> **Tested and confirmed working.** Follow these steps carefully — a few settings differ from Tapo.
+
+1. In the Eufy Security app: go to the camera → **Settings → NAS(RTSP)** and enable it
+2. Set **Authentication** to **Basic** (Digest authentication does NOT work)
+3. Set a streaming username and password
+4. Note the RTSP URL shown in the app (format: `rtsp://username:password@ip/live0`)
+5. Set in `.env` — use the **full RTSP URL** as `CAMERA_HOST`:
+   ```env
+   CAMERA_HOST=rtsp://your-username:your-password@192.168.1.xxx/live0
+   CAMERA_USERNAME=
+   CAMERA_PASSWORD=
+   ```
+   Leave `CAMERA_USERNAME` and `CAMERA_PASSWORD` empty — credentials are already in the URL.
+
+> **Note:** Eufy C220 allows only **one simultaneous RTSP connection**. Stop other apps connected to the camera before starting familiar-ai.
+
 
 ### غږ (ElevenLabs)
 
@@ -353,7 +374,7 @@ tail -f ~/.cache/familiar-ai/chat.log
 هو. د انحصاري ماډل (multilingual-e5-small) د CPU په ریښتیا سره ښه کار کوي. GPU دا چټک کوي مګر اړین نه دی.
 
 **Q: آیا زه د Tapo پرته یوه بله کامره وکاروم؟**
-هر کامره چې د ONVIF + RTSP ملاتړ وکړي کار کوي. Tapo C220 هغه څه دی چې موږ پرې آزموینه کړې.
+هر کامره چې د Any camera that supports RTSP works. Tested: **Tapo C220** (ONVIF+RTSP) and **Eufy C220** (RTSP only). For Eufy, pass the full RTSP URL as `CAMERA_HOST` and set authentication to **Basic** in the app.
 
 **Q: آیا زما معلوماته چیرته لیږدول کیږي؟**
 انځورونه او متن ستاسو ټاکل شوې LLM API ته د پروسس لپاره لیږل کیږي. یادونې محلي په `~/.familiar_ai/` کې ذخیره کیږي.
