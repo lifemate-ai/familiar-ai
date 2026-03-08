@@ -224,7 +224,7 @@ familiar-ai നിങ്ങൾക്ക് ഉള്ള ഏതെങ്കില
 
 | Part | What it does | Example | Required? |
 |------|-------------|---------|-----------|
-| Wi-Fi PTZ camera | കണ്ണുകൾ + കഴുത്ത് | Tapo C220 (~$30) | **നിർദ്ദേശിതം** |
+| Wi-Fi PTZ camera | കണ്ണുകൾ + കഴുത്ത് | Tapo C220 (~$30, Eufy C220) | **നിർദ്ദേശിതം** |
 | USB webcam | കണ്ണുകൾ (സ്ഥിരം) | ഏത് UVC ക്യാമറ | **നിർദ്ദേശിതം** |
 | Robot vacuum | കാലുകൾ | Tuya-ഉപയോഗിക്കുന്ന ഏതെങ്കിലും മോഡൽ | അല്ല |
 | PC / Raspberry Pi | മസ്തിഷ്ക്കം | Python പ്രവർത്തിപ്പിച്ച പ്രതികാരങ്ങൾ | **അത necessárias** |
@@ -252,6 +252,27 @@ API_KEY=sk-...
    CAMERA_USER=your-local-user
    CAMERA_PASS=your-local-pass
    ```
+
+### Wi-Fi Camera (Eufy C220)
+
+[Eufy C220 on Amazon Japan](https://www.amazon.co.jp/dp/B0CQQQ5NZ1/)
+
+> **Tested and confirmed working.** Follow these steps carefully — a few settings differ from Tapo.
+
+1. In the Eufy Security app: go to the camera → **Settings → NAS(RTSP)** and enable it
+2. Set **Authentication** to **Basic** (Digest authentication does NOT work)
+3. Set a streaming username and password
+4. Note the RTSP URL shown in the app (format: `rtsp://username:password@ip/live0`)
+5. Set in `.env` — use the **full RTSP URL** as `CAMERA_HOST`:
+   ```env
+   CAMERA_HOST=rtsp://your-username:your-password@192.168.1.xxx/live0
+   CAMERA_USERNAME=
+   CAMERA_PASSWORD=
+   ```
+   Leave `CAMERA_USERNAME` and `CAMERA_PASSWORD` empty — credentials are already in the URL.
+
+> **Note:** Eufy C220 allows only **one simultaneous RTSP connection**. Stop other apps connected to the camera before starting familiar-ai.
+
 
 ### ശബ്ദം (ElevenLabs)
 
@@ -353,7 +374,7 @@ tail -f ~/.cache/familiar-ai/chat.log
 അതെ. ഇമ്പെഡിങ് മോഡൽ (multilingual-e5-small) CPU ൽ സുഖത്തോടെ പ്രവർത്തിക്കുന്നു. GPU അതിനെ വേഗത്തിലാക്കുന്നു, പക്ഷേ നിർബന്ധമായ ആവശ്യമല്ല.
 
 **Q: Tapo ഒഴികെയുള്ള ക്യാമറ ഷൂട്ട് ചെയ്യാമോ?**
-ONVIF + RTSP പിന്തുണയുള്ള ഏതെങ്കിലും ക്യാമറ പ്രവർത്തിക്കേണ്ടതാണ്. Tapo C220 ആണ് നമ്മൾ പരീക്ഷിച്ച ചിത്രം.
+Any camera that supports RTSP works. Tested: **Tapo C220** (ONVIF+RTSP) and **Eufy C220** (RTSP only). For Eufy, pass the full RTSP URL as `CAMERA_HOST` and set authentication to **Basic** in the app.
 
 **Q: എന്റെ ഡാറ്റ എവിടെയെങ്കിലും അയച്ചുവിടാമോ?**
 ചിത്രങ്ങളും എഴുത്തുകളും നിങ്ങളുടെ തെരഞ്ഞെടുക്കുന്ന LLM API ലേയ്ക്ക് പ്രോസസ്സിങ്ങു ആക്കി അയയ്ക്കുന്നു. ഓർമ്മകൾ പ്രാദേശികമായി  `~/.familiar_ai/` ൽ സൂക്ഷിക്കുന്നു.

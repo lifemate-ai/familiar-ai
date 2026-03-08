@@ -223,7 +223,7 @@ familiar-ai radi s bilo kojim hardverom koji imate — ili čak i bez njega.
 
 | Dio | Što radi | Primjer | Obavezno? |
 |------|-------------|---------|-----------|
-| Wi-Fi PTZ kamera | Oči + vrata | Tapo C220 (~$30) | **Preporučeno** |
+| Wi-Fi PTZ kamera | Oči + vrata | Tapo C220 (~$30, Eufy C220) | **Preporučeno** |
 | USB web kamera | Oči (fiksne) | Bilo koja UVC kamera | **Preporučeno** |
 | Robotski usisavač | Noge | Bilo koji model kompatibilan s Tuya | Ne |
 | PC / Raspberry Pi | Mozak | Bilo što što pokreće Python | **Da** |
@@ -251,6 +251,27 @@ Pokrenite `./run.sh` (macOS/Linux/WSL2) ili `run.bat` (Windows) i počnite čavr
    CAMERA_USER=your-local-user
    CAMERA_PASS=your-local-pass
    ```
+
+### Wi-Fi Camera (Eufy C220)
+
+[Eufy C220 on Amazon Japan](https://www.amazon.co.jp/dp/B0CQQQ5NZ1/)
+
+> **Tested and confirmed working.** Follow these steps carefully — a few settings differ from Tapo.
+
+1. In the Eufy Security app: go to the camera → **Settings → NAS(RTSP)** and enable it
+2. Set **Authentication** to **Basic** (Digest authentication does NOT work)
+3. Set a streaming username and password
+4. Note the RTSP URL shown in the app (format: `rtsp://username:password@ip/live0`)
+5. Set in `.env` — use the **full RTSP URL** as `CAMERA_HOST`:
+   ```env
+   CAMERA_HOST=rtsp://your-username:your-password@192.168.1.xxx/live0
+   CAMERA_USERNAME=
+   CAMERA_PASSWORD=
+   ```
+   Leave `CAMERA_USERNAME` and `CAMERA_PASSWORD` empty — credentials are already in the URL.
+
+> **Note:** Eufy C220 allows only **one simultaneous RTSP connection**. Stop other apps connected to the camera before starting familiar-ai.
+
 
 ### Glas (ElevenLabs)
 
@@ -352,7 +373,7 @@ Pogledajte [`persona-template/en.md`](./persona-template/en.md) za primjer, ili 
 Da. Model ugradnje (multilingual-e5-small) dobro radi na CPU-u. GPU ga čini bržim, ali nije potreban.
 
 **P: Mogu li koristiti kameru osim Tapo?**
-Bilo koja kamera koja podržava ONVIF + RTSP trebala bi raditi. Tapo C220 je ono s čime smo testirali.
+Bilo koja kamera koja podržava Any camera that supports RTSP works. Tested: **Tapo C220** (ONVIF+RTSP) and **Eufy C220** (RTSP only). For Eufy, pass the full RTSP URL as `CAMERA_HOST` and set authentication to **Basic** in the app.
 
 **P: Da li se moji podaci šalju negdje?**
 Slike i tekst šalju se na vašu odabranu LLM API za obradu. Uspomene se lokalno pohranjuju u `~/.familiar_ai/`.

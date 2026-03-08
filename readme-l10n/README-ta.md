@@ -224,7 +224,7 @@ familiar-ai நீங்கள் வைத்திருக்கும் எ
 
 | பகுதி | இது என்ன செய்கிறது | எடுத்துக்காட்டு | தேவை? |
 |------|-------------|---------|-----------|
-| Wi-Fi PTZ கேமரா | கண்கள் + கழுவுகள் | Tapo C220 (~$30) | **சராசரி** |
+| Wi-Fi PTZ கேமரா | கண்கள் + கழுவுகள் | Tapo C220 (~$30, Eufy C220) | **சராசரி** |
 | USB கேமரா | கண்கள் (நிலை) | எந்த UVC கேமரா | **சராசரி** |
 | ரோபோட் வாகனம் | கால்கள் | எதுவும் Tuya-உகந்த மாதிரி | இல்லை |
 | PC / Raspberry Pi | மூளை | எந்தவொரு Python ஐ இயக்கும் | **ஆம்** |
@@ -252,6 +252,27 @@ API_KEY=sk-...
    CAMERA_USER=your-local-user
    CAMERA_PASS=your-local-pass
    ```
+
+### Wi-Fi Camera (Eufy C220)
+
+[Eufy C220 on Amazon Japan](https://www.amazon.co.jp/dp/B0CQQQ5NZ1/)
+
+> **Tested and confirmed working.** Follow these steps carefully — a few settings differ from Tapo.
+
+1. In the Eufy Security app: go to the camera → **Settings → NAS(RTSP)** and enable it
+2. Set **Authentication** to **Basic** (Digest authentication does NOT work)
+3. Set a streaming username and password
+4. Note the RTSP URL shown in the app (format: `rtsp://username:password@ip/live0`)
+5. Set in `.env` — use the **full RTSP URL** as `CAMERA_HOST`:
+   ```env
+   CAMERA_HOST=rtsp://your-username:your-password@192.168.1.xxx/live0
+   CAMERA_USERNAME=
+   CAMERA_PASSWORD=
+   ```
+   Leave `CAMERA_USERNAME` and `CAMERA_PASSWORD` empty — credentials are already in the URL.
+
+> **Note:** Eufy C220 allows only **one simultaneous RTSP connection**. Stop other apps connected to the camera before starting familiar-ai.
+
 
 ### குரல் (ElevenLabs)
 
@@ -353,7 +374,7 @@ tail -f ~/.cache/familiar-ai/chat.log
 ஆம். embedding முறை (multilingual-e5-small) CPU யில் அச்செயல்கிறது. GPU விரைவாக செய்கிறது ஆனால் தேவை இல்லை.
 
 **Q: Tapoக்கும் மாறுபட்ட கேமராவைக் காணலாம்?**
-ONVIF + RTSP ஐ ஆதரித்தால் எந்த கேமரா நிலவவோ, வேலை செய்யவேண்டும். Tapo C220 எங்களுக்கு சோதனைக்குப் பயன்படுத்தப்பட்டது.
+Any camera that supports RTSP works. Tested: **Tapo C220** (ONVIF+RTSP) and **Eufy C220** (RTSP only). For Eufy, pass the full RTSP URL as `CAMERA_HOST` and set authentication to **Basic** in the app.
 
 **Q: எனது தரவுகள் எங்கு செல்கின்றன?**
 படங்கள் மற்றும் உரை உங்கள் தேர்ந்த LLM API க்கு செயலாக்கம் செய்ய அனுப்பப்படுகின்றன. நினைவுகள் உள்ளடக்கத்தில் `~/.familiar_ai/` இல் இணைக்கப்படுகின்றன.
