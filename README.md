@@ -1,6 +1,6 @@
 # familiar-ai 
 
-<img width="1024" height="1024" alt="familiar-ai-icon" src="https://github.com/user-attachments/assets/944b2023-9ca0-4b30-8240-de766e4439ed" />
+<img width="25%" height="25%" alt="familiar-ai-icon" src="https://github.com/user-attachments/assets/944b2023-9ca0-4b30-8240-de766e4439ed" />
 
 **An AI that lives alongside you** — with eyes, voice, legs, and memory.
 
