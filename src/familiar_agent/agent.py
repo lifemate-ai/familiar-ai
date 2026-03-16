@@ -18,6 +18,7 @@ from .relationship import RelationshipTracker
 from .self_narrative import SelfNarrative
 from .exploration import ExplorationTracker
 from .scene import SceneTracker
+from .workspace import GlobalWorkspace
 from .memory_worker import MemoryJobWorker
 from .tape import check_plan_blocked, generate_plan, generate_replan
 from .tools.camera import CameraTool
@@ -449,6 +450,7 @@ class EmbodiedAgent:
         self._mcp: MCPClientManager | None = None
         self._relationship = RelationshipTracker()
         self._self_narrative = SelfNarrative()
+        self._workspace = GlobalWorkspace()
 
         # Mood persistence (Phase 2 companion-likeness)
         self._mood: str = "neutral"
@@ -645,6 +647,7 @@ class EmbodiedAgent:
         inner_voice: str = "",
         plan_ctx: str = "",
         companion_mood: str = "engaged",
+        workspace_ctx: str = "",
     ) -> tuple[str, str]:
         """Return (stable, variable) system prompt parts for prompt caching.
 
@@ -690,13 +693,17 @@ class EmbodiedAgent:
                 + plan_ctx
             )
 
-        exploration_ctx = self._exploration_context()
-        if exploration_ctx:
-            variable_parts.append(exploration_ctx)
-
-        scene_ctx = self._scene.context_for_prompt() if self._scene else ""
-        if scene_ctx:
-            variable_parts.append(scene_ctx)
+        # Global Workspace: replaces individual exploration + scene context blocks.
+        # If nothing ignited this turn, fall back to direct module context.
+        if workspace_ctx:
+            variable_parts.append(workspace_ctx)
+        else:
+            exploration_ctx = self._exploration_context()
+            if exploration_ctx:
+                variable_parts.append(exploration_ctx)
+            scene_ctx = self._scene.context_for_prompt() if self._scene else ""
+            if scene_ctx:
+                variable_parts.append(scene_ctx)
 
         variable = "\n\n---\n\n".join(variable_parts)
         return stable, variable
@@ -704,6 +711,54 @@ class EmbodiedAgent:
     def _exploration_context(self) -> str:
         """Return exploration history for ICL-based direction steering."""
         return self._exploration.context_for_prompt(n=5)
+
+    async def _gather_workspace_context(self, desires: DesireSystem | None = None) -> str:
+        """Run one Global Workspace competition cycle and return the broadcast context.
+
+        Gathers coalitions from all available processors in parallel, runs the
+        ignition competition, and returns the winning coalition's context_block
+        plus a compact peripheral-awareness summary of non-winners.
+
+        Returns empty string if nothing reaches ignition threshold.
+        """
+        # Sync coalitions (wrap in to_thread to avoid blocking)
+        sync_tasks = [
+            asyncio.to_thread(self._exploration.as_coalition),
+            asyncio.to_thread(self._self_narrative.as_coalition),
+            asyncio.to_thread(self._tom_tool.as_coalition),
+        ]
+        if self._scene is not None:
+            sync_tasks.append(asyncio.to_thread(self._scene.as_coalition))
+        if desires is not None:
+            sync_tasks.append(asyncio.to_thread(desires.as_coalition))
+
+        # Async coalitions
+        async_tasks = [
+            self._memory.as_coalition_async(),
+        ]
+
+        results = await asyncio.gather(*sync_tasks, *async_tasks, return_exceptions=True)
+
+        from .workspace import Coalition as _Coalition
+
+        coalitions = []
+        for r in results:
+            if isinstance(r, Exception):
+                logger.debug("Coalition gather error: %s", r)
+            elif isinstance(r, _Coalition):
+                coalitions.append(r)
+
+        if not coalitions:
+            return ""
+
+        winner = self._workspace.compete(coalitions)
+        if winner is None:
+            logger.debug("GlobalWorkspace: nothing reached ignition threshold")
+            return ""
+
+        others = [c for c in coalitions if c is not winner]
+        await self._workspace.notify_listeners(winner)
+        return self._workspace.broadcast(winner, others)
 
     @staticmethod
     def _select_context_blocks(
@@ -1343,6 +1398,12 @@ class EmbodiedAgent:
             plan_ctx = await generate_plan(self.backend, user_input, tool_names)
             if plan_ctx:
                 logger.debug("TAPE plan: %s", plan_ctx[:80])
+
+        # Global Workspace: gather coalitions once per turn, before the ReAct loop.
+        workspace_ctx = await self._gather_workspace_context(desires=desires)
+        if workspace_ctx:
+            logger.debug("GlobalWorkspace broadcast: %s", workspace_ctx[:80])
+
         if on_phase and startup_phase:
             on_phase("thinking")
 
@@ -1361,6 +1422,7 @@ class EmbodiedAgent:
                     inner_voice=inner_voice,
                     plan_ctx=plan_ctx,
                     companion_mood=companion_mood,
+                    workspace_ctx=workspace_ctx,
                 ),
                 messages=self.messages,
                 tools=self._all_tool_defs,
@@ -1572,7 +1634,9 @@ class EmbodiedAgent:
             )
         )
         result, _ = await self.backend.stream_turn(
-            system=self._system_prompt(morning_ctx=morning_ctx, plan_ctx=plan_ctx),
+            system=self._system_prompt(
+                morning_ctx=morning_ctx, plan_ctx=plan_ctx, workspace_ctx=workspace_ctx
+            ),
             messages=self.messages,
             tools=[],
             max_tokens=self.config.max_tokens,

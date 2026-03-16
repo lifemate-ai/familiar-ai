@@ -11,7 +11,10 @@ import json
 import logging
 from datetime import date
 from pathlib import Path
-from typing import NamedTuple
+from typing import TYPE_CHECKING, NamedTuple
+
+if TYPE_CHECKING:
+    from .workspace import Coalition
 
 logger = logging.getLogger(__name__)
 
@@ -81,3 +84,24 @@ class SelfNarrative:
             return None
         lines = [f"[{e.date}] {e.text}" for e in entries]
         return "過去のウチからの続き:\n" + "\n".join(lines)
+
+    def as_coalition(self) -> Coalition | None:
+        """Return a workspace Coalition from recent self-narrative entries."""
+        from .workspace import Coalition
+
+        context = self.context_for_prompt()
+        if not context:
+            return None
+
+        entries = self.read_recent(n=3)
+        latest = entries[-1] if entries else None
+        summary = latest.text[:80] if latest else "self-narrative"
+
+        return Coalition(
+            source="narrative",
+            summary=summary,
+            activation=0.4,
+            urgency=0.1,
+            novelty=0.1,
+            context_block=context,
+        )

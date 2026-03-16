@@ -8,8 +8,12 @@ import os
 import time
 from datetime import datetime
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 from ._i18n import _t
+
+if TYPE_CHECKING:
+    from .workspace import Coalition
 
 logger = logging.getLogger(__name__)
 
@@ -271,3 +275,29 @@ class DesireSystem:
             ),
         }
         return prompts.get(name)
+
+    def as_coalition(self) -> Coalition | None:
+        """Return a workspace Coalition from the dominant desire, if any."""
+        from .workspace import Coalition
+
+        result = self.get_dominant()
+        if result is None:
+            return None
+        name, level = result
+        prompt = self.dominant_as_prompt() or name
+        urgency_map = {
+            "worry_companion": 0.9,
+            "greet_companion": 0.7,
+            "look_around": 0.4,
+            "explore": 0.4,
+            "share_memory": 0.3,
+            "rest": 0.1,
+        }
+        return Coalition(
+            source="desire",
+            summary=f"{name} ({level:.2f})",
+            activation=level,
+            urgency=urgency_map.get(name, 0.3),
+            novelty=0.0,
+            context_block=f"[inner-voice] {prompt}",
+        )

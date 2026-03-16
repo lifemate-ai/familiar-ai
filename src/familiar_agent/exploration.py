@@ -17,6 +17,10 @@ import json
 import sqlite3
 from dataclasses import asdict, dataclass
 from datetime import datetime
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from .workspace import Coalition
 
 
 # Directions that the camera can face
@@ -172,3 +176,27 @@ class ExplorationTracker:
             lines.append(hint)
 
         return "\n".join(lines)
+
+    def as_coalition(self) -> Coalition | None:
+        """Return a workspace Coalition from recent exploration state."""
+        from .workspace import Coalition
+
+        if not self._records:
+            return None
+
+        context = self.context_for_prompt()
+        recent_novelties = [r.novelty for r in self._records[-5:] if r.novelty is not None]
+        avg_novelty = sum(recent_novelties) / len(recent_novelties) if recent_novelties else 0.0
+        hint = self.unvisited_hint()
+        urgency = 0.5 if hint else 0.1
+        last = self._records[-1]
+        summary = f"last look: {last.direction_label} (novelty={'?' if last.novelty is None else f'{last.novelty:.2f}'})"
+
+        return Coalition(
+            source="exploration",
+            summary=summary,
+            activation=min(1.0, avg_novelty + 0.2),
+            urgency=urgency,
+            novelty=avg_novelty,
+            context_block=context,
+        )

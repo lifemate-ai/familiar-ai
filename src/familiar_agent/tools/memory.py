@@ -17,7 +17,10 @@ import threading
 import uuid
 from datetime import datetime, timedelta
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
+
+if TYPE_CHECKING:
+    from ..workspace import Coalition
 
 import numpy as np
 from ..sqlite_migrations import apply_migrations, default_migration_dir
@@ -1541,6 +1544,34 @@ class ObservationMemory:
         self, memory_id: str, direction: str = "both"
     ) -> list[dict]:
         return await asyncio.to_thread(self.get_linked_memories, memory_id, direction)
+
+    async def as_coalition_async(self) -> Coalition | None:
+        """Return a workspace Coalition from recent recalled memories."""
+        from ..workspace import Coalition
+
+        memories = await self.recall_async("最近の出来事 印象的な記憶", n=3)
+        if not memories:
+            return None
+
+        # Use highest-confidence recalled memory
+        top = max(memories, key=lambda m: m.get("confidence", 0.0))
+        summary = top.get("summary", "")[:80]
+        confidence = top.get("confidence", 0.3)
+
+        lines = ["[Memory recall]"]
+        for m in memories:
+            emotion = m.get("emotion", "neutral")
+            lines.append(f"  [{emotion}] {m.get('summary', '')[:60]}")
+        context_block = "\n".join(lines)
+
+        return Coalition(
+            source="memory",
+            summary=summary,
+            activation=confidence,
+            urgency=0.1,
+            novelty=0.0,
+            context_block=context_block,
+        )
 
 
 class MemoryTool:
