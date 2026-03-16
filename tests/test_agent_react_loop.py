@@ -126,12 +126,14 @@ def _make_agent(*, with_tts: bool = False, with_camera: bool = False, with_mcp: 
     from familiar_agent.relationship import RelationshipTracker
     from familiar_agent.workspace import GlobalWorkspace
     from familiar_agent.prediction import PredictionEngine
+    from familiar_agent.attention_schema import AttentionSchema
     import time as _time
 
     agent._self_narrative = SelfNarrative()
     agent._relationship = RelationshipTracker()
     agent._workspace = GlobalWorkspace()
     agent._prediction = PredictionEngine()
+    agent._attention_schema = AttentionSchema()
     agent._memory_worker = MagicMock()
     agent._memory_worker.is_running = True
     agent._mood = "neutral"

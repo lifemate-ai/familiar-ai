@@ -18,6 +18,7 @@ from .relationship import RelationshipTracker
 from .self_narrative import SelfNarrative
 from .exploration import ExplorationTracker
 from .scene import SceneTracker
+from .attention_schema import AttentionSchema
 from .prediction import PredictionEngine
 from .workspace import GlobalWorkspace
 from .memory_worker import MemoryJobWorker
@@ -453,6 +454,7 @@ class EmbodiedAgent:
         self._self_narrative = SelfNarrative()
         self._workspace = GlobalWorkspace()
         self._prediction = PredictionEngine()
+        self._attention_schema = AttentionSchema()
 
         # Mood persistence (Phase 2 companion-likeness)
         self._mood: str = "neutral"
@@ -729,6 +731,7 @@ class EmbodiedAgent:
             asyncio.to_thread(self._self_narrative.as_coalition),
             asyncio.to_thread(self._tom_tool.as_coalition),
             asyncio.to_thread(self._prediction.as_coalition),
+            asyncio.to_thread(self._attention_schema.as_coalition),
         ]
         if self._scene is not None:
             sync_tasks.append(asyncio.to_thread(self._scene.as_coalition))
@@ -760,6 +763,8 @@ class EmbodiedAgent:
             return ""
 
         others = [c for c in coalitions if c is not winner]
+        # Update attention schema with this turn's winner (AST)
+        self._attention_schema.update_focus(winner)
         await self._workspace.notify_listeners(winner)
         return self._workspace.broadcast(winner, others)
 
