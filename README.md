@@ -4,7 +4,8 @@
 
 **An AI that lives alongside you** — with eyes, voice, legs, and memory.
 
-[![Lint](https://github.com/kmizu/familiar-ai/actions/workflows/lint.yml/badge.svg)](https://github.com/kmizu/familiar-ai/actions/workflows/lint.yml)
+[![Lint](https://github.com/lifemate-ai/familiar-ai/actions/workflows/lint.yml/badge.svg)](https://github.com/lifemate-ai/familiar-ai/actions/workflows/lint.yml)
+[![Test](https://github.com/lifemate-ai/familiar-ai/actions/workflows/test.yml/badge.svg)](https://github.com/lifemate-ai/familiar-ai/actions/workflows/test.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](./LICENSE)
 [![Python 3.10+](https://img.shields.io/badge/python-3.10+-blue.svg)](https://www.python.org/)
 [![GitHub Sponsors](https://img.shields.io/github/sponsors/kmizu?style=flat&logo=github&color=ea4aaa)](https://github.com/sponsors/kmizu)
@@ -30,6 +31,11 @@ It perceives the real world through cameras, moves around on a robot body, speak
 - 🧠 **Remember** — actively stores and recalls memories with semantic search (SQLite + embeddings)
 - 🫀 **Theory of Mind** — takes the other person's perspective before responding
 - 💭 **Desire** — has its own internal drives that trigger autonomous behavior
+- 🌐 **Global Workspace** — perception, memory, desires, and predictions compete for attention; only the most salient wins
+- 🔮 **Prediction** — tracks what it expects to see; surprise lowers the attention threshold
+- 🔍 **Attention Schema** — maintains a self-model of what it's focused on and why
+- 💤 **Default Mode** — mind-wanders when idle, spontaneously surfacing memories and associations
+- 🔬 **Meta-cognition** — observes its own reasoning steps each turn
 
 ## How it works
 
@@ -41,6 +47,33 @@ user input
 ```
 
 When idle, it acts on its own desires: curiosity, wanting to look outside, missing the person it lives with.
+
+### Global Workspace Architecture
+
+Under the hood, familiar-ai implements a [Global Workspace Theory](https://arxiv.org/abs/2410.11407)-inspired architecture. Rather than dumping everything into the LLM prompt, specialized processors compete for a central workspace each turn — and only the winner gets full representation:
+
+```
+Specialized processors (run in parallel each turn)
+  ├─ Desires       — what it wants right now
+  ├─ Scene         — what it perceives (prediction error: surprise → heightened awareness)
+  ├─ Memory        — what it recalls
+  ├─ Theory of Mind — what the other person might be thinking
+  ├─ Self-narrative — continuity of identity
+  ├─ Exploration   — curiosity about unvisited directions
+  ├─ Attention Schema — self-model of its own focus
+  ├─ Prediction    — expected vs actual world state
+  └─ Default Mode  — mind-wandering when nothing else ignites
+          │
+          ▼  compete (ignition threshold)
+   ┌─────────────┐
+   │  Workspace  │  winner → LLM prompt (bottleneck)
+   │  broadcast  │  others → peripheral summary (1 line each)
+   └─────────────┘
+          │
+          └──▶ Meta-Monitor records each step ("what was I attending to?")
+```
+
+This creates **selective attention** — not everything reaches the LLM on every turn, only what matters most.
 
 ## Getting started
 
@@ -384,7 +417,7 @@ Make sure `ELEVENLABS_API_KEY` is set. Without it, voice is disabled and the age
 
 ## Technical background
 
-Curious about how it works? See [docs/technical.md](./docs/technical.md) for the research and design decisions behind familiar-ai — ReAct, SayCan, Reflexion, Voyager, the desire system, and more.
+Curious about how it works? See [docs/technical.md](./docs/technical.md) for the research and design decisions behind familiar-ai — ReAct, SayCan, Reflexion, Voyager, the desire system, Global Workspace Theory, and more.
 
 ---
 

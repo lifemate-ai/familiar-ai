@@ -2,7 +2,8 @@
 
 **あなたのそばで生きるAI** — 目・声・足・記憶を持つコンパニオン。
 
-[![Lint](https://github.com/kmizu/familiar-ai/actions/workflows/lint.yml/badge.svg)](https://github.com/kmizu/familiar-ai/actions/workflows/lint.yml)
+[![Lint](https://github.com/lifemate-ai/familiar-ai/actions/workflows/lint.yml/badge.svg)](https://github.com/lifemate-ai/familiar-ai/actions/workflows/lint.yml)
+[![Test](https://github.com/lifemate-ai/familiar-ai/actions/workflows/test.yml/badge.svg)](https://github.com/lifemate-ai/familiar-ai/actions/workflows/test.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](./LICENSE)
 [![Python 3.10+](https://img.shields.io/badge/python-3.10+-blue.svg)](https://www.python.org/)
 [![GitHub Sponsors](https://img.shields.io/github/sponsors/kmizu?style=flat&logo=github&color=ea4aaa)](https://github.com/sponsors/kmizu)
@@ -28,6 +29,11 @@ familiar-ai は、あなたの家に住むAIコンパニオンです。
 - 🧠 **記憶する** — セマンティック検索（SQLite＋埋め込み）で記憶を積極的に保存・想起
 - 🫀 **心の理論** — 相手の視点に立ってから返答
 - 💭 **欲求** — 内的な動機を持ち、自律的に行動
+- 🌐 **グローバルワークスペース** — 知覚・記憶・欲求・予測が注意を競い合い、最も顕著なものだけが意識に上る
+- 🔮 **予測** — 見えるものを予測し、驚き（予測誤差）が注意の閾値を下げる
+- 🔍 **注意スキーマ** — 「今、何に注目しているか・なぜか」という自己モデルを保持
+- 💤 **デフォルトモードネットワーク** — アイドル時に自発的に記憶を想起・連想する
+- 🔬 **メタ認知** — 毎ターン、自分の思考ステップを観察・記録する
 
 ## 仕組み
 
@@ -39,6 +45,33 @@ familiar-ai は、あなたが選んだLLMで動く [ReAct](https://arxiv.org/ab
 ```
 
 アイドル時は、好奇心・外を見たい欲求・一緒にいる人への思いといった欲求に従って自律的に動きます。
+
+### グローバルワークスペースアーキテクチャ
+
+内部では、[グローバルワークスペース理論](https://arxiv.org/abs/2410.11407)に着想を得たアーキテクチャが動いています。すべての情報をLLMプロンプトに詰め込むのではなく、専門化されたプロセッサが毎ターン「中央ワークスペース」を競い合い、勝者だけが完全な表現を得ます：
+
+```
+専門プロセッサ（毎ターン並列実行）
+  ├─ 欲求         — 今、何を望んでいるか
+  ├─ 場面         — 何を知覚しているか（予測誤差：驚きが注意の閾値を下げる）
+  ├─ 記憶         — 何を想起しているか
+  ├─ 心の理論     — 相手が何を考えているか
+  ├─ 自己物語     — アイデンティティの連続性
+  ├─ 探索         — 未訪問方向への好奇心
+  ├─ 注意スキーマ — 自分の注意の自己モデル
+  ├─ 予測         — 期待vs実際の世界状態
+  └─ デフォルトモード — 何も点火しないときの心の彷徨
+          │
+          ▼  競争（点火閾値）
+   ┌─────────────┐
+   │ ワークスペース │  勝者 → LLMプロンプト（ボトルネック）
+   │  ブロードキャスト │  その他 → 周辺サマリー（各1行）
+   └─────────────┘
+          │
+          └──▶ メタモニターが各ステップを記録（「何に注意していたか？」）
+```
+
+これにより**選択的注意**が実現されます — 毎ターン、重要なものだけがLLMに届きます。
 
 ## セットアップ
 
@@ -275,7 +308,7 @@ ELEVENLABS_API_KEY=sk_...   # TTSと同じキー
 
 ## 技術的な背景
 
-仕組みに興味がある方は [docs/technical.md](./docs/technical.md) をご覧ください。familiar-aiの設計思想 — ReAct・SayCan・Reflexion・Voyager・欲求システムなどについて解説しています。
+仕組みに興味がある方は [docs/technical.md](./docs/technical.md) をご覧ください。familiar-aiの設計思想 — ReAct・SayCan・Reflexion・Voyager・欲求システム・グローバルワークスペース理論などについて解説しています。
 
 ---
 
