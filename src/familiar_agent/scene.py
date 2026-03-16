@@ -20,6 +20,7 @@ from datetime import datetime
 from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
+    from .prediction import PredictionEngine
     from .workspace import Coalition
 
 logger = logging.getLogger(__name__)
@@ -120,16 +121,29 @@ class SceneTracker:
         except Exception:
             self._current_entities = {}
 
-    async def update(self, description: str, backend: Any) -> list[dict]:
+    async def update(
+        self,
+        description: str,
+        backend: Any,
+        prediction_engine: PredictionEngine | None = None,
+    ) -> list[dict]:
         """Extract entities from description, detect changes, persist, return events.
 
         Returns a list of event dicts: {event_type, entity_label, entity_id}.
+
+        If prediction_engine is provided, compute prediction error against
+        the new observation and update the model.
         """
         new_entities = await extract_entities(description, backend)
         events = self._diff_entities(new_entities)
         self._persist_entities(new_entities)
         self._persist_events(events)
         self._current_entities = {e["label"]: e for e in new_entities}
+
+        if prediction_engine is not None:
+            labels = [e["label"] for e in new_entities]
+            prediction_engine.compute_error(labels)
+            prediction_engine.update(labels)
         return events
 
     def _diff_entities(self, new_entities: list[dict]) -> list[dict]:
