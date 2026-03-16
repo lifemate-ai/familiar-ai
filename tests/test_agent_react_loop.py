@@ -134,6 +134,11 @@ def _make_agent(*, with_tts: bool = False, with_camera: bool = False, with_mcp: 
     agent._workspace = GlobalWorkspace()
     agent._prediction = PredictionEngine()
     agent._attention_schema = AttentionSchema()
+    agent._dmn = MagicMock()
+    agent._dmn.wander = AsyncMock(return_value=None)
+    agent._meta_monitor = MagicMock()
+    agent._meta_monitor.as_coalition = MagicMock(return_value=None)
+    agent._meta_monitor.record_step = MagicMock()
     agent._memory_worker = MagicMock()
     agent._memory_worker.is_running = True
     agent._mood = "neutral"

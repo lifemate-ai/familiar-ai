@@ -19,6 +19,8 @@ from .self_narrative import SelfNarrative
 from .exploration import ExplorationTracker
 from .scene import SceneTracker
 from .attention_schema import AttentionSchema
+from .default_mode import DefaultModeProcessor
+from .meta_monitor import MetaMonitor
 from .prediction import PredictionEngine
 from .workspace import GlobalWorkspace
 from .memory_worker import MemoryJobWorker
@@ -455,6 +457,8 @@ class EmbodiedAgent:
         self._workspace = GlobalWorkspace()
         self._prediction = PredictionEngine()
         self._attention_schema = AttentionSchema()
+        self._dmn = DefaultModeProcessor(self._memory)
+        self._meta_monitor = MetaMonitor()
 
         # Mood persistence (Phase 2 companion-likeness)
         self._mood: str = "neutral"
@@ -732,6 +736,7 @@ class EmbodiedAgent:
             asyncio.to_thread(self._tom_tool.as_coalition),
             asyncio.to_thread(self._prediction.as_coalition),
             asyncio.to_thread(self._attention_schema.as_coalition),
+            asyncio.to_thread(self._meta_monitor.as_coalition),
         ]
         if self._scene is not None:
             sync_tasks.append(asyncio.to_thread(self._scene.as_coalition))
@@ -759,8 +764,13 @@ class EmbodiedAgent:
 
         winner = self._workspace.compete(coalitions)
         if winner is None:
-            logger.debug("GlobalWorkspace: nothing reached ignition threshold")
-            return ""
+            logger.debug("GlobalWorkspace: nothing reached ignition threshold — activating DMN")
+            # Default Mode Network: mind-wander when workspace is idle
+            dmn_coalition = await self._dmn.wander()
+            if dmn_coalition is None:
+                return ""
+            winner = dmn_coalition
+            coalitions.append(dmn_coalition)
 
         others = [c for c in coalitions if c is not winner]
         # Update attention schema with this turn's winner (AST)
@@ -1440,6 +1450,15 @@ class EmbodiedAgent:
             self._last_context_tokens = result.input_tokens
             self._session_input_tokens += result.input_tokens
             self._session_output_tokens += result.output_tokens
+
+            # HOT layer: record this step metacognitively
+            _focus = self._attention_schema.current_focus()
+            if _focus is not None:
+                _action = result.stop_reason
+                if result.stop_reason == "tool_use" and result.tool_calls:
+                    _action = result.tool_calls[0].name
+                _conf = min(1.0, result.output_tokens / max(1, self.config.max_tokens))
+                self._meta_monitor.record_step(_focus, action=_action, confidence=_conf)
 
             if result.stop_reason == "end_turn":
                 self.messages.append(self.backend.make_assistant_message(result, raw_content))
