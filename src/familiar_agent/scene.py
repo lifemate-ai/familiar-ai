@@ -17,7 +17,10 @@ import logging
 import sqlite3
 import uuid
 from datetime import datetime
-from typing import Any
+from typing import TYPE_CHECKING, Any
+
+if TYPE_CHECKING:
+    from .workspace import Coalition
 
 logger = logging.getLogger(__name__)
 
@@ -230,3 +233,40 @@ class SceneTracker:
             (n,),
         ).fetchall()
         return [{"event_type": r[0], "entity_label": r[1], "timestamp": r[2]} for r in rows]
+
+    def as_coalition(self) -> Coalition | None:
+        """Return a workspace Coalition from the current scene state."""
+        from .workspace import Coalition
+
+        if not self._current_entities:
+            return None
+
+        # Urgency rises when people appeared recently
+        events = self.recent_events(n=3)
+        appeared_people = [
+            e
+            for e in events
+            if e["event_type"] == "appeared"
+            and any(
+                ent.get("category") == "person" and ent["label"] == e["entity_label"]
+                for ent in self._current_entities.values()
+            )
+        ]
+        urgency = 0.8 if appeared_people else 0.2
+        novelty = min(1.0, len(events) * 0.2)
+
+        entity_count = len(self._current_entities)
+        summary = f"{entity_count} entities in scene"
+        context = self.context_for_prompt()
+        avg_conf = (
+            sum(e.get("confidence", 0.8) for e in self._current_entities.values()) / entity_count
+        )
+
+        return Coalition(
+            source="scene",
+            summary=summary,
+            activation=avg_conf,
+            urgency=urgency,
+            novelty=novelty,
+            context_block=context,
+        )

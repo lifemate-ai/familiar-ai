@@ -8,6 +8,7 @@ from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
     from .memory import ObservationMemory
+    from ..workspace import Coalition
 
 logger = logging.getLogger(__name__)
 
@@ -24,6 +25,9 @@ class ToMTool:
         self._memory = memory
         self._default_person = default_person
         self._backend = backend
+        self._last_situation: str | None = None
+        self._last_person: str | None = None
+        self._last_policy: str | None = None
 
     def get_tool_definitions(self) -> list[dict]:
         return [
@@ -69,10 +73,23 @@ class ToMTool:
 
         # No backend → return static template (backward compatible)
         if self._backend is None:
-            return self._template_output(situation, person, memory_context), None
+            result = self._template_output(situation, person, memory_context)
+        else:
+            # LLM-based inference
+            result = await self._llm_inference(situation, person, memory_context)
 
-        # LLM-based inference
-        return await self._llm_inference(situation, person, memory_context), None
+        # Track last inference for workspace coalition
+        self._last_situation = situation
+        self._last_person = person
+        # Extract policy line if present
+        for line in result.splitlines():
+            if "policy" in line.lower() or "応答方針" in line:
+                self._last_policy = line.strip()
+                break
+        else:
+            self._last_policy = situation[:80]
+
+        return result, None
 
     async def _llm_inference(self, situation: str, person: str, memory_context: str) -> str:
         assert self._backend is not None  # caller ensures this
@@ -161,4 +178,26 @@ class ToMTool:
             f"## 応答方針\n"
             f"→ 上の結果を踏まえて、どう返すべきか決めよ\n"
             f"→ 相手のトーンに合わせた返し方を選べ\n"
+        )
+
+    def as_coalition(self) -> Coalition | None:
+        """Return a workspace Coalition from the most recent ToM inference."""
+        from ..workspace import Coalition
+
+        if self._last_situation is None:
+            return None
+
+        person = self._last_person or self._default_person
+        summary = f"ToM: {person} — {(self._last_situation or '')[:60]}"
+        context = (
+            f"[ToM: {person}]\nSituation: {self._last_situation}\nPolicy: {self._last_policy or ''}"
+        )
+
+        return Coalition(
+            source="tom",
+            summary=summary,
+            activation=0.5,
+            urgency=0.6,
+            novelty=0.2,
+            context_block=context,
         )

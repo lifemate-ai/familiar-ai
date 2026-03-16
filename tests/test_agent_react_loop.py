@@ -76,6 +76,7 @@ def _make_agent(*, with_tts: bool = False, with_camera: bool = False, with_mcp: 
     mem.save_async = AsyncMock()
     mem.get_dates_with_observations = MagicMock(return_value=[])
     mem.get_dates_with_summaries = MagicMock(return_value=[])
+    mem.as_coalition_async = AsyncMock(return_value=None)
     agent._memory = mem
 
     mem_tool = MagicMock()
@@ -123,10 +124,12 @@ def _make_agent(*, with_tts: bool = False, with_camera: bool = False, with_mcp: 
 
     from familiar_agent.self_narrative import SelfNarrative
     from familiar_agent.relationship import RelationshipTracker
+    from familiar_agent.workspace import GlobalWorkspace
     import time as _time
 
     agent._self_narrative = SelfNarrative()
     agent._relationship = RelationshipTracker()
+    agent._workspace = GlobalWorkspace()
     agent._memory_worker = MagicMock()
     agent._memory_worker.is_running = True
     agent._mood = "neutral"
