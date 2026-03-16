@@ -125,12 +125,14 @@ class TestInferCompanionMood:
         from familiar_agent.self_narrative import SelfNarrative
         from familiar_agent.relationship import RelationshipTracker
         from familiar_agent.workspace import GlobalWorkspace
+        from familiar_agent.prediction import PredictionEngine
 
         agent._exploration = ExplorationTracker()
         agent._scene = None
         agent._self_narrative = SelfNarrative()
         agent._relationship = RelationshipTracker()
         agent._workspace = GlobalWorkspace()
+        agent._prediction = PredictionEngine()
         agent._memory.as_coalition_async = AsyncMock(return_value=None)
         agent._memory_worker = MagicMock()
         agent._memory_worker.is_running = True
@@ -292,12 +294,14 @@ class TestFrustratedBoostsDesire:
         from familiar_agent.self_narrative import SelfNarrative
         from familiar_agent.relationship import RelationshipTracker
         from familiar_agent.workspace import GlobalWorkspace
+        from familiar_agent.prediction import PredictionEngine
 
         agent._exploration = ExplorationTracker()
         agent._scene = None
         agent._self_narrative = SelfNarrative()
         agent._relationship = RelationshipTracker()
         agent._workspace = GlobalWorkspace()
+        agent._prediction = PredictionEngine()
         agent._memory.as_coalition_async = AsyncMock(return_value=None)
         agent._memory_worker = MagicMock()
         agent._memory_worker.is_running = True

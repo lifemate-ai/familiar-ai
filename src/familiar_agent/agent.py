@@ -18,6 +18,7 @@ from .relationship import RelationshipTracker
 from .self_narrative import SelfNarrative
 from .exploration import ExplorationTracker
 from .scene import SceneTracker
+from .prediction import PredictionEngine
 from .workspace import GlobalWorkspace
 from .memory_worker import MemoryJobWorker
 from .tape import check_plan_blocked, generate_plan, generate_replan
@@ -451,6 +452,7 @@ class EmbodiedAgent:
         self._relationship = RelationshipTracker()
         self._self_narrative = SelfNarrative()
         self._workspace = GlobalWorkspace()
+        self._prediction = PredictionEngine()
 
         # Mood persistence (Phase 2 companion-likeness)
         self._mood: str = "neutral"
@@ -726,6 +728,7 @@ class EmbodiedAgent:
             asyncio.to_thread(self._exploration.as_coalition),
             asyncio.to_thread(self._self_narrative.as_coalition),
             asyncio.to_thread(self._tom_tool.as_coalition),
+            asyncio.to_thread(self._prediction.as_coalition),
         ]
         if self._scene is not None:
             sync_tasks.append(asyncio.to_thread(self._scene.as_coalition))
@@ -1466,9 +1469,15 @@ class EmbodiedAgent:
                         # World model: update scene entities from the agent's visual observation.
                         if self._scene is not None:
                             scene_events = await self._scene.update(
-                                final_text[:500], self._scene_backend
+                                final_text[:500],
+                                self._scene_backend,
+                                prediction_engine=self._prediction,
                             )
                             _react_to_scene_events(scene_events, desires)
+                            # Propagate prediction error to workspace threshold
+                            pred_coalition = self._prediction.as_coalition()
+                            if pred_coalition is not None:
+                                self._workspace.apply_prediction_error(pred_coalition.novelty)
                         await self._memory.save_async(
                             final_text[:500],
                             direction="観察",
