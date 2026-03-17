@@ -385,6 +385,7 @@ class FamiliarApp(App):
         stream = self.query_one("#stream", Static)
         text_buf: list[str] = []
         action_counts: dict[str, int] = {}
+        say_fired = False
 
         name_tag = f"[bold magenta]{self._agent_name} ▶[/bold magenta]"
 
@@ -427,12 +428,14 @@ class FamiliarApp(App):
             self._append_log(f"── {elapsed:.1f}s ──")
 
         def on_action(name: str, tool_input: dict) -> None:
+            nonlocal say_fired
             action_counts[name] = action_counts.get(name, 0) + 1
             _stop_spinner()
             if name == "say":
                 # Discard pre-say text (usually redundant with spoken content),
                 # then commit each say() directly to the log so multiple calls
                 # all appear — not overwritten by the next one.
+                say_fired = True
                 text_buf.clear()
                 stream.update("")
                 raw = str(tool_input.get("text", ""))
@@ -454,6 +457,11 @@ class FamiliarApp(App):
                 _restart_spinner()
 
         def on_text(chunk: str) -> None:
+            if say_fired:
+                # Discard post-say text: LLMs often re-emit say() content as plain
+                # text after the tool call (with audio tags intact). Suppressing it
+                # prevents the raw tagged text from appearing below the clean version.
+                return
             _stop_spinner()
             text_buf.append(chunk)
             stream.update(f"{name_tag} {''.join(text_buf)}")
