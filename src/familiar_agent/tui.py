@@ -429,9 +429,21 @@ class FamiliarApp(App):
         def on_action(name: str, tool_input: dict) -> None:
             action_counts[name] = action_counts.get(name, 0) + 1
             _stop_spinner()
-            _flush_stream()
-            label = _format_action(name, tool_input)
-            log.write(f"[dim]{label}[/dim]")
+            if name == "say":
+                # Replace any accumulated text with the spoken content so the
+                # display shows what was said — not a separate dim action label.
+                raw = str(tool_input.get("text", ""))
+                clean = re.sub(r"\[.*?\]", "", raw).strip()
+                text_buf.clear()
+                if clean:
+                    text_buf.append(clean)
+                    stream.update(f"{name_tag} {clean}")
+                else:
+                    stream.update("")
+            else:
+                _flush_stream()
+                label = _format_action(name, tool_input)
+                log.write(f"[dim]{label}[/dim]")
             # Restart spinner while waiting for the next LLM response
             _restart_spinner()
 

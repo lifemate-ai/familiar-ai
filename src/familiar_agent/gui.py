@@ -22,6 +22,7 @@ import contextlib
 import html as _html
 import logging
 import os
+import re
 import sys
 import time
 from pathlib import Path
@@ -1443,10 +1444,19 @@ class FamiliarWindow(QMainWindow):
             self._stream.append_chunk(chunk)
 
         def on_action(name: str, tool_input: dict) -> None:
-            committed = self._stream.commit_and_clear()
-            if committed.strip():
-                self._log.append_line(f"[{self._agent_display_name}] {committed.strip()}")
-            self._log.append_action(name, tool_input)
+            if name == "say":
+                # Discard any pre-say text and replace with clean spoken content
+                # so the display shows what was said rather than both text + action.
+                self._stream.commit_and_clear()
+                raw = str(tool_input.get("text", ""))
+                clean = re.sub(r"\[.*?\]", "", raw).strip()
+                if clean:
+                    self._stream.append_chunk(clean)
+            else:
+                committed = self._stream.commit_and_clear()
+                if committed.strip():
+                    self._log.append_line(f"[{self._agent_display_name}] {committed.strip()}")
+                self._log.append_action(name, tool_input)
             if name == "look":
                 self._request_look_preview(tool_input.get("degrees"))
 
