@@ -883,6 +883,14 @@ class EmbodiedAgent:
         "playful": 0.5,
         "proud": 0.6,
     }
+    _SALIENT_NARRATIVE_EMOTIONS = {
+        "excited",
+        "moved",
+        "tender",
+        "nostalgic",
+        "proud",
+        "surprised",
+    }
 
     def _update_mood(self, emotion: str) -> None:
         """Update persistent mood state from the latest inferred emotion.
@@ -996,6 +1004,64 @@ class EmbodiedAgent:
             pass
 
         return "\n".join(lines) if lines else None
+
+    async def _online_temporal_context(self, desires: DesireSystem | None = None) -> str | None:
+        """Surface temporal-self fragments during ordinary turns.
+
+        This keeps old memories, milestones, and unresolved threads available
+        beyond startup reconstruction, but only when the current state suggests
+        they matter.
+        """
+        if self._turn_count <= 1:
+            return None
+
+        share_memory_level = 0.0
+        curiosity_target = None
+        if desires is not None:
+            try:
+                share_memory_level = float(desires.level("share_memory"))
+            except Exception:
+                share_memory_level = 0.0
+            curiosity_target = getattr(desires, "curiosity_target", None)
+
+        tension = 0.0
+        self_state = getattr(self, "_self_state", None)
+        if self_state is not None:
+            try:
+                tension = float(self_state.snapshot().get("unresolved_tension", 0.0))
+            except Exception:
+                tension = 0.0
+
+        should_surface_memory = share_memory_level >= 0.45 or tension >= 0.45
+        should_surface_anniversary = self._turn_count % 4 == 0 or tension >= 0.6
+        should_surface_thread = bool(curiosity_target) and tension >= 0.5
+
+        if not (should_surface_memory or should_surface_anniversary or should_surface_thread):
+            return None
+
+        proactive_ctx: str | None = None
+        anniversary_ctx: str | None = None
+        if should_surface_memory and should_surface_anniversary:
+            proactive_ctx, anniversary_ctx = await asyncio.gather(
+                self._proactive_memory_context(),
+                self._anniversary_context(),
+            )
+        elif should_surface_memory:
+            proactive_ctx = await self._proactive_memory_context()
+        elif should_surface_anniversary:
+            anniversary_ctx = await self._anniversary_context()
+
+        lines: list[str] = []
+        if should_surface_thread:
+            lines.append(f"[Unresolved thread]: {str(curiosity_target)[:160]}")
+        if proactive_ctx:
+            lines.append(f"[Resurfaced memory]: {proactive_ctx[:180]}")
+        if anniversary_ctx:
+            lines.append(anniversary_ctx)
+
+        if not lines:
+            return None
+        return "[Temporal self]\n" + "\n".join(lines)
 
     async def _infer_companion_mood(self, text: str) -> str:
         """Classify companion's emotional state from their message. Returns mood label."""
@@ -1223,6 +1289,125 @@ class EmbodiedAgent:
         except Exception as e:
             logger.warning("Self-model update failed: %s", e)
 
+    async def _maybe_update_self_narrative(
+        self,
+        *,
+        user_input: str,
+        final_text: str,
+        emotion: str,
+        is_desire_turn: bool,
+    ) -> None:
+        """Capture salient within-session self-narrative moments."""
+        if not final_text or final_text == "(no response)":
+            return
+
+        pred_signal = self._prediction.last_signal()
+        agency_error = float(pred_signal.agency_error) if pred_signal is not None else 0.0
+        salient_emotion = emotion in self._SALIENT_NARRATIVE_EMOTIONS
+
+        if not salient_emotion and agency_error < 0.55:
+            return
+
+        reason = "salient_turn" if salient_emotion else "agency_error"
+        if salient_emotion and agency_error >= 0.55:
+            reason = "salient_turn_agency"
+        if is_desire_turn and not salient_emotion and agency_error < 0.7:
+            return
+
+        prompt = (
+            "次の出来事を、ウチ自身の自己叙述として一文で書いて。\n"
+            f"user: {user_input[:160]}\n"
+            f"agent: {final_text[:220]}\n"
+            f"emotion: {emotion}\n"
+            f"agency_error: {agency_error:.2f}\n"
+            "条件: 一人称は『ウチ』。60文字以内。説明や前置きは禁止。"
+        )
+        try:
+            text = await asyncio.wait_for(
+                self._utility_backend.complete(prompt, max_tokens=120),
+                timeout=12.0,
+            )
+            if text and text.strip():
+                mood = emotion if emotion != "neutral" else self._decayed_mood()[0]
+                self._self_narrative.write(text.strip(), mood=mood, trigger=reason)
+                logger.info("Self-narrative moment captured (%s): %s", reason, text.strip()[:60])
+        except Exception as e:
+            logger.warning("Could not update self narrative mid-session: %s", e)
+
+    async def _maybe_adapt_values(
+        self,
+        *,
+        user_input: str,
+        final_text: str,
+        emotion: str,
+        camera_used: bool,
+        curiosity: str | None,
+        is_desire_turn: bool,
+        desires: DesireSystem | None,
+    ) -> None:
+        """Lightweight experience-driven updates for policy/value confidence."""
+        updates = []
+
+        pred_signal = self._prediction.last_signal()
+        if camera_used and curiosity:
+            updates.append(
+                self._memory.adjust_behavior_policy_confidence_async(
+                    "curiosity:active",
+                    0.08,
+                    reason="curiosity_satisfied",
+                    policy_text=f"When idle, follow up this curiosity thread: {curiosity[:180]}",
+                    trigger_context="idle",
+                    action_hint="look_around",
+                )
+            )
+            if desires is not None:
+                desires.boost("share_memory", 0.08)
+
+        if (
+            pred_signal is not None
+            and pred_signal.action_name in {"look", "walk", "see"}
+            and pred_signal.agency_error >= 0.55
+        ):
+            updates.append(
+                self._memory.adjust_behavior_policy_confidence_async(
+                    "curiosity:active",
+                    -0.05,
+                    reason="agency_error_high",
+                )
+            )
+
+        if not is_desire_turn and user_input and emotion in {"moved", "tender", "relieved"}:
+            updates.append(
+                self._memory.adjust_behavior_policy_confidence_async(
+                    "conversation:supportive_style",
+                    0.04,
+                    reason="supportive_exchange",
+                    policy_text=(
+                        "Prefer this response style when supporting the companion: "
+                        f"{final_text[:180]}"
+                    ),
+                    trigger_context="conversation",
+                    action_hint="respond_supportively",
+                )
+            )
+
+        if emotion in {"moved", "proud", "tender"}:
+            updates.append(
+                self._memory.adjust_semantic_fact_confidence_async(
+                    "self_model:core",
+                    0.03,
+                    reason="salient_self_consistency",
+                )
+            )
+
+        if not updates:
+            return
+
+        results = await asyncio.gather(*updates, return_exceptions=True)
+        for result in results:
+            if isinstance(result, Exception):
+                logger.debug("Adaptive value update failed: %s", result)
+
     async def extract_curiosity(self, exploration_result: str) -> str | None:
         """Ask the LLM what was most curious/interesting in the exploration."""
         try:
@@ -1402,7 +1587,7 @@ class EmbodiedAgent:
             self._relationship.record_session()
             morning_ctx = await self._morning_reconstruction(desires=desires)
 
-        is_desire_turn = inner_voice and not user_input
+        is_desire_turn = bool(inner_voice and not user_input)
 
         # Compact context if it has grown too large (GC-like: compress old turns)
         if self._should_compact():
@@ -1418,12 +1603,14 @@ class EmbodiedAgent:
                 companion_mood,
                 semantic_facts,
                 behavior_policies,
+                temporal_ctx,
             ) = await asyncio.gather(
                 self._memory.recall_async(user_input, n=recall_n),
                 self._memory.recent_feelings_async(n=4),
                 self._infer_companion_mood(user_input),
                 self._memory.recall_semantic_facts_async(user_input, n=3),
                 self._memory.recall_behavior_policies_async(user_input, n=2),
+                self._online_temporal_context(desires=desires),
             )
             memory_parts = []
             if memories:
@@ -1436,6 +1623,8 @@ class EmbodiedAgent:
                 memory_parts.append(
                     self._memory.format_behavior_policies_for_context(behavior_policies)
                 )
+            if temporal_ctx:
+                memory_parts.append(temporal_ctx)
             if memory_parts:
                 user_input_with_ctx = user_input + "\n\n" + "\n\n".join(memory_parts)
             else:
@@ -1470,6 +1659,7 @@ class EmbodiedAgent:
         camera_used = False
         say_used = False
         final_text = "(no response)"
+        emotion = "neutral"
         non_say_streak = 0  # consecutive tool calls without say()
         observation_action_name: str | None = None
         observation_action_input: dict | None = None
@@ -1581,6 +1771,12 @@ class EmbodiedAgent:
 
                     # Update self-model when something actually moved us (Conway's working self)
                     await self._update_self_model(final_text, emotion)
+                    await self._maybe_update_self_narrative(
+                        user_input=user_input,
+                        final_text=final_text,
+                        emotion=emotion,
+                        is_desire_turn=is_desire_turn,
+                    )
 
                     # Track conversation count for relationship modeling
                     if not is_desire_turn and user_input:
@@ -1602,6 +1798,7 @@ class EmbodiedAgent:
                             logger.debug("Companion mood frustrated: boosting worry_companion")
 
                 # Extract curiosity target only when camera was actually used
+                curiosity: str | None = None
                 if desires is not None and final_text and camera_used:
                     curiosity = await self.extract_curiosity(final_text)
                     if curiosity:
@@ -1617,6 +1814,16 @@ class EmbodiedAgent:
                             materialize_now=False,
                         )
                         logger.info("Curiosity persisted: %s", curiosity)
+
+                await self._maybe_adapt_values(
+                    user_input=user_input,
+                    final_text=final_text,
+                    emotion=emotion,
+                    camera_used=camera_used,
+                    curiosity=curiosity,
+                    is_desire_turn=is_desire_turn,
+                    desires=desires,
+                )
 
                 return final_text
 

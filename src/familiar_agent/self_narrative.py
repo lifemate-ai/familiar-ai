@@ -25,6 +25,7 @@ class NarrativeEntry(NamedTuple):
     date: str
     text: str
     mood: str
+    trigger: str
 
 
 class SelfNarrative:
@@ -37,12 +38,22 @@ class SelfNarrative:
     def __init__(self, path: Path | None = None):
         self._path = path or _DEFAULT_PATH
 
-    def write(self, text: str, mood: str = "neutral") -> None:
+    def write(self, text: str, mood: str = "neutral", trigger: str = "session_close") -> None:
         """Append today's self-description."""
+        cleaned = text.strip()
+        if not cleaned:
+            return
+
+        today = date.today().isoformat()
+        recent = self.read_recent(n=1)
+        if recent and recent[-1].date == today and recent[-1].text == cleaned:
+            return
+
         entry = {
-            "date": date.today().isoformat(),
-            "text": text.strip(),
+            "date": today,
+            "text": cleaned,
             "mood": mood,
+            "trigger": trigger,
         }
         try:
             self._path.parent.mkdir(parents=True, exist_ok=True)
@@ -68,6 +79,7 @@ class SelfNarrative:
                             date=data["date"],
                             text=data["text"],
                             mood=data.get("mood", "neutral"),
+                            trigger=data.get("trigger", "session_close"),
                         )
                     )
         except Exception as e:

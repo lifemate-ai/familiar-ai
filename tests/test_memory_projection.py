@@ -91,3 +91,61 @@ def test_projection_updates_create_revision_chain(tmp_path) -> None:
     assert revisions
     assert "value honesty" in revisions[0]["previous_text"].lower()
     assert "precision" in revisions[0]["new_text"].lower()
+
+
+def test_adjust_behavior_policy_confidence_creates_adaptive_revision(tmp_path) -> None:
+    db_path = str(tmp_path / "projection_adaptive_policy.db")
+    with (
+        patch.object(_EmbeddingModel, "pre_warm"),
+        patch.object(_EmbeddingModel, "encode_document", return_value=[[0.1, 0.2, 0.3]]),
+        patch.object(_EmbeddingModel, "encode_query", return_value=[[0.1, 0.2, 0.3]]),
+    ):
+        mem = ObservationMemory(db_path=db_path)
+        assert mem.save("What is making that faint ticking sound?", kind="curiosity")
+
+        updated = mem.adjust_behavior_policy_confidence(
+            "curiosity:active",
+            0.08,
+            reason="curiosity_satisfied",
+        )
+        policies = mem.recall_behavior_policies("ticking", n=5)
+        revisions = mem.recall_revisions(
+            entity_type="behavior_policy",
+            entity_key="curiosity:active",
+        )
+        mem.close()
+
+    assert updated is not None
+    assert policies
+    assert float(policies[0]["confidence"]) >= 0.8
+    assert revisions
+    assert revisions[0]["reason"] == "curiosity_satisfied"
+
+
+def test_adjust_semantic_fact_confidence_changes_existing_fact(tmp_path) -> None:
+    db_path = str(tmp_path / "projection_adaptive_fact.db")
+    with (
+        patch.object(_EmbeddingModel, "pre_warm"),
+        patch.object(_EmbeddingModel, "encode_document", return_value=[[0.1, 0.2, 0.3]]),
+        patch.object(_EmbeddingModel, "encode_query", return_value=[[0.1, 0.2, 0.3]]),
+    ):
+        mem = ObservationMemory(db_path=db_path)
+        assert mem.save("I try to respond with honesty.", kind="self_model", emotion="moved")
+
+        updated = mem.adjust_semantic_fact_confidence(
+            "self_model:core",
+            -0.1,
+            reason="self_model_conflict",
+        )
+        facts = mem.recall_semantic_facts("honesty", n=5)
+        revisions = mem.recall_revisions(
+            entity_type="semantic_fact",
+            entity_key="self_model:core",
+        )
+        mem.close()
+
+    assert updated is not None
+    assert facts
+    assert float(facts[0]["confidence"]) < 0.82
+    assert revisions
+    assert revisions[0]["reason"] == "self_model_conflict"

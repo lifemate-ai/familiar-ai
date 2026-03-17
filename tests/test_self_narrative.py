@@ -46,6 +46,13 @@ def test_write_preserves_mood(tmp_path: Path) -> None:
     assert entries[0].mood == "moved"
 
 
+def test_write_preserves_trigger(tmp_path: Path) -> None:
+    sn = SelfNarrative(path=tmp_path / "narrative.jsonl")
+    sn.write("まだ続いてる感じがした。", trigger="salient_turn")
+    entries = sn.read_recent()
+    assert entries[0].trigger == "salient_turn"
+
+
 def test_write_records_date(tmp_path: Path) -> None:
     from datetime import date
 
@@ -62,6 +69,14 @@ def test_write_multiple_entries_appends(tmp_path: Path) -> None:
     sn.write("三日目。")
     entries = sn.read_recent(n=10)
     assert len(entries) == 3
+
+
+def test_duplicate_write_same_day_is_skipped(tmp_path: Path) -> None:
+    sn = SelfNarrative(path=tmp_path / "narrative.jsonl")
+    sn.write("同じ節目。")
+    sn.write("同じ節目。", trigger="salient_turn")
+    entries = sn.read_recent(n=10)
+    assert len(entries) == 1
 
 
 def test_read_respects_n_limit(tmp_path: Path) -> None:

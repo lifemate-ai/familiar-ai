@@ -17,10 +17,10 @@ _VERSION = "v0.1"
 def _detect_lang() -> str:
     """Detect language from environment. Returns a key present in _T, or 'en'."""
     raw = (
-        os.environ.get("LANGUAGE")
+        os.environ.get("LANG")
         or os.environ.get("LC_ALL")
         or os.environ.get("LC_MESSAGES")
-        or os.environ.get("LANG")
+        or os.environ.get("LANGUAGE")
         or locale.getlocale()[0]
         or ""
     )
