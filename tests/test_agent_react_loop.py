@@ -326,6 +326,49 @@ async def test_run_tool_results_added_to_messages():
     assert agent.backend.make_tool_results.called
 
 
+@pytest.mark.asyncio
+async def test_run_passes_latest_pre_see_action_into_scene_update():
+    """The last embodied action before see() conditions the scene update."""
+    agent = _make_agent(with_camera=True)
+    agent._scene = MagicMock()
+    agent._scene.update = AsyncMock(return_value=[])
+    agent._scene.context_for_prompt = MagicMock(return_value="")
+    agent._scene_backend = MagicMock()
+    agent._camera.call = AsyncMock(
+        side_effect=[
+            ("looked left", None),
+            ("I see a room", "base64img"),
+        ]
+    )
+
+    turn1 = TurnResult(
+        stop_reason="tool_use",
+        text="",
+        tool_calls=[
+            ToolCall(id="tc1", name="look", input={"direction": "left", "degrees": 45}),
+            ToolCall(id="tc2", name="see", input={}),
+        ],
+    )
+    turn2 = TurnResult(stop_reason="end_turn", text="There is a window.", tool_calls=[])
+    agent.backend.stream_turn = AsyncMock(
+        side_effect=[(turn1, None), (turn2, "There is a window.")]
+    )
+
+    ps = _patch_heavy()
+    for p in ps:
+        p.start()
+    try:
+        await agent.run("look and report")
+    finally:
+        for p in ps:
+            p.stop()
+
+    agent._scene.update.assert_awaited_once()
+    _, kwargs = agent._scene.update.call_args
+    assert kwargs["action_name"] == "look"
+    assert kwargs["action_input"] == {"direction": "left", "degrees": 45}
+
+
 # ---------------------------------------------------------------------------
 # Tests: auto-say
 # ---------------------------------------------------------------------------

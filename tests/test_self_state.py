@@ -63,6 +63,35 @@ def test_state_persists_to_disk(tmp_path):
     assert reloaded.snapshot() == state.snapshot()
 
 
+def test_successful_action_prediction_increases_sensor_confidence(tmp_path):
+    state = SelfState(path=tmp_path / "self_state.json")
+    before = state.snapshot()
+
+    state.apply_prediction_feedback(
+        external_surprise=0.1,
+        agency_error=0.0,
+        action_name="look",
+    )
+    after = state.snapshot()
+
+    assert after["sensor_confidence"] > before["sensor_confidence"]
+
+
+def test_agency_error_reduces_sensor_confidence(tmp_path):
+    state = SelfState(path=tmp_path / "self_state.json")
+    before = state.snapshot()
+
+    state.apply_prediction_feedback(
+        external_surprise=0.1,
+        agency_error=0.8,
+        action_name="walk",
+    )
+    after = state.snapshot()
+
+    assert after["sensor_confidence"] < before["sensor_confidence"]
+    assert after["unresolved_tension"] > before["unresolved_tension"]
+
+
 @pytest.mark.asyncio
 async def test_workspace_listener_updates_self_state(tmp_path):
     state = SelfState(path=tmp_path / "self_state.json")

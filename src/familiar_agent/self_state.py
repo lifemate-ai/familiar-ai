@@ -115,5 +115,28 @@ class SelfState:
 
         self._save()
 
+    def apply_prediction_feedback(
+        self,
+        *,
+        external_surprise: float,
+        agency_error: float,
+        action_name: str | None = None,
+    ) -> None:
+        """Apply action-conditioned prediction feedback directly to self state."""
+        external_surprise = _clamp(float(external_surprise))
+        agency_error = _clamp(float(agency_error))
+
+        if action_name in {"look", "walk", "see"} and agency_error <= 0.05:
+            self._nudge("sensor_confidence", 0.02 + 0.05 * (1.0 - external_surprise))
+            self._nudge("focus_stability", 0.02)
+            self._nudge("unresolved_tension", -0.03)
+
+        if agency_error > 0.0:
+            self._nudge("sensor_confidence", -(0.04 + 0.14 * agency_error))
+            self._nudge("unresolved_tension", 0.03 + 0.12 * agency_error)
+            self._nudge("arousal", 0.02 + 0.08 * agency_error)
+
+        self._save()
+
     async def on_broadcast(self, winner: "Coalition") -> None:
         self.apply_broadcast(winner)
