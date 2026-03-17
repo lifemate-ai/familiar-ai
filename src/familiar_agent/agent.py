@@ -38,6 +38,12 @@ from .mcp_client import MCPClientManager, _resolve_config_path
 
 logger = logging.getLogger(__name__)
 
+
+async def _noop_str() -> str:
+    """Async no-op that returns an empty string (used as a placeholder in asyncio.gather)."""
+    return ""
+
+
 MAX_ITERATIONS = 50
 _MORNING_CONTEXT_MAX_CHARS = 2600
 _DEFAULT_TOOL_TIMEOUT = 20.0
@@ -1647,17 +1653,21 @@ class EmbodiedAgent:
 
         self.messages.append(self.backend.make_user_message(user_input_with_ctx))
 
-        # TAPE mechanism 1: generate an upfront action plan to anchor the react loop.
-        # Skip for desire-driven turns (no explicit user request to plan around).
-        plan_ctx = ""
-        if not is_desire_turn and user_input.strip():
-            tool_names = [t["name"] for t in self._all_tool_defs]
-            plan_ctx = await generate_plan(self.backend, user_input, tool_names)
-            if plan_ctx:
-                logger.debug("TAPE plan: %s", plan_ctx[:80])
-
-        # Global Workspace: gather coalitions once per turn, before the ReAct loop.
-        workspace_ctx = await self._gather_workspace_context(desires=desires)
+        # TAPE mechanism 1 + Global Workspace: run in parallel — both are independent
+        # of each other and of the ReAct loop setup.
+        # TAPE uses the utility backend (cheaper/faster) instead of the main backend.
+        tool_names = [t["name"] for t in self._all_tool_defs]
+        plan_task = (
+            generate_plan(self._utility_backend, user_input, tool_names)
+            if not is_desire_turn and user_input.strip()
+            else _noop_str()
+        )
+        plan_ctx, workspace_ctx = await asyncio.gather(
+            plan_task,
+            self._gather_workspace_context(desires=desires),
+        )
+        if plan_ctx:
+            logger.debug("TAPE plan: %s", plan_ctx[:80])
         if workspace_ctx:
             logger.debug("GlobalWorkspace broadcast: %s", workspace_ctx[:80])
 
