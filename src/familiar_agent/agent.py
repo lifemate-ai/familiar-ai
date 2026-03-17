@@ -289,6 +289,101 @@ Message: {text}
 Reply with the label only (one English word)."""
 
 
+def _companion_mood_heuristic(text: str) -> str:
+    """Fast keyword-based mood classifier used when no dedicated utility backend exists.
+
+    Covers the common explicit expressions; defaults to "engaged" for ambiguous text.
+    Labels: engaged / tired / frustrated / absent / happy
+    """
+    t = text.lower()
+
+    # tired
+    if any(
+        w in t
+        for w in [
+            "疲れ",
+            "つかれ",
+            "しんど",
+            "眠い",
+            "ねむ",
+            "だるい",
+            "きつい",
+            "tired",
+            "exhausted",
+            "sleepy",
+            "worn out",
+            "drained",
+        ]
+    ):
+        return "tired"
+
+    # frustrated
+    if any(
+        w in t
+        for w in [
+            "むかつ",
+            "いらいら",
+            "うざ",
+            "最悪",
+            "ムカつ",
+            "怒",
+            "frustrated",
+            "annoyed",
+            "angry",
+            "not working",
+            "isn't working",
+            "doesn't work",
+            "won't work",
+            "can't",
+            "ugh",
+            "argh",
+        ]
+    ):
+        return "frustrated"
+
+    # happy
+    if any(
+        w in t
+        for w in [
+            "嬉しい",
+            "うれし",
+            "楽しい",
+            "たのし",
+            "やったー",
+            "やった",
+            "最高",
+            "最強",
+            "好き",
+            "すき",
+            "幸せ",
+            "しあわせ",
+            ":)",
+            "😊",
+            "😄",
+            "🎉",
+            "笑",
+            "www",
+            "ｗ",
+            "happy",
+            "great",
+            "perfect",
+            "worked",
+            "excellent",
+            "wonderful",
+            "love",
+            "yay",
+            "awesome",
+        ]
+    ):
+        return "happy"
+
+    # absent (very short / punctuation only)
+    if len(text.strip()) < 4:
+        return "absent"
+
+    return "engaged"
+
+
 # Day summary prompt — condense a day's observations into a diary-like entry
 _DAY_SUMMARY_PROMPT = """\
 You are writing a diary entry about this day from your own first-person memory.
@@ -1078,9 +1173,17 @@ class EmbodiedAgent:
         return "[Temporal self]\n" + "\n".join(lines)
 
     async def _infer_companion_mood(self, text: str) -> str:
-        """Classify companion's emotional state from their message. Returns mood label."""
+        """Classify companion's emotional state from their message. Returns mood label.
+
+        When the utility backend is the same as the main backend (e.g. both are Kimi),
+        uses a fast keyword heuristic to avoid an extra LLM round-trip every turn.
+        Falls back to the LLM when a dedicated utility backend is configured.
+        """
         if not text or len(text.strip()) < 3:
             return "absent"
+        # Skip LLM call when utility == main backend (no dedicated cheap model available).
+        if self._utility_backend is self.backend:
+            return _companion_mood_heuristic(text)
         label = await self._utility_backend.complete(
             _COMPANION_MOOD_PROMPT.format(text=text[:300]), max_tokens=10
         )
