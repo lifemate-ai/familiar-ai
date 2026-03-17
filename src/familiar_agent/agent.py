@@ -511,7 +511,15 @@ class EmbodiedAgent:
         # Allow camera if host is present, even without password (e.g. local RTSP)
         if cam.host:
             self._camera = CameraTool(
-                cam.host, cam.username, cam.password, cam.port, preview=cam.preview
+                cam.host,
+                cam.username,
+                cam.password,
+                cam.port,
+                preview=cam.preview,
+                ptz_host=cam.ptz_host,
+                ptz_username=cam.ptz_username,
+                ptz_password=cam.ptz_password,
+                ptz_port=cam.ptz_port,
             )
 
         mob = self.config.mobility

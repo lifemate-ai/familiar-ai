@@ -718,8 +718,12 @@ class SettingsDialog(QDialog):
             form.setFieldGrowthPolicy(QFormLayout.FieldGrowthPolicy.ExpandingFieldsGrow)
             form.setFormAlignment(Qt.AlignmentFlag.AlignTop | Qt.AlignmentFlag.AlignLeft)
 
-        def _form_label(key: str) -> QLabel:
-            label = QLabel(_t(key))
+        def _form_label(key_or_text: str) -> QLabel:
+            try:
+                text = _t(key_or_text)
+            except KeyError:
+                text = key_or_text
+            label = QLabel(text)
             # Keep enough width so short JP labels like 「名」 never get clipped.
             label.setMinimumWidth(180)
             label.setStyleSheet(
@@ -784,11 +788,25 @@ class SettingsDialog(QDialog):
         self._cam_pass.setEchoMode(QLineEdit.EchoMode.Password)
         self._cam_pass.setPlaceholderText(_t("settings_placeholder_unchanged"))
         self._cam_port = QLineEdit(str(config.camera.port))
+        self._cam_ptz_host = QLineEdit(config.camera.ptz_host_override)
+        self._cam_ptz_user = QLineEdit(config.camera.ptz_username_override)
+        self._cam_ptz_pass = QLineEdit()
+        self._cam_ptz_pass.setEchoMode(QLineEdit.EchoMode.Password)
+        self._cam_ptz_pass.setPlaceholderText(_t("settings_placeholder_unchanged"))
+        self._cam_ptz_port = QLineEdit(
+            str(config.camera.ptz_port_override)
+            if config.camera.ptz_port_override is not None
+            else ""
+        )
 
         cf.addRow(_form_label("settings_field_camera_host"), self._cam_host)
         cf.addRow(_form_label("settings_field_camera_username"), self._cam_user)
         cf.addRow(_form_label("settings_field_camera_password"), self._cam_pass)
         cf.addRow(_form_label("settings_field_camera_onvif_port"), self._cam_port)
+        cf.addRow(_form_label("PTZ host override:"), self._cam_ptz_host)
+        cf.addRow(_form_label("PTZ username override:"), self._cam_ptz_user)
+        cf.addRow(_form_label("PTZ password override:"), self._cam_ptz_pass)
+        cf.addRow(_form_label("PTZ port override:"), self._cam_ptz_port)
         tabs.addTab(cam_tab, _t("settings_tab_camera"))
 
         # ── Tab 4: Advanced ───────────────────────────────────────
@@ -839,11 +857,17 @@ class SettingsDialog(QDialog):
             ("THINKING_EFFORT", self._thinking_effort.currentText()),
             ("MEMORY_DB_PATH", self._memory_path.text()),
         ]
+        ptz_override_pairs = [
+            ("CAMERA_PTZ_HOST", self._cam_ptz_host.text()),
+            ("CAMERA_PTZ_USERNAME", self._cam_ptz_user.text()),
+            ("CAMERA_PTZ_PORT", self._cam_ptz_port.text()),
+        ]
         # Sensitive fields: skip if empty (placeholder shown)
         masked_pairs = [
             ("API_KEY", self._api_key.text()),
             ("ELEVENLABS_API_KEY", self._el_api_key.text()),
             ("CAMERA_PASSWORD", self._cam_pass.text()),
+            ("CAMERA_PTZ_PASSWORD", self._cam_ptz_pass.text()),
         ]
 
         try:
@@ -851,6 +875,8 @@ class SettingsDialog(QDialog):
             for key, value in plain_pairs:
                 if value:
                     set_key(env_str, key, value)
+            for key, value in ptz_override_pairs:
+                set_key(env_str, key, value)
             for key, value in masked_pairs:
                 if value:
                     set_key(env_str, key, value)

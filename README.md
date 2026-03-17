@@ -134,7 +134,8 @@ cp .env.example .env
 | `MODEL` | Model name (sensible defaults per platform) |
 | `AGENT_NAME` | Display name shown in the TUI (e.g. `Yukine`) |
 | `CAMERA_HOST` | IP address of your ONVIF/RTSP camera |
-| `CAMERA_USER` / `CAMERA_PASS` | Camera credentials |
+| `CAMERA_USERNAME` / `CAMERA_PASSWORD` | Camera credentials |
+| `CAMERA_PTZ_HOST` / `CAMERA_PTZ_USERNAME` / `CAMERA_PTZ_PASSWORD` / `CAMERA_PTZ_PORT` | Optional PTZ overrides when the control endpoint differs from the RTSP stream endpoint |
 | `ELEVENLABS_API_KEY` | For voice output — [elevenlabs.io](https://elevenlabs.io/) |
 | `REALTIME_STT` | `true` to enable always-on hands-free voice input (requires `ELEVENLABS_API_KEY`) |
 | `TTS_OUTPUT` | Where to play audio: `local` (PC speaker, default) \| `remote` (camera speaker) \| `both` |
@@ -283,8 +284,8 @@ Run `./run.sh` (macOS/Linux/WSL2) or `run.bat` (Windows) and start chatting. Add
 3. Set in `.env`:
    ```env
    CAMERA_HOST=192.168.1.xxx
-   CAMERA_USER=your-local-user
-   CAMERA_PASS=your-local-pass
+   CAMERA_USERNAME=your-local-user
+   CAMERA_PASSWORD=your-local-pass
    ```
 
 ### Wi-Fi camera (Eufy C220)
@@ -304,6 +305,15 @@ Run `./run.sh` (macOS/Linux/WSL2) or `run.bat` (Windows) and start chatting. Add
    CAMERA_PASSWORD=
    ```
    Leave `CAMERA_USERNAME` and `CAMERA_PASSWORD` empty — credentials are already in the URL.
+
+6. If your PTZ control endpoint differs from the RTSP stream endpoint, set the optional PTZ overrides:
+   ```env
+   CAMERA_PTZ_HOST=192.168.1.xxx
+   CAMERA_PTZ_USERNAME=your-ptz-user
+   CAMERA_PTZ_PASSWORD=your-ptz-password
+   CAMERA_PTZ_PORT=2020
+   ```
+   If you leave them unset, familiar-ai falls back to `CAMERA_HOST`, `CAMERA_USERNAME`, `CAMERA_PASSWORD`, and `CAMERA_ONVIF_PORT`.
 
 > **Note:** Eufy C220 allows only **one simultaneous RTSP connection**. If another app (e.g. a Wi-Fi cam MCP server) is connected to the same camera, familiar-ai will fail to get frames. Stop other clients before starting familiar-ai.
 
@@ -407,7 +417,7 @@ See [`persona-template/en.md`](./persona-template/en.md) for an example, or [`pe
 Yes. The embedding model (multilingual-e5-small) runs fine on CPU. A GPU makes it faster but isn't required.
 
 **Q: Can I use a camera other than Tapo?**
-Yes. Any camera that supports RTSP works. Tested cameras: **Tapo C220** (ONVIF + RTSP) and **Eufy C220** (RTSP only — see setup notes above). For Eufy, pass the full RTSP URL as `CAMERA_HOST` and set authentication to **Basic** in the app.
+Yes. Any camera that supports RTSP works for `see()`. Tested cameras: **Tapo C220** (ONVIF + RTSP) and **Eufy C220** (RTSP for vision; PTZ may require a different control endpoint). For Eufy, pass the full RTSP URL as `CAMERA_HOST`, set authentication to **Basic** in the app, and use `CAMERA_PTZ_*` overrides if pan/tilt lives on a separate ONVIF endpoint.
 
 **Q: Is my data sent anywhere?**
 Images and text are sent to your chosen LLM API for processing. Memories are stored locally in `~/.familiar_ai/`.

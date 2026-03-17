@@ -17,31 +17,69 @@ def _default_companion_name() -> str:
     return _t("default_companion_name")
 
 
+def _env_value(*names: str, default: str = "") -> str:
+    """Return the first present env var, preserving explicit empty strings."""
+    for name in names:
+        value = os.environ.get(name)
+        if value is not None:
+            return value
+    return default
+
+
+def _optional_int_env(*names: str) -> int | None:
+    value = _env_value(*names, default="")
+    if not value:
+        return None
+    return int(value)
+
+
 @dataclass
 class CameraConfig:
     host: str = field(
-        default_factory=lambda: os.environ.get(
-            "CAMERA_HOST", os.environ.get("TAPO_CAMERA_HOST", "")
-        )
+        default_factory=lambda: _env_value("CAMERA_HOST", "TAPO_CAMERA_HOST", default="")
     )
     username: str = field(
-        default_factory=lambda: os.environ.get(
-            "CAMERA_USERNAME", os.environ.get("TAPO_USERNAME", "admin")
-        )
+        default_factory=lambda: _env_value("CAMERA_USERNAME", "TAPO_USERNAME", default="admin")
     )
     password: str = field(
-        default_factory=lambda: os.environ.get(
-            "CAMERA_PASSWORD", os.environ.get("TAPO_PASSWORD", "")
-        )
+        default_factory=lambda: _env_value("CAMERA_PASSWORD", "TAPO_PASSWORD", default="")
     )
     port: int = field(
         default_factory=lambda: int(
-            os.environ.get("CAMERA_ONVIF_PORT", os.environ.get("TAPO_ONVIF_PORT", "2020"))
+            _env_value("CAMERA_ONVIF_PORT", "TAPO_ONVIF_PORT", default="2020")
         )
     )
     preview: bool = field(
         default_factory=lambda: os.environ.get("CAMERA_PREVIEW", "false").lower() == "true"
     )
+    ptz_host_override: str = field(
+        default_factory=lambda: _env_value("CAMERA_PTZ_HOST", default="")
+    )
+    ptz_username_override: str = field(
+        default_factory=lambda: _env_value("CAMERA_PTZ_USERNAME", default="")
+    )
+    ptz_password_override: str = field(
+        default_factory=lambda: _env_value("CAMERA_PTZ_PASSWORD", default="")
+    )
+    ptz_port_override: int | None = field(
+        default_factory=lambda: _optional_int_env("CAMERA_PTZ_PORT")
+    )
+
+    @property
+    def ptz_host(self) -> str:
+        return self.ptz_host_override or self.host
+
+    @property
+    def ptz_username(self) -> str:
+        return self.ptz_username_override or self.username
+
+    @property
+    def ptz_password(self) -> str:
+        return self.ptz_password_override or self.password
+
+    @property
+    def ptz_port(self) -> int:
+        return self.ptz_port_override if self.ptz_port_override is not None else self.port
 
 
 @dataclass

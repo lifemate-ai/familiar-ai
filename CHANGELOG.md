@@ -25,10 +25,8 @@ This project adheres to [Semantic Versioning](https://semver.org/).
 - Interoception now reflects internal self-state signals in addition to time, uptime, social context, and mood
 - Prediction signals now distinguish external surprise from mismatches in the agent's own embodied actions
 - Self-narrative entries now record their trigger and suppress duplicate same-day rewrites
-<<<<<<< fix/realtime-stt-reconnect
 - Realtime STT now supervises the websocket transport and reconnects automatically after mid-session disconnects instead of silently stopping after a few turns
-=======
->>>>>>> main
+- Camera settings now support optional `CAMERA_PTZ_*` overrides, with fallback to the existing `CAMERA_*` values and RTSP URL credentials when stream and PTZ endpoints differ
 
 ## [0.1.0] - 2026-02-22
 
