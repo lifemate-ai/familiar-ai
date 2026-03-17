@@ -126,6 +126,8 @@ class SceneTracker:
         description: str,
         backend: Any,
         prediction_engine: PredictionEngine | None = None,
+        action_name: str | None = None,
+        action_input: dict[str, Any] | None = None,
     ) -> list[dict]:
         """Extract entities from description, detect changes, persist, return events.
 
@@ -134,6 +136,9 @@ class SceneTracker:
         If prediction_engine is provided, compute prediction error against
         the new observation and update the model.
         """
+        if prediction_engine is not None and action_name:
+            prediction_engine.record_action(action_name, action_input or {})
+
         new_entities = await extract_entities(description, backend)
         events = self._diff_entities(new_entities)
         self._persist_entities(new_entities)

@@ -1471,6 +1471,10 @@ class EmbodiedAgent:
         say_used = False
         final_text = "(no response)"
         non_say_streak = 0  # consecutive tool calls without say()
+        observation_action_name: str | None = None
+        observation_action_input: dict | None = None
+        pending_view_action_name: str | None = None
+        pending_view_action_input: dict | None = None
 
         for i in range(MAX_ITERATIONS):
             logger.debug("Agent iteration %d", i + 1)
@@ -1538,8 +1542,18 @@ class EmbodiedAgent:
                                 final_text[:500],
                                 self._scene_backend,
                                 prediction_engine=self._prediction,
+                                action_name=observation_action_name,
+                                action_input=observation_action_input,
                             )
                             _react_to_scene_events(scene_events, desires)
+                            pred_signal = self._prediction.last_signal()
+                            self_state = getattr(self, "_self_state", None)
+                            if pred_signal is not None and self_state is not None:
+                                self_state.apply_prediction_feedback(
+                                    external_surprise=pred_signal.external_surprise,
+                                    agency_error=pred_signal.agency_error,
+                                    action_name=pred_signal.action_name,
+                                )
                             # Propagate prediction error to workspace threshold
                             pred_coalition = self._prediction.as_coalition()
                             if pred_coalition is not None:
@@ -1611,6 +1625,17 @@ class EmbodiedAgent:
                 for tc in result.tool_calls:
                     if tc.name == "see":
                         camera_used = True
+                        if pending_view_action_name is not None:
+                            observation_action_name = pending_view_action_name
+                            observation_action_input = dict(pending_view_action_input or {})
+                        else:
+                            observation_action_name = "see"
+                            observation_action_input = dict(tc.input)
+                        pending_view_action_name = None
+                        pending_view_action_input = None
+                    elif tc.name in {"look", "walk"}:
+                        pending_view_action_name = tc.name
+                        pending_view_action_input = dict(tc.input)
                     if tc.name == "say":
                         say_used = True
                         non_say_streak = 0

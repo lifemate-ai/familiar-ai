@@ -124,6 +124,30 @@ async def test_update_sets_current_entities():
     assert "lamp" in tracker._current_entities
 
 
+@pytest.mark.asyncio
+async def test_update_records_action_on_prediction_engine():
+    """Action context is forwarded to the prediction engine before error computation."""
+    tracker = _in_memory_tracker()
+    payload = json.dumps({"entities": [{"label": "lamp", "category": "object", "confidence": 0.8}]})
+    backend = _backend_with_response(payload)
+    prediction = MagicMock()
+    prediction.compute_error = MagicMock(return_value=0.0)
+    prediction.update = MagicMock()
+
+    await tracker.update(
+        "A lamp on the table.",
+        backend,
+        prediction_engine=prediction,
+        action_name="look",
+        action_input={"direction": "left", "degrees": 45},
+    )
+
+    prediction.record_action.assert_called_once_with(
+        "look",
+        {"direction": "left", "degrees": 45},
+    )
+
+
 # ---------------------------------------------------------------------------
 # Tests: SceneTracker.update() — change detection
 # ---------------------------------------------------------------------------
