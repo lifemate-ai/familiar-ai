@@ -306,14 +306,15 @@ Run `./run.sh` (macOS/Linux/WSL2) or `run.bat` (Windows) and start chatting. Add
    ```
    Leave `CAMERA_USERNAME` and `CAMERA_PASSWORD` empty — credentials are already in the URL.
 
-6. If your PTZ control endpoint differs from the RTSP stream endpoint, set the optional PTZ overrides:
+6. Enable pan/tilt (PTZ). The Eufy C220 uses ONVIF on **port 8080** — different from Tapo's 2020:
    ```env
    CAMERA_PTZ_HOST=192.168.1.xxx
-   CAMERA_PTZ_USERNAME=your-ptz-user
-   CAMERA_PTZ_PASSWORD=your-ptz-password
-   CAMERA_PTZ_PORT=2020
+   CAMERA_PTZ_USERNAME=your-rtsp-username
+   CAMERA_PTZ_PASSWORD=your-rtsp-password
+   CAMERA_PTZ_PORT=8080
    ```
-   If you leave them unset, familiar-ai falls back to `CAMERA_HOST`, `CAMERA_USERNAME`, `CAMERA_PASSWORD`, and `CAMERA_ONVIF_PORT`.
+   familiar-ai will try port 8080 automatically as a fallback, but setting it explicitly is more reliable.
+   If pan/tilt still doesn't work, check the familiar-ai log for `ONVIF PTZ unavailable` — it will show exactly which ports were tried and why they failed.
 
 > **Note:** Eufy C220 allows only **one simultaneous RTSP connection**. If another app (e.g. a Wi-Fi cam MCP server) is connected to the same camera, familiar-ai will fail to get frames. Stop other clients before starting familiar-ai.
 

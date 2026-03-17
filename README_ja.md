@@ -263,14 +263,15 @@ API_KEY=sk-...
    ```
    `CAMERA_USERNAME` と `CAMERA_PASSWORD` は空白でOKです（URLに認証情報が含まれているため）。
 
-6. PTZ制御先がRTSP配信先と別なら、任意で `CAMERA_PTZ_*` を設定:
+6. パン・チルト（PTZ）を有効化します。Eufy C220のONVIFポートは **8080**（TapoのデフォルトはL 2020と異なります）：
    ```env
    CAMERA_PTZ_HOST=192.168.1.xxx
-   CAMERA_PTZ_USERNAME=your-ptz-user
-   CAMERA_PTZ_PASSWORD=your-ptz-password
-   CAMERA_PTZ_PORT=2020
+   CAMERA_PTZ_USERNAME=RTSPのユーザー名
+   CAMERA_PTZ_PASSWORD=RTSPのパスワード
+   CAMERA_PTZ_PORT=8080
    ```
-   未設定なら、`CAMERA_HOST` / `CAMERA_USERNAME` / `CAMERA_PASSWORD` / `CAMERA_ONVIF_PORT` に自動で fallback します。
+   familiar-aiはフォールバックとして8080を自動で試みますが、明示的に設定する方が確実です。
+   首振りが動かない場合は、familiar-aiのログで `ONVIF PTZ unavailable` を探してください — 試みたポートと失敗理由が表示されます。
 
 > **注意:** Eufy C220は**同時RTSPセッションが1つまで**です。他のアプリ（Wi-Fiカメラ用MCPサーバーなど）が同じカメラに接続中だと、familiar-aiはフレームを取得できません。familiar-ai起動前に他のクライアントを停止してください。
 

@@ -167,25 +167,46 @@ class CameraTool:
         if isinstance(hostname, int) or (isinstance(hostname, str) and hostname.isdigit()):
             return False
 
-        try:
-            # onvif-zeep-async bug: wsdl_dir defaults to site-packages/wsdl/
-            # instead of the correct site-packages/onvif/wsdl/
-            onvif_dir = os.path.dirname(onvif.__file__)
-            wsdl_dir = os.path.join(onvif_dir, "wsdl")
-            if not os.path.isdir(wsdl_dir):
-                wsdl_dir = os.path.join(os.path.dirname(onvif_dir), "wsdl")
+        # onvif-zeep-async bug: wsdl_dir defaults to site-packages/wsdl/
+        # instead of the correct site-packages/onvif/wsdl/
+        onvif_dir = os.path.dirname(onvif.__file__)
+        wsdl_dir = os.path.join(onvif_dir, "wsdl")
+        if not os.path.isdir(wsdl_dir):
+            wsdl_dir = os.path.join(os.path.dirname(onvif_dir), "wsdl")
 
-            self._cam_onvif = ONVIFCamera(hostname, port, username, password, wsdl_dir=wsdl_dir)
-            await self._cam_onvif.update_xaddrs()
-            media = await self._cam_onvif.create_media_service()
-            profiles = await media.GetProfiles()
-            self._profile_token = profiles[0].token if profiles else "Profile_1"
-            self._ptz = await self._cam_onvif.create_ptz_service()
-            logger.info("Camera PTZ connected via ONVIF: %s", hostname)
-            return True
-        except Exception as e:
-            logger.debug("ONVIF PTZ not available: %s", e)
-            return False
+        # Try the configured port first, then common fallback ports (Eufy/generic cameras
+        # often use 8080 or 80 instead of Tapo's default 2020).
+        ports_to_try = [port]
+        for fallback in (8080, 80):
+            if fallback != port:
+                ports_to_try.append(fallback)
+
+        last_error: Exception | None = None
+        for try_port in ports_to_try:
+            try:
+                cam = ONVIFCamera(hostname, try_port, username, password, wsdl_dir=wsdl_dir)
+                await cam.update_xaddrs()
+                media = await cam.create_media_service()
+                profiles = await media.GetProfiles()
+                self._profile_token = profiles[0].token if profiles else "Profile_1"
+                self._ptz = await cam.create_ptz_service()
+                self._cam_onvif = cam
+                logger.info("Camera PTZ connected via ONVIF: %s (port %d)", hostname, try_port)
+                return True
+            except Exception as e:
+                logger.debug("ONVIF PTZ port %d failed for %s: %s", try_port, hostname, e)
+                last_error = e
+
+        logger.warning(
+            "ONVIF PTZ unavailable for %s (tried ports %s). "
+            "Pan/tilt will be disabled. Last error: %s. "
+            "Tip: set CAMERA_PTZ_PORT to the correct ONVIF port for your camera "
+            "(Tapo=2020, Eufy=8080).",
+            hostname,
+            ports_to_try,
+            last_error,
+        )
+        return False
 
     def _get_stream_url_parts(self):
         if isinstance(self.host, str) and "://" in self.host:
