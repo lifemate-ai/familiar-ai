@@ -259,7 +259,8 @@ familiar-ai works with whatever hardware you have — or none at all.
 
 | Part | What it does | Example | Required? |
 |------|-------------|---------|-----------|
-| Wi-Fi PTZ camera | Eyes + neck | Tapo C220 (~$30), Eufy C220 | **Recommended** |
+| Wi-Fi PTZ camera | Eyes + neck | Tapo C220 (~$30) | **Recommended** |
+| Wi-Fi camera (fixed) | Eyes only | Eufy C220 (no pan/tilt) | Optional |
 | USB webcam | Eyes (fixed) | Any UVC camera | **Recommended** |
 | Robot vacuum | Legs | Any Tuya-compatible model | No |
 | PC / Raspberry Pi | Brain | Anything that runs Python | **Yes** |
@@ -292,7 +293,7 @@ Run `./run.sh` (macOS/Linux/WSL2) or `run.bat` (Windows) and start chatting. Add
 
 [Eufy C220 on Amazon Japan](https://www.amazon.co.jp/dp/B0CQQQ5NZ1/)
 
-> **Tested and confirmed working.** Follow these steps carefully — a few settings differ from Tapo.
+> **Streaming works. Pan/tilt does NOT work.** The Eufy C220 has no ONVIF PTZ service and no HTTP control API. For a camera with working pan/tilt, use the **Tapo C220** instead.
 
 1. In the Eufy Security app: go to the camera → **Settings → NAS(RTSP)** and enable it
 2. Set **Authentication** to **Basic** (Digest authentication does NOT work)
@@ -305,16 +306,6 @@ Run `./run.sh` (macOS/Linux/WSL2) or `run.bat` (Windows) and start chatting. Add
    CAMERA_PASSWORD=
    ```
    Leave `CAMERA_USERNAME` and `CAMERA_PASSWORD` empty — credentials are already in the URL.
-
-6. Enable pan/tilt (PTZ). The Eufy C220 uses ONVIF on **port 8080** — different from Tapo's 2020:
-   ```env
-   CAMERA_PTZ_HOST=192.168.1.xxx
-   CAMERA_PTZ_USERNAME=your-rtsp-username
-   CAMERA_PTZ_PASSWORD=your-rtsp-password
-   CAMERA_PTZ_PORT=8080
-   ```
-   familiar-ai will try port 8080 automatically as a fallback, but setting it explicitly is more reliable.
-   If pan/tilt still doesn't work, check the familiar-ai log for `ONVIF PTZ unavailable` — it will show exactly which ports were tried and why they failed.
 
 > **Note:** Eufy C220 allows only **one simultaneous RTSP connection**. If another app (e.g. a Wi-Fi cam MCP server) is connected to the same camera, familiar-ai will fail to get frames. Stop other clients before starting familiar-ai.
 
@@ -418,7 +409,7 @@ See [`persona-template/en.md`](./persona-template/en.md) for an example, or [`pe
 Yes. The embedding model (multilingual-e5-small) runs fine on CPU. A GPU makes it faster but isn't required.
 
 **Q: Can I use a camera other than Tapo?**
-Yes. Any camera that supports RTSP works for `see()`. Tested cameras: **Tapo C220** (ONVIF + RTSP) and **Eufy C220** (RTSP for vision; PTZ may require a different control endpoint). For Eufy, pass the full RTSP URL as `CAMERA_HOST`, set authentication to **Basic** in the app, and use `CAMERA_PTZ_*` overrides if pan/tilt lives on a separate ONVIF endpoint.
+Yes. Any RTSP camera works for `see()`. Tested: **Tapo C220** (ONVIF + RTSP, full pan/tilt) and **Eufy C220** (RTSP only — **pan/tilt not supported**). For pan/tilt, use the Tapo C220.
 
 **Q: Is my data sent anywhere?**
 Images and text are sent to your chosen LLM API for processing. Memories are stored locally in `~/.familiar_ai/`.
