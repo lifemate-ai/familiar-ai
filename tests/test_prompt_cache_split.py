@@ -62,6 +62,23 @@ class TestSystemPromptSplit:
         _, variable = agent._system_prompt()
         assert "(interoception" in variable
 
+    def test_variable_part_reflects_self_state(self, agent):
+        from familiar_agent.workspace import Coalition
+
+        agent._self_state.apply_broadcast(
+            Coalition(
+                source="prediction",
+                summary="surprise",
+                activation=0.9,
+                urgency=0.8,
+                novelty=0.9,
+                context_block="[prediction]",
+            )
+        )
+        _, variable = agent._system_prompt()
+        assert "(body-state" in variable
+        assert "(tension" in variable
+
     def test_variable_part_contains_feelings_when_provided(self, agent):
         _, variable = agent._system_prompt(feelings_ctx="feeling great today")
         assert "feeling great today" in variable

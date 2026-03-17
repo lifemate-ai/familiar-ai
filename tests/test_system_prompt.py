@@ -141,3 +141,21 @@ def test_interoception_balanced_parens() -> None:
     """S-expression output should have balanced parentheses."""
     result = _interoception(time.time(), 3)
     assert result.count("(") == result.count(")")
+
+
+def test_interoception_reflects_self_state_when_provided() -> None:
+    result = _interoception(
+        time.time(),
+        2,
+        self_state={
+            "arousal": 0.85,
+            "fatigue": 0.2,
+            "social_pull": 0.75,
+            "sensor_confidence": 0.35,
+            "unresolved_tension": 0.8,
+            "focus_stability": 0.3,
+        },
+    )
+    assert "(body-state" in result
+    assert "(tension" in result
+    assert "(sensing" in result

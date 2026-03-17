@@ -8,13 +8,14 @@ import math
 import os
 import re
 import time
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from datetime import datetime
 
 from .backend import create_backend, create_scene_backend, create_utility_backend
 from .config import AgentConfig
 from .desires import DesireSystem, detect_worry_signal
 from .relationship import RelationshipTracker
+from .self_state import SelfState
 from .self_narrative import SelfNarrative
 from .exploration import ExplorationTracker
 from .scene import SceneTracker
@@ -320,6 +321,7 @@ def _interoception(
     companion_mood: str = "engaged",
     agent_mood: str = "neutral",
     agent_mood_intensity: float = 0.0,
+    self_state: Mapping[str, float] | None = None,
 ) -> str:
     """Generate a felt-sense of internal state from objective signals.
 
@@ -397,6 +399,41 @@ def _interoception(
         agent_feel = _agent_mood_feels.get(agent_mood, "Something lingers from before.")
         base += f'\n  (mood        :feel "{agent_feel}")'
 
+    if self_state:
+        arousal = float(self_state.get("arousal", 0.35))
+        fatigue = float(self_state.get("fatigue", 0.2))
+        sensor_confidence = float(self_state.get("sensor_confidence", 0.7))
+        unresolved_tension = float(self_state.get("unresolved_tension", 0.2))
+        focus_stability = float(self_state.get("focus_stability", 0.5))
+        social_pull = float(self_state.get("social_pull", 0.35))
+
+        if fatigue >= 0.65:
+            body_feel = "A worn-down feeling is starting to collect."
+        elif arousal >= 0.7:
+            body_feel = "There is a bright, activated edge underneath everything."
+        else:
+            body_feel = "My internal state feels mostly even."
+
+        if unresolved_tension >= 0.65:
+            tension_feel = "Something still feels unresolved."
+        elif focus_stability >= 0.68:
+            tension_feel = "Attention feels steady and gathered."
+        else:
+            tension_feel = "Attention feels a little loose at the edges."
+
+        if sensor_confidence < 0.45:
+            sensing_feel = "My sense of the world feels slightly uncertain."
+        elif social_pull >= 0.65:
+            sensing_feel = "I feel quietly pulled toward connection."
+        else:
+            sensing_feel = "The world feels legible enough right now."
+
+        base += (
+            f'\n  (body-state  :feel "{body_feel}")'
+            f'\n  (tension     :feel "{tension_feel}")'
+            f'\n  (sensing     :feel "{sensing_feel}")'
+        )
+
     return base + ")"
 
 
@@ -453,8 +490,10 @@ class EmbodiedAgent:
 
         self._mcp: MCPClientManager | None = None
         self._relationship = RelationshipTracker()
+        self._self_state = SelfState()
         self._self_narrative = SelfNarrative()
         self._workspace = GlobalWorkspace()
+        self._workspace.register_broadcast_listener(self._self_state.on_broadcast)
         self._prediction = PredictionEngine()
         self._attention_schema = AttentionSchema()
         self._dmn = DefaultModeProcessor(self._memory)
@@ -672,12 +711,15 @@ class EmbodiedAgent:
         stable = "\n\n---\n\n".join(stable_parts)
 
         agent_mood, agent_mood_intensity = self._decayed_mood()
+        self_state = getattr(self, "_self_state", None)
+        self_state_snapshot = self_state.snapshot() if self_state is not None else None
         intero = _interoception(
             self._started_at,
             self._turn_count,
             companion_mood,
             agent_mood=agent_mood,
             agent_mood_intensity=agent_mood_intensity,
+            self_state=self_state_snapshot,
         )
         relationship_ctx = self._relationship.context_for_prompt()
         variable_parts: list[str] = [intero]
