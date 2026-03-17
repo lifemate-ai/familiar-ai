@@ -1439,14 +1439,23 @@ class FamiliarWindow(QMainWindow):
             if not self._stream.has_content():
                 _update_thinking_status()
 
+        say_fired = False
+
         def on_text(chunk: str) -> None:
+            if say_fired:
+                # Discard post-say text: LLMs often re-emit say() content as plain
+                # text after the tool call (with audio tags intact). Suppressing it
+                # prevents the raw tagged text from appearing below the clean version.
+                return
             self._stream.clear_status()
             self._stream.append_chunk(chunk)
 
         def on_action(name: str, tool_input: dict) -> None:
+            nonlocal say_fired
             if name == "say":
                 # Discard pre-say text, then commit each say() immediately so
                 # multiple calls all appear in order rather than overwriting.
+                say_fired = True
                 self._stream.commit_and_clear()
                 raw = str(tool_input.get("text", ""))
                 clean = re.sub(r"\[.*?\]", "", raw).strip()
@@ -1481,9 +1490,13 @@ class FamiliarWindow(QMainWindow):
             )
             final_text = await self._agent_task
             committed = self._stream.commit_and_clear()
-            display = committed.strip() or final_text.strip()
-            if display:
-                self._log.append_line(f"[{self._agent_display_name}] {display}")
+            # When say() was called, the spoken content is already in the log
+            # (clean, tags stripped). Suppress final_text to avoid the LLM's
+            # post-say text echo (same content with raw audio tags) appearing again.
+            if not say_fired:
+                display = committed.strip() or final_text.strip()
+                if display:
+                    self._log.append_line(f"[{self._agent_display_name}] {display}")
         except asyncio.CancelledError:
             self._stream.commit_and_clear()
             if not self._cancel_requested:
