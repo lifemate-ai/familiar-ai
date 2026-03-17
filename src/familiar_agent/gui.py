@@ -1453,9 +1453,6 @@ class FamiliarWindow(QMainWindow):
                 if clean:
                     self._log.append_line(f"[{self._agent_display_name}] {clean}")
             else:
-                committed = self._stream.commit_and_clear()
-                if committed.strip():
-                    self._log.append_line(f"[{self._agent_display_name}] {committed.strip()}")
                 self._log.append_action(name, tool_input)
             if name == "look":
                 self._request_look_preview(tool_input.get("degrees"))

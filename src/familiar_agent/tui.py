@@ -441,7 +441,6 @@ class FamiliarApp(App):
                     log.write(f"{name_tag} {clean}")
                     self._append_log(f"{self._agent_name} ▶ {clean}")
             else:
-                _flush_stream()
                 label = _format_action(name, tool_input)
                 log.write(f"[dim]{label}[/dim]")
             # Restart spinner while waiting for the next LLM response
