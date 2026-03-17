@@ -44,8 +44,13 @@ class RealtimeSttClient:
         self.on_partial: asyncio.Queue[str] | None = None
         self.on_committed: asyncio.Queue[str] | None = None
 
+    @property
+    def connected(self) -> bool:
+        return self._connected
+
     async def connect(self) -> None:
         """Connect to ElevenLabs Realtime STT WebSocket."""
+        await self._cleanup()
         self._session = aiohttp.ClientSession()
         headers = {"xi-api-key": self.api_key}
         try:
@@ -71,6 +76,7 @@ class RealtimeSttClient:
         try:
             await self._ws.send_str(json.dumps(payload))
         except Exception as e:
+            self._connected = False
             logger.warning("Realtime STT send failed: %s", e)
 
     async def _recv_loop(self) -> None:
@@ -99,6 +105,7 @@ class RealtimeSttClient:
                     except json.JSONDecodeError:
                         pass
                 elif msg.type in (aiohttp.WSMsgType.CLOSED, aiohttp.WSMsgType.ERROR):
+                    logger.warning("Realtime STT websocket closed: type=%s", msg.type.name)
                     break
         except asyncio.CancelledError:
             pass
