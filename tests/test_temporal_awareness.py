@@ -242,3 +242,48 @@ async def test_anniversary_context_no_crash_on_none_earliest_date() -> None:
 
     result = await agent._anniversary_context()
     assert result is None
+
+
+@pytest.mark.asyncio
+async def test_online_temporal_context_surfaces_resurfaced_memory_and_thread() -> None:
+    from familiar_agent.agent import EmbodiedAgent
+
+    agent = EmbodiedAgent.__new__(EmbodiedAgent)
+    agent._turn_count = 3
+    agent._self_state = MagicMock()
+    agent._self_state.snapshot.return_value = {"unresolved_tension": 0.72}
+    agent._proactive_memory_context = AsyncMock(return_value="あの夜に空を探した")
+    agent._anniversary_context = AsyncMock(return_value=None)
+
+    desires = MagicMock()
+    desires.level = MagicMock(return_value=0.0)
+    desires.curiosity_target = "窓の向こうにある空の気配"
+
+    result = await agent._online_temporal_context(desires=desires)
+
+    assert result is not None
+    assert "[Resurfaced memory]" in result
+    assert "[Unresolved thread]" in result
+    assert "空" in result
+
+
+@pytest.mark.asyncio
+async def test_online_temporal_context_skips_first_turn() -> None:
+    from familiar_agent.agent import EmbodiedAgent
+
+    agent = EmbodiedAgent.__new__(EmbodiedAgent)
+    agent._turn_count = 1
+    agent._self_state = MagicMock()
+    agent._self_state.snapshot.return_value = {"unresolved_tension": 0.9}
+    agent._proactive_memory_context = AsyncMock(return_value="昔の記憶")
+    agent._anniversary_context = AsyncMock(return_value="[Milestone]: 14 days since first memory.")
+
+    desires = MagicMock()
+    desires.level = MagicMock(return_value=0.9)
+    desires.curiosity_target = "未解決の糸口"
+
+    result = await agent._online_temporal_context(desires=desires)
+
+    assert result is None
+    agent._proactive_memory_context.assert_not_awaited()
+    agent._anniversary_context.assert_not_awaited()

@@ -541,6 +541,50 @@ class ObservationMemory:
             ),
         )
 
+    def _adjust_projection_confidence_locked(
+        self,
+        db: sqlite3.Connection,
+        *,
+        table: str,
+        key_column: str,
+        text_column: str,
+        entity_type: str,
+        entity_key: str,
+        delta: float,
+        reason: str,
+    ) -> float | None:
+        row = db.execute(
+            f"SELECT {text_column}, confidence FROM {table} WHERE {key_column} = ?",
+            (entity_key,),
+        ).fetchone()
+        if row is None:
+            return None
+
+        prev_text = str(row[text_column])
+        prev_conf = float(row["confidence"])
+        new_conf = max(0.0, min(1.0, prev_conf + float(delta)))
+        if abs(new_conf - prev_conf) <= 1e-6:
+            return new_conf
+
+        now_iso = self._now_iso()
+        db.execute(
+            f"UPDATE {table} SET confidence = ?, last_seen_at = ?, updated_at = ? "
+            f"WHERE {key_column} = ?",
+            (new_conf, now_iso, now_iso, entity_key),
+        )
+        self._insert_revision_locked(
+            db,
+            entity_type=entity_type,
+            entity_key=entity_key,
+            previous_text=prev_text,
+            new_text=prev_text,
+            previous_confidence=prev_conf,
+            new_confidence=new_conf,
+            source_memory_id=None,
+            reason=reason,
+        )
+        return new_conf
+
     def _project_memory_locked(
         self,
         db: sqlite3.Connection,
@@ -601,6 +645,63 @@ class ObservationMemory:
                 source_memory_id=source_memory_id,
                 confidence=0.62,
             )
+
+    def adjust_semantic_fact_confidence(
+        self,
+        fact_key: str,
+        delta: float,
+        *,
+        reason: str = "adaptive_update",
+    ) -> float | None:
+        with self._db_lock:
+            db = self._ensure_connected()
+            result = self._adjust_projection_confidence_locked(
+                db,
+                table="semantic_facts",
+                key_column="fact_key",
+                text_column="fact_text",
+                entity_type="semantic_fact",
+                entity_key=fact_key,
+                delta=delta,
+                reason=reason,
+            )
+            db.commit()
+            return result
+
+    def adjust_behavior_policy_confidence(
+        self,
+        policy_key: str,
+        delta: float,
+        *,
+        reason: str = "adaptive_update",
+        policy_text: str | None = None,
+        trigger_context: str = "",
+        action_hint: str = "",
+    ) -> float | None:
+        with self._db_lock:
+            db = self._ensure_connected()
+            result = self._adjust_projection_confidence_locked(
+                db,
+                table="behavior_policies",
+                key_column="policy_key",
+                text_column="policy_text",
+                entity_type="behavior_policy",
+                entity_key=policy_key,
+                delta=delta,
+                reason=reason,
+            )
+            if result is None and policy_text and delta > 0.0:
+                result = max(0.0, min(1.0, 0.6 + float(delta)))
+                self._upsert_behavior_policy_locked(
+                    db,
+                    policy_key=policy_key,
+                    policy_text=policy_text,
+                    trigger_context=trigger_context,
+                    action_hint=action_hint,
+                    confidence=result,
+                )
+            db.commit()
+            return result
 
     def _materialize_memory_save_event(self, event_id: str, payload: dict[str, Any]) -> bool:
         """Materialize a memory.save payload into observations + embeddings."""
@@ -1211,6 +1312,40 @@ class ObservationMemory:
 
     async def recall_behavior_policies_async(self, query: str, n: int = 5) -> list[dict]:
         return await asyncio.to_thread(self.recall_behavior_policies, query, n)
+
+    async def adjust_semantic_fact_confidence_async(
+        self,
+        fact_key: str,
+        delta: float,
+        *,
+        reason: str = "adaptive_update",
+    ) -> float | None:
+        return await asyncio.to_thread(
+            self.adjust_semantic_fact_confidence,
+            fact_key,
+            delta,
+            reason=reason,
+        )
+
+    async def adjust_behavior_policy_confidence_async(
+        self,
+        policy_key: str,
+        delta: float,
+        *,
+        reason: str = "adaptive_update",
+        policy_text: str | None = None,
+        trigger_context: str = "",
+        action_hint: str = "",
+    ) -> float | None:
+        return await asyncio.to_thread(
+            self.adjust_behavior_policy_confidence,
+            policy_key,
+            delta,
+            reason=reason,
+            policy_text=policy_text,
+            trigger_context=trigger_context,
+            action_hint=action_hint,
+        )
 
     # ------------------------------------------------------------------
     # Phase 2-2: importance decay
