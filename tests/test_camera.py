@@ -26,6 +26,10 @@ def _make_camera_tool(host: str = "192.168.1.100"):
         cam.password = "password"
         cam.port = 2020
         cam.preview = False
+        cam.ptz_host = host
+        cam.ptz_username = "admin"
+        cam.ptz_password = "password"
+        cam.ptz_port = 2020
         cam._cam_onvif = None
         cam._ptz = None
         cam._profile_token = None
@@ -170,3 +174,34 @@ async def test_call_unknown_tool_returns_error():
     result, img = await cam.call("nonexistent", {})
 
     assert "Unknown" in result or "nonexistent" in result
+
+
+def test_ptz_params_fall_back_to_stream_url_credentials():
+    cam = _make_camera_tool("rtsp://stream-user:stream-pass@192.168.1.206/live0")
+    cam.username = ""
+    cam.password = ""
+    cam.ptz_host = cam.host
+    cam.ptz_username = ""
+    cam.ptz_password = ""
+
+    host, username, password, port = cam._get_ptz_connection_params()
+
+    assert host == "192.168.1.206"
+    assert username == "stream-user"
+    assert password == "stream-pass"
+    assert port == 2020
+
+
+def test_ptz_params_prefer_explicit_overrides():
+    cam = _make_camera_tool("rtsp://stream-user:stream-pass@192.168.1.206/live0")
+    cam.ptz_host = "192.168.1.145"
+    cam.ptz_username = "ptz-user"
+    cam.ptz_password = "ptz-pass"
+    cam.ptz_port = 8899
+
+    host, username, password, port = cam._get_ptz_connection_params()
+
+    assert host == "192.168.1.145"
+    assert username == "ptz-user"
+    assert password == "ptz-pass"
+    assert port == 8899

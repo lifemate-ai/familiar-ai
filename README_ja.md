@@ -133,6 +133,7 @@ cp .env.example .env
 | `AGENT_NAME` | TUIに表示される名前（例: `ゆきね`） |
 | `CAMERA_HOST` | ONVIF/RTSPカメラのIPアドレスまたはRTSP URL |
 | `CAMERA_USERNAME` / `CAMERA_PASSWORD` | カメラ認証情報 |
+| `CAMERA_PTZ_HOST` / `CAMERA_PTZ_USERNAME` / `CAMERA_PTZ_PASSWORD` / `CAMERA_PTZ_PORT` | PTZ制御先がRTSP配信先と異なる場合の任意 override |
 | `ELEVENLABS_API_KEY` | 音声出力用 — [elevenlabs.io](https://elevenlabs.io/) |
 | `REALTIME_STT` | `true` でハンズフリー音声入力を有効化（`ELEVENLABS_API_KEY` が必要） |
 | `TTS_OUTPUT` | 音声出力先: `local`（PCスピーカー、デフォルト）\| `remote`（カメラスピーカー）\| `both` |
@@ -262,6 +263,15 @@ API_KEY=sk-...
    ```
    `CAMERA_USERNAME` と `CAMERA_PASSWORD` は空白でOKです（URLに認証情報が含まれているため）。
 
+6. PTZ制御先がRTSP配信先と別なら、任意で `CAMERA_PTZ_*` を設定:
+   ```env
+   CAMERA_PTZ_HOST=192.168.1.xxx
+   CAMERA_PTZ_USERNAME=your-ptz-user
+   CAMERA_PTZ_PASSWORD=your-ptz-password
+   CAMERA_PTZ_PORT=2020
+   ```
+   未設定なら、`CAMERA_HOST` / `CAMERA_USERNAME` / `CAMERA_PASSWORD` / `CAMERA_ONVIF_PORT` に自動で fallback します。
+
 > **注意:** Eufy C220は**同時RTSPセッションが1つまで**です。他のアプリ（Wi-Fiカメラ用MCPサーバーなど）が同じカメラに接続中だと、familiar-aiはフレームを取得できません。familiar-ai起動前に他のクライアントを停止してください。
 
 ### 音声出力（ElevenLabs）
@@ -298,7 +308,7 @@ ELEVENLABS_API_KEY=sk_...   # TTSと同じキー
 はい。埋め込みモデル（multilingual-e5-small）はCPUで動きます。GPUがあれば速くなりますが、必須ではありません。
 
 **Q: Tapo以外のカメラは使えますか？**
-はい。RTSPに対応したカメラであれば動きます。動作確認済み: **Tapo C220**（ONVIF + RTSP）、**Eufy C220**（RTSPのみ — 上記のセットアップ手順を参照）。Eufyの場合は `CAMERA_HOST` に完全なRTSP URLを設定し、アプリの認証を**Basic**に変更してください。
+はい。少なくとも `see()` は RTSP に対応していれば動きます。動作確認済み: **Tapo C220**（ONVIF + RTSP）、**Eufy C220**（視界はRTSP、PTZは別制御先の可能性あり）。Eufyの場合は `CAMERA_HOST` に完全なRTSP URLを設定し、アプリの認証を **Basic** に変更してください。パン・チルトの制御先が別なら `CAMERA_PTZ_*` override を使ってください。
 
 **Q: データはどこかに送られますか？**
 画像とテキストは選択したLLM APIに送信されます。記憶はローカルの `~/.familiar_ai/` に保存されます。

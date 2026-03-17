@@ -32,12 +32,21 @@ class CameraTool:
         password: str | None = None,
         port: int = 2020,
         preview: bool = False,
+        *,
+        ptz_host: str | int | None = None,
+        ptz_username: str | None = None,
+        ptz_password: str | None = None,
+        ptz_port: int | None = None,
     ):
         self.host = host
         self.username = username
         self.password = password
         self.port = port
         self.preview = preview
+        self.ptz_host = ptz_host if ptz_host is not None else host
+        self.ptz_username = ptz_username
+        self.ptz_password = ptz_password
+        self.ptz_port = ptz_port if ptz_port is not None else port
 
         self._cam_onvif: Any = None
         self._ptz: Any = None
@@ -55,8 +64,11 @@ class CameraTool:
     @property
     def is_pan_tilt_available(self) -> bool:
         """Check if PTZ controls are supported by the camera."""
-        # ONVIF is only attempted if host is not a simple integer (USB)
-        if isinstance(self.host, int) or (isinstance(self.host, str) and self.host.isdigit()):
+        hostname, _username, _password, _port = self._get_ptz_connection_params()
+        # ONVIF is only attempted if PTZ host is not a simple integer (USB)
+        if hostname is None:
+            return False
+        if isinstance(hostname, int) or (isinstance(hostname, str) and hostname.isdigit()):
             return False
         # If PTZ service is already connected, it's available.
         # Otherwise, assume it's available if it's an IP camera (will be lazy-connected later).
@@ -149,7 +161,10 @@ class CameraTool:
         if self._cam_onvif is not None:
             return True
 
-        if isinstance(self.host, int) or (isinstance(self.host, str) and self.host.isdigit()):
+        hostname, username, password, port = self._get_ptz_connection_params()
+        if hostname is None:
+            return False
+        if isinstance(hostname, int) or (isinstance(hostname, str) and hostname.isdigit()):
             return False
 
         try:
@@ -160,14 +175,7 @@ class CameraTool:
             if not os.path.isdir(wsdl_dir):
                 wsdl_dir = os.path.join(os.path.dirname(onvif_dir), "wsdl")
 
-            hostname = self.host
-            if isinstance(hostname, str) and "://" in hostname:
-                parsed = urlparse(hostname)
-                hostname = parsed.hostname or self.host
-
-            self._cam_onvif = ONVIFCamera(
-                hostname, self.port, self.username, self.password, wsdl_dir=wsdl_dir
-            )
+            self._cam_onvif = ONVIFCamera(hostname, port, username, password, wsdl_dir=wsdl_dir)
             await self._cam_onvif.update_xaddrs()
             media = await self._cam_onvif.create_media_service()
             profiles = await media.GetProfiles()
@@ -178,6 +186,30 @@ class CameraTool:
         except Exception as e:
             logger.debug("ONVIF PTZ not available: %s", e)
             return False
+
+    def _get_stream_url_parts(self):
+        if isinstance(self.host, str) and "://" in self.host:
+            return urlparse(self.host)
+        return None
+
+    def _get_ptz_connection_params(
+        self,
+    ) -> tuple[str | int | None, str | None, str | None, int]:
+        ptz_host = self.ptz_host
+        if isinstance(ptz_host, str) and "://" in ptz_host:
+            parsed_ptz = urlparse(ptz_host)
+            hostname: str | int | None = parsed_ptz.hostname or ptz_host
+        else:
+            hostname = ptz_host
+
+        stream_parts = self._get_stream_url_parts()
+        stream_username = stream_parts.username if stream_parts is not None else None
+        stream_password = stream_parts.password if stream_parts is not None else None
+
+        username = self.ptz_username or self.username or stream_username
+        password = self.ptz_password or self.password or stream_password
+        port = self.ptz_port
+        return hostname, username, password, port
 
     def _get_stream_url(self) -> str | int:
         if isinstance(self.host, int) or (isinstance(self.host, str) and self.host.isdigit()):
