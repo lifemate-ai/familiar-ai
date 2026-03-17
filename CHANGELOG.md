@@ -15,9 +15,11 @@ This project adheres to [Semantic Versioning](https://semver.org/).
   - Opt-in via `REALTIME_STT=true` in `.env`
   - Coexists with existing batch STT (Ctrl+T / Space PTT)
 - Support for full RTSP URLs in `CAMERA_HOST` (enables ATOMCam and other non-standard RTSP paths)
+- Persistent latent self state driven by workspace broadcasts, with prompt-visible interoception updates and dedicated test coverage
 
 ### Changed
 - GUI settings dialog now keeps JP labels fully visible (including short labels like `名`), refreshed the app to a bright, soft, rounded light theme, split first-turn startup status from "thinking", and increased GUI font sizing for readability.
+- Interoception now reflects internal self-state signals in addition to time, uptime, social context, and mood
 
 ## [0.1.0] - 2026-02-22
 
