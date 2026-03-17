@@ -1823,10 +1823,9 @@ class EmbodiedAgent:
 
                 # Auto-say: if the model wrote text but never called say(), speak it aloud.
                 if self._tts and not say_used and final_text and final_text != "(no response)":
-                    spoken = final_text[:150]
                     if on_action:
-                        on_action("say", {"text": spoken})
-                    await self._tts.call("say", {"text": spoken})
+                        on_action("say", {"text": final_text})
+                    await self._tts.call("say", {"text": final_text})
 
                 if final_text and final_text != "(no response)":
                     # Save observation and compute novelty for ICL exploration
