@@ -1260,7 +1260,9 @@ class FamiliarWindow(QMainWindow):
             return
         self._input.clear()
         self._stream.clear_status()
-        self._log.append_line(f"[{self._companion_display_name}] {text}")
+        # Don't log here — logged at the start of _run_agent so that user
+        # messages always appear after the current agent turn's say() output,
+        # even when the user types before the AI finishes speaking.
         self._input_queue.put_nowait(text)
         qsize = self._input_queue.qsize()
         if qsize >= _GUI_QUEUE_WARN_SIZE:
@@ -1280,14 +1282,15 @@ class FamiliarWindow(QMainWindow):
         self._stream.set_status(f"🎤 {partial}")
 
     def _on_realtime_stt_committed(self, text: str) -> None:
-        """Display committed STT transcript as a user message bubble."""
+        """Queue committed STT transcript as a user message (logged in _run_agent)."""
         if self._closing:
             return
         spoken = text.strip()
         if not spoken:
             return
         self._stream.clear_status()
-        self._log.append_line(f"[{self._companion_display_name}] {spoken}")
+        # Don't log here — _run_agent will log it in order after current turn ends.
+        self._input_queue.put_nowait(spoken)
 
     async def _start_realtime_stt(self) -> None:
         """Initialize realtime STT and feed transcripts into the GUI input queue."""
@@ -1394,6 +1397,10 @@ class FamiliarWindow(QMainWindow):
             await self._run_agent(text)
 
     async def _run_agent(self, user_input: str, inner_voice: str = "") -> None:
+        # Log user message here (not in _on_send) so it appears after the
+        # previous agent turn's say() output — preserving chronological order.
+        if user_input:
+            self._log.append_line(f"[{self._companion_display_name}] {user_input}")
         turn_started = time.perf_counter()
         self._agent_running = True
         self._cancel_requested = False
@@ -1445,13 +1452,13 @@ class FamiliarWindow(QMainWindow):
 
         def on_action(name: str, tool_input: dict) -> None:
             if name == "say":
-                # Discard any pre-say text and replace with clean spoken content
-                # so the display shows what was said rather than both text + action.
+                # Discard pre-say text, then commit each say() immediately so
+                # multiple calls all appear in order rather than overwriting.
                 self._stream.commit_and_clear()
                 raw = str(tool_input.get("text", ""))
                 clean = re.sub(r"\[.*?\]", "", raw).strip()
                 if clean:
-                    self._stream.append_chunk(clean)
+                    self._log.append_line(f"[{self._agent_display_name}] {clean}")
             else:
                 committed = self._stream.commit_and_clear()
                 if committed.strip():

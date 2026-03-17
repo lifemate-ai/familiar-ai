@@ -11,6 +11,7 @@ Keeping these here prevents duplication across tui.py, gui.py, and main.py.
 
 from __future__ import annotations
 
+import os
 from typing import TYPE_CHECKING
 
 from ._i18n import _t
@@ -223,7 +224,7 @@ def _format_tom_result(result: str) -> str | None:
 # ---------------------------------------------------------------------------
 
 IDLE_CHECK_INTERVAL: float = 10.0  # seconds between desire checks when idle
-DESIRE_COOLDOWN: float = 90.0  # seconds after last user interaction before desires fire
+DESIRE_COOLDOWN: float = float(os.environ.get("DESIRE_COOLDOWN", "90"))  # configurable
 
 
 def should_fire_idle_desire(

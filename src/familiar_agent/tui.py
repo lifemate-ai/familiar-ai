@@ -430,16 +430,16 @@ class FamiliarApp(App):
             action_counts[name] = action_counts.get(name, 0) + 1
             _stop_spinner()
             if name == "say":
-                # Replace any accumulated text with the spoken content so the
-                # display shows what was said — not a separate dim action label.
+                # Discard pre-say text (usually redundant with spoken content),
+                # then commit each say() directly to the log so multiple calls
+                # all appear — not overwritten by the next one.
+                text_buf.clear()
+                stream.update("")
                 raw = str(tool_input.get("text", ""))
                 clean = re.sub(r"\[.*?\]", "", raw).strip()
-                text_buf.clear()
                 if clean:
-                    text_buf.append(clean)
-                    stream.update(f"{name_tag} {clean}")
-                else:
-                    stream.update("")
+                    log.write(f"{name_tag} {clean}")
+                    self._append_log(f"{self._agent_name} ▶ {clean}")
             else:
                 _flush_stream()
                 label = _format_action(name, tool_input)
