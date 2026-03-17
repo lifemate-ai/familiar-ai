@@ -33,6 +33,8 @@ logger = logging.getLogger(__name__)
 # ── Filler / short-utterance filter ──────────────────────────────────
 _FILLER_WORDS = frozenset("えー ええと えっと あの その うーん んー ま はい うん ん".split())
 _DEDUPE_WINDOW_SECS = 3.0
+_RECONNECT_POLL_SECS = 1.0
+_RECONNECT_BACKOFF_SECS = 2.0
 
 
 def _is_only_punct_or_symbol(s: str) -> bool:
@@ -73,7 +75,13 @@ class RealtimeSttSession:
         self._mic_capture: MicCapture | None = None
         self._relay_task: asyncio.Task | None = None
         self._partial_task: asyncio.Task | None = None
+        self._monitor_task: asyncio.Task | None = None
         self._committed_queue: asyncio.Queue[str | None] | None = None
+        self._incoming_committed: asyncio.Queue[str] = asyncio.Queue()
+        self._incoming_partial: asyncio.Queue[str] = asyncio.Queue()
+        self._connect_lock = asyncio.Lock()
+        self._loop: asyncio.AbstractEventLoop | None = None
+        self._stopping = False
 
         # Deduplication state
         self._last_normalized_text = ""
@@ -86,7 +94,12 @@ class RealtimeSttSession:
     @property
     def active(self) -> bool:
         """True while the session is running."""
-        return self._stt_client is not None
+        return self._mic_capture is not None or self._monitor_task is not None
+
+    @property
+    def connected(self) -> bool:
+        """True while the websocket transport is currently live."""
+        return bool(self._stt_client and self._stt_client.connected)
 
     async def start(
         self,
@@ -94,29 +107,37 @@ class RealtimeSttSession:
         committed_queue: asyncio.Queue[str | None],
     ) -> None:
         """Connect the STT WebSocket and start microphone capture."""
-        from .tools.realtime_stt import RealtimeSttClient  # noqa: PLC0415
         from .tools.mic import MicCapture  # noqa: PLC0415
 
-        self._committed_queue = committed_queue
+        if self.active:
+            logger.debug("Realtime STT session already active; start() is a no-op")
+            return
 
-        self._stt_client = RealtimeSttClient(self._api_key)
-        self._stt_client.on_committed = asyncio.Queue()
-        self._stt_client.on_partial = asyncio.Queue()
-        await self._stt_client.connect()
+        self._loop = loop
+        self._committed_queue = committed_queue
+        self._stopping = False
+        self._last_normalized_text = ""
+        self._last_time = 0.0
+        self._incoming_committed = asyncio.Queue()
+        self._incoming_partial = asyncio.Queue()
+
+        await self._connect_client()
 
         self._relay_task = asyncio.create_task(self._committed_relay())
         self._partial_task = asyncio.create_task(self._partial_relay())
+        self._monitor_task = asyncio.create_task(self._monitor_connection())
 
-        self._mic_capture = MicCapture(on_audio=self._stt_client.send_audio)
+        self._mic_capture = MicCapture(on_audio=self._send_audio)
         self._mic_capture.start(loop)
         logger.info("Realtime STT session started")
 
     async def stop(self) -> None:
         """Stop microphone capture and close the STT WebSocket."""
+        self._stopping = True
         if self._mic_capture:
             self._mic_capture.stop()
             self._mic_capture = None
-        for task in (self._relay_task, self._partial_task):
+        for task in (self._relay_task, self._partial_task, self._monitor_task):
             if task:
                 task.cancel()
                 try:
@@ -125,6 +146,7 @@ class RealtimeSttSession:
                     pass
         self._relay_task = None
         self._partial_task = None
+        self._monitor_task = None
         if self._stt_client:
             await self._stt_client.close()
             self._stt_client = None
@@ -132,12 +154,56 @@ class RealtimeSttSession:
 
     # ── internal relay tasks ─────────────────────────────────────────
 
+    async def _connect_client(self) -> None:
+        from .tools.realtime_stt import RealtimeSttClient  # noqa: PLC0415
+
+        async with self._connect_lock:
+            if self._stopping:
+                return
+
+            old_client = self._stt_client
+            self._stt_client = None
+            if old_client is not None:
+                await old_client.close()
+
+            client = RealtimeSttClient(self._api_key)
+            client.on_committed = self._incoming_committed
+            client.on_partial = self._incoming_partial
+            await client.connect()
+            self._stt_client = client
+            logger.info("Realtime STT transport connected")
+
+    async def _ensure_connected(self) -> bool:
+        client = self._stt_client
+        if client is not None and client.connected:
+            return False
+        await self._connect_client()
+        return True
+
+    async def _monitor_connection(self) -> None:
+        """Reconnect when the realtime websocket drops mid-session."""
+        while not self._stopping:
+            await asyncio.sleep(_RECONNECT_POLL_SECS)
+            try:
+                reconnected = await self._ensure_connected()
+                if reconnected:
+                    logger.warning("Realtime STT disconnected; reconnected transport")
+            except asyncio.CancelledError:
+                raise
+            except Exception as exc:
+                logger.warning("Realtime STT reconnect failed: %s", exc)
+                await asyncio.sleep(_RECONNECT_BACKOFF_SECS)
+
+    async def _send_audio(self, pcm16le: bytes) -> None:
+        client = self._stt_client
+        if client is None:
+            return
+        await client.send_audio(pcm16le)
+
     async def _committed_relay(self) -> None:
-        assert self._stt_client is not None
-        assert self._stt_client.on_committed is not None
         assert self._committed_queue is not None
         while True:
-            text = await self._stt_client.on_committed.get()
+            text = await self._incoming_committed.get()
             if should_skip_stt(text):
                 continue
             normalized = _normalize_for_dedupe(text)
@@ -157,10 +223,8 @@ class RealtimeSttSession:
             await self._committed_queue.put(text)
 
     async def _partial_relay(self) -> None:
-        assert self._stt_client is not None
-        assert self._stt_client.on_partial is not None
         while True:
-            text = await self._stt_client.on_partial.get()
+            text = await self._incoming_partial.get()
             if self.on_partial:
                 self.on_partial(text)
 
