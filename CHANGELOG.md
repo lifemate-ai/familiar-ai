@@ -27,6 +27,7 @@ This project adheres to [Semantic Versioning](https://semver.org/).
 - Self-narrative entries now record their trigger and suppress duplicate same-day rewrites
 - Realtime STT now supervises the websocket transport and reconnects automatically after mid-session disconnects instead of silently stopping after a few turns
 - Realtime STT now honors `STT_LANGUAGE` (default `ja`) for ElevenLabs sessions and logs session / transcript payload anomalies instead of failing silently
+- Realtime STT now drops bracketed non-speech event tags like `（水の音）` and `（ドアの閉まる音）` before they reach the UI or input queue
 - Camera settings now support optional `CAMERA_PTZ_*` overrides, with fallback to the existing `CAMERA_*` values and RTSP URL credentials when stream and PTZ endpoints differ
 - Agent replies no longer wait on post-response memory/self-model updates, and TAPE planning is skipped when no separate utility backend is configured
 
