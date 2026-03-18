@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -41,6 +42,7 @@ def _make_agent(*, with_tts: bool = False, with_camera: bool = False, with_mcp: 
     agent._session_output_tokens = 0
     agent._last_context_tokens = 0
     agent._post_compact = False
+    agent._background_tasks = set()
     agent._started_at = 0.0
     agent.messages = []
     agent._me_md = ""
@@ -160,6 +162,7 @@ _HEAVY_PATCHES = {
     "familiar_agent.agent.EmbodiedAgent._infer_emotion": AsyncMock(return_value="neutral"),
     "familiar_agent.agent.EmbodiedAgent._summarize_exchange": AsyncMock(return_value="summary"),
     "familiar_agent.agent.EmbodiedAgent._online_temporal_context": AsyncMock(return_value=None),
+    "familiar_agent.agent.EmbodiedAgent._run_post_response_pipeline": AsyncMock(),
     "familiar_agent.agent.EmbodiedAgent._update_self_model": AsyncMock(),
     "familiar_agent.agent.EmbodiedAgent._maybe_update_self_narrative": AsyncMock(),
     "familiar_agent.agent.EmbodiedAgent._maybe_adapt_values": AsyncMock(),
@@ -337,6 +340,8 @@ async def test_run_tool_results_added_to_messages():
 @pytest.mark.asyncio
 async def test_run_passes_latest_pre_see_action_into_scene_update():
     """The last embodied action before see() conditions the scene update."""
+    from familiar_agent.agent import EmbodiedAgent
+
     agent = _make_agent(with_camera=True)
     agent._scene = MagicMock()
     agent._scene.update = AsyncMock(return_value=[])
@@ -362,11 +367,17 @@ async def test_run_passes_latest_pre_see_action_into_scene_update():
         side_effect=[(turn1, None), (turn2, "There is a window.")]
     )
 
-    ps = _patch_heavy()
+    patches = dict(_HEAVY_PATCHES)
+    patches["familiar_agent.agent.EmbodiedAgent._run_post_response_pipeline"] = (
+        EmbodiedAgent._run_post_response_pipeline
+    )
+
+    ps = [patch(t, n) for t, n in patches.items()]
     for p in ps:
         p.start()
     try:
         await agent.run("look and report")
+        await agent._drain_background_tasks(timeout=0.5)
     finally:
         for p in ps:
             p.stop()
@@ -602,3 +613,56 @@ async def test_run_empty_text_returns_no_response_placeholder():
             p.stop()
 
     assert result == "(no response)"
+
+
+@pytest.mark.asyncio
+async def test_run_schedules_post_response_pipeline_without_blocking_reply():
+    """Post-response work should happen in the background after the reply is ready."""
+    agent = _make_agent()
+    agent.backend.stream_turn = AsyncMock(return_value=(_turn("end_turn", text="Hello!"), "Hello!"))
+
+    started = asyncio.Event()
+    release = asyncio.Event()
+
+    async def _slow_pipeline(self, **kwargs):  # noqa: ARG001
+        started.set()
+        await release.wait()
+
+    patches = dict(_HEAVY_PATCHES)
+    patches["familiar_agent.agent.EmbodiedAgent._run_post_response_pipeline"] = _slow_pipeline
+
+    ps = [patch(t, n) for t, n in patches.items()]
+    for p in ps:
+        p.start()
+    try:
+        result = await agent.run("こんにちは")
+        assert result == "Hello!"
+        await asyncio.wait_for(started.wait(), timeout=0.5)
+        assert any(not task.done() for task in agent._background_tasks)
+    finally:
+        release.set()
+        await agent._drain_background_tasks(timeout=0.5)
+        for p in ps:
+            p.stop()
+
+
+@pytest.mark.asyncio
+async def test_run_skips_tape_plan_when_no_separate_utility_backend():
+    """No separate utility backend -> skip the extra TAPE planning round-trip."""
+    agent = _make_agent()
+    agent.backend.stream_turn = AsyncMock(return_value=(_turn("end_turn", text="Hello!"), "Hello!"))
+
+    plan_mock = AsyncMock(return_value="1. say")
+    patches = dict(_HEAVY_PATCHES)
+    patches["familiar_agent.agent.generate_plan"] = plan_mock
+
+    ps = [patch(t, n) for t, n in patches.items()]
+    for p in ps:
+        p.start()
+    try:
+        await agent.run("こんにちは")
+    finally:
+        for p in ps:
+            p.stop()
+
+    plan_mock.assert_not_awaited()

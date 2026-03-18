@@ -106,6 +106,7 @@ class TestInferCompanionMood:
         agent._session_output_tokens = 0
         agent._last_context_tokens = 0
         agent._post_compact = False
+        agent._background_tasks = set()
 
         from familiar_agent.tools.memory import ObservationMemory, MemoryTool
         from familiar_agent.tools.tom import ToMTool
@@ -330,6 +331,7 @@ class TestFrustratedBoostsDesire:
             user_input="This is absolutely broken and I'm really frustrated!",
             desires=desires,
         )
+        await agent._drain_background_tasks(timeout=0.5)
 
         # desires.boost should have been called with worry_companion
         boost_calls = [
