@@ -373,6 +373,7 @@ Set `REALTIME_STT=true` in `.env` for always-on, hands-free voice input:
 ```env
 REALTIME_STT=true
 ELEVENLABS_API_KEY=sk_...   # same key as TTS
+STT_LANGUAGE=ja            # recommended for Japanese; used by both batch and realtime STT
 ```
 
 familiar-ai streams microphone audio to ElevenLabs Scribe v2 and auto-commits transcripts when you pause speaking. No button press required. Coexists with the push-to-talk mode (Ctrl+T).
