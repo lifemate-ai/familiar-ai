@@ -10,12 +10,14 @@ def test_build_stt_ws_url_includes_language_code_when_provided() -> None:
 
     assert "model_id=scribe_v2_realtime" in url
     assert "audio_format=pcm_16000" in url
+    assert "tag_audio_events=false" in url
     assert "language_code=ja" in url
 
 
 def test_build_stt_ws_url_omits_language_code_when_empty() -> None:
     url = _build_stt_ws_url("")
 
+    assert "tag_audio_events=false" in url
     assert "language_code=" not in url
 
 
