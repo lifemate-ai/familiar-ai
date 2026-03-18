@@ -8,7 +8,11 @@ from types import SimpleNamespace
 
 import pytest
 
-from familiar_agent.realtime_stt_session import RealtimeSttSession, _normalize_for_dedupe
+from familiar_agent.realtime_stt_session import (
+    RealtimeSttSession,
+    _normalize_for_dedupe,
+    create_realtime_stt_session,
+)
 
 
 def test_normalize_for_dedupe_collapses_spacing_and_trailing_punctuation() -> None:
@@ -91,8 +95,9 @@ async def test_ensure_connected_replaces_disconnected_client(monkeypatch) -> Non
     class _FreshClient:
         instances: list["_FreshClient"] = []
 
-        def __init__(self, api_key: str) -> None:
+        def __init__(self, api_key: str, language_code: str = "") -> None:
             self.api_key = api_key
+            self.language_code = language_code
             self.connected = False
             self.closed = False
             self.on_committed = None
@@ -119,6 +124,7 @@ async def test_ensure_connected_replaces_disconnected_client(monkeypatch) -> Non
     assert len(_FreshClient.instances) == 1
     fresh = _FreshClient.instances[0]
     assert session._stt_client is fresh
+    assert fresh.language_code == "ja"
     assert fresh.on_committed is session._incoming_committed
     assert fresh.on_partial is session._incoming_partial
 
@@ -162,3 +168,14 @@ async def test_send_audio_uses_latest_client_reference() -> None:
 
     assert first.sent == [b"first"]
     assert second.sent == [b"second"]
+
+
+def test_create_realtime_stt_session_uses_stt_language(monkeypatch) -> None:
+    monkeypatch.setenv("REALTIME_STT", "true")
+    monkeypatch.setenv("ELEVENLABS_API_KEY", "key")
+    monkeypatch.setenv("STT_LANGUAGE", "ja")
+
+    session = create_realtime_stt_session()
+
+    assert session is not None
+    assert session._language_code == "ja"
