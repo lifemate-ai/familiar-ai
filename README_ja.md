@@ -290,6 +290,7 @@ TTS_OUTPUT=both     # カメラスピーカー + PCスピーカー同時
 ```env
 REALTIME_STT=true
 ELEVENLABS_API_KEY=sk_...   # TTSと同じキー
+STT_LANGUAGE=ja            # 日本語なら推奨。バッチSTT / Realtime STT の両方で使います
 ```
 
 ---

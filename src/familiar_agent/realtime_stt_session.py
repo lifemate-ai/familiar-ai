@@ -35,16 +35,30 @@ _FILLER_WORDS = frozenset("えー ええと えっと あの その うーん �
 _DEDUPE_WINDOW_SECS = 3.0
 _RECONNECT_POLL_SECS = 1.0
 _RECONNECT_BACKOFF_SECS = 2.0
+_BRACKETED_EVENT_RE = re.compile(r"[（(［\[]([^（）()\[\]［］]{1,40})[）)］\]]")
 
 
 def _is_only_punct_or_symbol(s: str) -> bool:
     return all(c in "。、！？…・「」『』（）()!?,." or not c.isalnum() for c in s)
 
 
+def _looks_like_audio_event(text: str) -> bool:
+    stripped = text.strip()
+    if not stripped:
+        return False
+    events = _BRACKETED_EVENT_RE.findall(stripped)
+    if not events:
+        return False
+    remainder = _BRACKETED_EVENT_RE.sub("", stripped)
+    return not remainder.strip()
+
+
 def should_skip_stt(text: str) -> bool:
     """Return True if the transcript should be silently discarded."""
     text = text.strip()
     if len(text) < 2:
+        return True
+    if _looks_like_audio_event(text):
         return True
     if _is_only_punct_or_symbol(text):
         return True
@@ -69,8 +83,9 @@ class RealtimeSttSession:
                       (called *before* the text is placed on the queue).
     """
 
-    def __init__(self, api_key: str) -> None:
+    def __init__(self, api_key: str, language_code: str = "ja") -> None:
         self._api_key = api_key
+        self._language_code = language_code.strip()
         self._stt_client: RealtimeSttClient | None = None
         self._mic_capture: MicCapture | None = None
         self._relay_task: asyncio.Task | None = None
@@ -166,7 +181,7 @@ class RealtimeSttSession:
             if old_client is not None:
                 await old_client.close()
 
-            client = RealtimeSttClient(self._api_key)
+            client = RealtimeSttClient(self._api_key, self._language_code)
             client.on_committed = self._incoming_committed
             client.on_partial = self._incoming_partial
             await client.connect()
@@ -205,9 +220,11 @@ class RealtimeSttSession:
         while True:
             text = await self._incoming_committed.get()
             if should_skip_stt(text):
+                logger.debug("Realtime STT dropped transcript after filtering: %r", text)
                 continue
             normalized = _normalize_for_dedupe(text)
             if not normalized:
+                logger.debug("Realtime STT dropped blank normalized transcript: %r", text)
                 continue
             now = time.time()
             if (
@@ -225,6 +242,9 @@ class RealtimeSttSession:
     async def _partial_relay(self) -> None:
         while True:
             text = await self._incoming_partial.get()
+            if _looks_like_audio_event(text):
+                logger.debug("Realtime STT dropped audio-event partial: %r", text)
+                continue
             if self.on_partial:
                 self.on_partial(text)
 
@@ -236,6 +256,7 @@ def create_realtime_stt_session() -> RealtimeSttSession | None:
     """
     enabled = os.environ.get("REALTIME_STT", "").lower() in ("1", "true", "yes")
     api_key = os.environ.get("ELEVENLABS_API_KEY", "")
+    language_code = os.environ.get("STT_LANGUAGE", "ja").strip()
 
     if not enabled:
         return None
@@ -243,4 +264,4 @@ def create_realtime_stt_session() -> RealtimeSttSession | None:
         logger.warning("REALTIME_STT=true but ELEVENLABS_API_KEY is not set")
         return None
 
-    return RealtimeSttSession(api_key)
+    return RealtimeSttSession(api_key, language_code=language_code)

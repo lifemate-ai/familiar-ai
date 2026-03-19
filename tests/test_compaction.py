@@ -25,6 +25,7 @@ def _make_agent():
     agent._session_output_tokens = 0
     agent._last_context_tokens = 0
     agent._post_compact = False
+    agent._background_tasks = set()
     agent.messages = []
 
     agent.backend = MagicMock()
@@ -226,6 +227,7 @@ class TestPostCompactionRecall:
         agent.backend.stream_turn = AsyncMock(return_value=(fake_result, []))
         agent.backend.make_assistant_message = MagicMock(return_value=_make_msg("assistant", "ok"))
         agent.backend.make_tool_results = MagicMock(return_value=_make_msg("user", ""))
+        agent._run_post_response_pipeline = AsyncMock()
         agent._infer_emotion = AsyncMock(return_value="neutral")
         agent._summarize_exchange = AsyncMock(return_value="summary")
         agent._update_self_model = AsyncMock()

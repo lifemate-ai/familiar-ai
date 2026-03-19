@@ -8,13 +8,25 @@ from types import SimpleNamespace
 
 import pytest
 
-from familiar_agent.realtime_stt_session import RealtimeSttSession, _normalize_for_dedupe
+from familiar_agent.realtime_stt_session import (
+    RealtimeSttSession,
+    _normalize_for_dedupe,
+    create_realtime_stt_session,
+    should_skip_stt,
+)
 
 
 def test_normalize_for_dedupe_collapses_spacing_and_trailing_punctuation() -> None:
     assert _normalize_for_dedupe("  こんにちは。 ") == "こんにちは"
     assert _normalize_for_dedupe("Hello   world!!") == "hello world"
     assert _normalize_for_dedupe("「テスト」") == "テスト"
+
+
+def test_should_skip_stt_drops_bracketed_audio_events() -> None:
+    assert should_skip_stt("（水の音）") is True
+    assert should_skip_stt("（ドアの閉まる音）") is True
+    assert should_skip_stt("（水の音）（水の音）（水の音）") is True
+    assert should_skip_stt("こんにちは") is False
 
 
 @pytest.mark.asyncio
@@ -91,8 +103,9 @@ async def test_ensure_connected_replaces_disconnected_client(monkeypatch) -> Non
     class _FreshClient:
         instances: list["_FreshClient"] = []
 
-        def __init__(self, api_key: str) -> None:
+        def __init__(self, api_key: str, language_code: str = "") -> None:
             self.api_key = api_key
+            self.language_code = language_code
             self.connected = False
             self.closed = False
             self.on_committed = None
@@ -119,6 +132,7 @@ async def test_ensure_connected_replaces_disconnected_client(monkeypatch) -> Non
     assert len(_FreshClient.instances) == 1
     fresh = _FreshClient.instances[0]
     assert session._stt_client is fresh
+    assert fresh.language_code == "ja"
     assert fresh.on_committed is session._incoming_committed
     assert fresh.on_partial is session._incoming_partial
 
@@ -162,3 +176,34 @@ async def test_send_audio_uses_latest_client_reference() -> None:
 
     assert first.sent == [b"first"]
     assert second.sent == [b"second"]
+
+
+@pytest.mark.asyncio
+async def test_partial_relay_drops_audio_event_tags() -> None:
+    session = RealtimeSttSession("dummy")
+    partial_q: asyncio.Queue[str] = asyncio.Queue()
+    session._incoming_partial = partial_q
+
+    shown: list[str] = []
+    session.on_partial = shown.append
+
+    task = asyncio.create_task(session._partial_relay())
+    await partial_q.put("（ドアの閉まる音）")
+    await partial_q.put("こんにちは")
+    await asyncio.sleep(0.05)
+    task.cancel()
+    with contextlib.suppress(asyncio.CancelledError):
+        await task
+
+    assert shown == ["こんにちは"]
+
+
+def test_create_realtime_stt_session_uses_stt_language(monkeypatch) -> None:
+    monkeypatch.setenv("REALTIME_STT", "true")
+    monkeypatch.setenv("ELEVENLABS_API_KEY", "key")
+    monkeypatch.setenv("STT_LANGUAGE", "ja")
+
+    session = create_realtime_stt_session()
+
+    assert session is not None
+    assert session._language_code == "ja"

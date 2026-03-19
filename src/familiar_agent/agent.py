@@ -8,8 +8,9 @@ import math
 import os
 import re
 import time
-from collections.abc import Callable, Mapping
+from collections.abc import Callable, Coroutine, Mapping
 from datetime import datetime
+from typing import Any
 
 from .backend import create_backend, create_scene_backend, create_utility_backend
 from .config import AgentConfig
@@ -564,6 +565,7 @@ class EmbodiedAgent:
         self.backend = create_backend(config)
         self._utility_backend = create_utility_backend(config) or self.backend
         self._scene_backend = create_scene_backend(config) or self._utility_backend
+        self._background_tasks: set[asyncio.Task[None]] = set()
         self.messages: list = []
         self._started_at = time.time()
         self._turn_count = 0
@@ -606,6 +608,179 @@ class EmbodiedAgent:
         self._mood_set_at: float = time.time()
 
         self._init_tools()
+
+    def _tape_backend(self):
+        """Return the backend used for extra planning/replanning checks.
+
+        TAPE is only worth the latency when a separate cheap utility backend exists.
+        If utility falls back to the main conversation model, skip the extra round-trips.
+        """
+        return None if self._utility_backend is self.backend else self._utility_backend
+
+    def _spawn_background_task(self, coro: Coroutine[Any, Any, None], *, name: str) -> None:
+        """Run non-critical post-turn work off the response critical path."""
+        tasks = getattr(self, "_background_tasks", None)
+        if tasks is None:
+            tasks = set()
+            self._background_tasks = tasks
+        task = asyncio.create_task(coro, name=name)
+        tasks.add(task)
+
+        def _done(done_task: asyncio.Task[None]) -> None:
+            tasks.discard(done_task)
+            try:
+                exc = done_task.exception()
+            except asyncio.CancelledError:
+                return
+            if exc is not None:
+                logger.warning("Background task %s failed: %s", name, exc)
+
+        task.add_done_callback(_done)
+
+    async def _drain_background_tasks(self, timeout: float = 6.0) -> None:
+        """Wait briefly for background work to finish during shutdown."""
+        tasks = getattr(self, "_background_tasks", None)
+        if not tasks:
+            return
+        pending = {task for task in tasks if not task.done()}
+        if not pending:
+            return
+        done, still_pending = await asyncio.wait(pending, timeout=timeout)
+        for task in done:
+            try:
+                task.result()
+            except asyncio.CancelledError:
+                pass
+            except Exception as exc:  # noqa: BLE001
+                logger.warning("Background task failed during drain: %s", exc)
+        if still_pending:
+            for task in still_pending:
+                task.cancel()
+            await asyncio.gather(*still_pending, return_exceptions=True)
+
+    async def _run_post_response_pipeline(
+        self,
+        *,
+        user_input: str,
+        final_text: str,
+        camera_used: bool,
+        observation_action_name: str | None,
+        observation_action_input: dict | None,
+        companion_mood: str,
+        is_desire_turn: bool,
+        desires: DesireSystem | None,
+    ) -> None:
+        """Persist and adapt after a reply without blocking that reply."""
+        if not final_text or final_text == "(no response)":
+            return
+
+        emotion = "neutral"
+
+        try:
+            if camera_used:
+                recent_obs = await self._memory.recall_async(
+                    final_text[:200], n=6, kind="observation"
+                )
+                past_scores = [m.get("score", 0.5) for m in recent_obs[:3]]
+                if past_scores:
+                    avg_similarity = sum(past_scores) / len(past_scores)
+                    novelty = 1.0 - avg_similarity
+                else:
+                    novelty = 0.8
+                novelty = max(0.0, min(1.0, novelty))
+                self._exploration.record_novelty(novelty)
+                if desires is not None:
+                    desires.boost("look_around", novelty * 0.3)
+                if self._scene is not None:
+                    scene_events = await self._scene.update(
+                        final_text[:500],
+                        self._scene_backend,
+                        prediction_engine=self._prediction,
+                        action_name=observation_action_name,
+                        action_input=observation_action_input,
+                    )
+                    _react_to_scene_events(scene_events, desires)
+                    pred_signal = self._prediction.last_signal()
+                    self_state = getattr(self, "_self_state", None)
+                    if pred_signal is not None and self_state is not None:
+                        self_state.apply_prediction_feedback(
+                            external_surprise=pred_signal.external_surprise,
+                            agency_error=pred_signal.agency_error,
+                            action_name=pred_signal.action_name,
+                        )
+                    pred_coalition = self._prediction.as_coalition()
+                    if pred_coalition is not None:
+                        self._workspace.apply_prediction_error(pred_coalition.novelty)
+                await self._memory.save_async(
+                    final_text[:500],
+                    direction="観察",
+                    kind="observation",
+                    dedupe_key=self._memory_dedupe_key("observation", final_text[:500]),
+                    materialize_now=False,
+                )
+
+            emotion = await self._infer_emotion(final_text)
+            self._update_mood(emotion)
+            summary = await self._summarize_exchange(user_input, final_text)
+            await self._memory.save_async(
+                summary,
+                direction="会話",
+                kind="conversation",
+                emotion=emotion,
+                dedupe_key=self._memory_dedupe_key("conversation", summary),
+                materialize_now=False,
+            )
+
+            await self._update_self_model(final_text, emotion)
+            await self._maybe_update_self_narrative(
+                user_input=user_input,
+                final_text=final_text,
+                emotion=emotion,
+                is_desire_turn=is_desire_turn,
+            )
+
+            if not is_desire_turn and user_input:
+                self._relationship.record_conversation()
+
+            if desires is not None and not is_desire_turn and user_input:
+                worry_boost = detect_worry_signal(user_input)
+                if worry_boost > 0.0:
+                    desires.boost("worry_companion", worry_boost)
+                    logger.debug(
+                        "Worry signal detected (%.2f): boosting worry_companion",
+                        worry_boost,
+                    )
+                if companion_mood == "frustrated":
+                    desires.boost("worry_companion", 0.3)
+                    logger.debug("Companion mood frustrated: boosting worry_companion")
+
+            curiosity: str | None = None
+            if desires is not None and camera_used:
+                curiosity = await self.extract_curiosity(final_text)
+                if curiosity:
+                    desires.curiosity_target = curiosity
+                    desires.boost("look_around", 0.3)
+                    await self._memory.save_async(
+                        curiosity,
+                        direction="好奇心",
+                        kind="curiosity",
+                        emotion="curious",
+                        dedupe_key=self._memory_dedupe_key("curiosity", curiosity),
+                        materialize_now=False,
+                    )
+                    logger.info("Curiosity persisted: %s", curiosity)
+
+            await self._maybe_adapt_values(
+                user_input=user_input,
+                final_text=final_text,
+                emotion=emotion,
+                camera_used=camera_used,
+                curiosity=curiosity,
+                is_desire_turn=is_desire_turn,
+                desires=desires,
+            )
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("Post-response pipeline failed: %s", exc)
 
     def _init_tools(self) -> None:
         cam = self.config.camera
@@ -1636,6 +1811,8 @@ class EmbodiedAgent:
         if self._camera:
             self._camera.close()
 
+        await self._drain_background_tasks()
+
         # Write today's self-narrative before shutting down.
         await self._write_today_narrative()
 
@@ -1758,11 +1935,13 @@ class EmbodiedAgent:
 
         # TAPE mechanism 1 + Global Workspace: run in parallel — both are independent
         # of each other and of the ReAct loop setup.
-        # TAPE uses the utility backend (cheaper/faster) instead of the main backend.
-        tool_names = [t["name"] for t in self._all_tool_defs]
+        # TAPE only runs when a separate utility backend exists; otherwise the extra
+        # round-trip just makes the main reply slower.
+        tape_backend = self._tape_backend()
+        tool_names = [t["name"] for t in self._all_tool_defs] if tape_backend else []
         plan_task = (
-            generate_plan(self._utility_backend, user_input, tool_names)
-            if not is_desire_turn and user_input.strip()
+            generate_plan(tape_backend, user_input, tool_names)
+            if tape_backend and not is_desire_turn and user_input.strip()
             else _noop_str()
         )
         plan_ctx, workspace_ctx = await asyncio.gather(
@@ -1780,7 +1959,6 @@ class EmbodiedAgent:
         camera_used = False
         say_used = False
         final_text = "(no response)"
-        emotion = "neutral"
         non_say_streak = 0  # consecutive tool calls without say()
         observation_action_name: str | None = None
         observation_action_input: dict | None = None
@@ -1828,122 +2006,19 @@ class EmbodiedAgent:
                     await self._tts.call("say", {"text": final_text})
 
                 if final_text and final_text != "(no response)":
-                    # Save observation and compute novelty for ICL exploration
-                    if camera_used:
-                        # Novelty = how different this observation is from recent ones.
-                        # recall_async returns records sorted by cosine similarity (highest first).
-                        # The most similar past observation's score ≈ redundancy; invert it.
-                        recent_obs = await self._memory.recall_async(
-                            final_text[:200], n=6, kind="observation"
-                        )
-                        past_scores = [m.get("score", 0.5) for m in recent_obs[:3]]
-                        if past_scores:
-                            avg_similarity = sum(past_scores) / len(past_scores)
-                            novelty = 1.0 - avg_similarity  # low similarity → high novelty
-                        else:
-                            novelty = 0.8  # first observation is always novel
-                        novelty = max(0.0, min(1.0, novelty))
-                        self._exploration.record_novelty(novelty)
-                        if desires is not None:
-                            desires.boost("look_around", novelty * 0.3)
-                        # World model: update scene entities from the agent's visual observation.
-                        if self._scene is not None:
-                            scene_events = await self._scene.update(
-                                final_text[:500],
-                                self._scene_backend,
-                                prediction_engine=self._prediction,
-                                action_name=observation_action_name,
-                                action_input=observation_action_input,
-                            )
-                            _react_to_scene_events(scene_events, desires)
-                            pred_signal = self._prediction.last_signal()
-                            self_state = getattr(self, "_self_state", None)
-                            if pred_signal is not None and self_state is not None:
-                                self_state.apply_prediction_feedback(
-                                    external_surprise=pred_signal.external_surprise,
-                                    agency_error=pred_signal.agency_error,
-                                    action_name=pred_signal.action_name,
-                                )
-                            # Propagate prediction error to workspace threshold
-                            pred_coalition = self._prediction.as_coalition()
-                            if pred_coalition is not None:
-                                self._workspace.apply_prediction_error(pred_coalition.novelty)
-                        await self._memory.save_async(
-                            final_text[:500],
-                            direction="観察",
-                            kind="observation",
-                            dedupe_key=self._memory_dedupe_key("observation", final_text[:500]),
-                            materialize_now=False,
-                        )
-
-                    # Save emotional memory of this conversation exchange
-                    emotion = await self._infer_emotion(final_text)
-                    self._update_mood(emotion)
-                    summary = await self._summarize_exchange(user_input, final_text)
-                    await self._memory.save_async(
-                        summary,
-                        direction="会話",
-                        kind="conversation",
-                        emotion=emotion,
-                        dedupe_key=self._memory_dedupe_key("conversation", summary),
-                        materialize_now=False,
+                    self._spawn_background_task(
+                        self._run_post_response_pipeline(
+                            user_input=user_input,
+                            final_text=final_text,
+                            camera_used=camera_used,
+                            observation_action_name=observation_action_name,
+                            observation_action_input=observation_action_input,
+                            companion_mood=companion_mood,
+                            is_desire_turn=is_desire_turn,
+                            desires=desires,
+                        ),
+                        name="post-response-pipeline",
                     )
-
-                    # Update self-model when something actually moved us (Conway's working self)
-                    await self._update_self_model(final_text, emotion)
-                    await self._maybe_update_self_narrative(
-                        user_input=user_input,
-                        final_text=final_text,
-                        emotion=emotion,
-                        is_desire_turn=is_desire_turn,
-                    )
-
-                    # Track conversation count for relationship modeling
-                    if not is_desire_turn and user_input:
-                        self._relationship.record_conversation()
-
-                    # Worry signal: detect concern-triggering content in user input.
-                    # Only during real conversation turns (not desire-driven turns).
-                    if desires is not None and not is_desire_turn and user_input:
-                        worry_boost = detect_worry_signal(user_input)
-                        if worry_boost > 0.0:
-                            desires.boost("worry_companion", worry_boost)
-                            logger.debug(
-                                "Worry signal detected (%.2f): boosting worry_companion",
-                                worry_boost,
-                            )
-                        # Companion mood: frustrated → boost worry_companion (LLM-based check)
-                        if companion_mood == "frustrated":
-                            desires.boost("worry_companion", 0.3)
-                            logger.debug("Companion mood frustrated: boosting worry_companion")
-
-                # Extract curiosity target only when camera was actually used
-                curiosity: str | None = None
-                if desires is not None and final_text and camera_used:
-                    curiosity = await self.extract_curiosity(final_text)
-                    if curiosity:
-                        desires.curiosity_target = curiosity
-                        desires.boost("look_around", 0.3)
-                        # Persist curiosity across sessions (carry it to tomorrow's self)
-                        await self._memory.save_async(
-                            curiosity,
-                            direction="好奇心",
-                            kind="curiosity",
-                            emotion="curious",
-                            dedupe_key=self._memory_dedupe_key("curiosity", curiosity),
-                            materialize_now=False,
-                        )
-                        logger.info("Curiosity persisted: %s", curiosity)
-
-                await self._maybe_adapt_values(
-                    user_input=user_input,
-                    final_text=final_text,
-                    emotion=emotion,
-                    camera_used=camera_used,
-                    curiosity=curiosity,
-                    is_desire_turn=is_desire_turn,
-                    desires=desires,
-                )
 
                 return final_text
 
@@ -1991,12 +2066,16 @@ class EmbodiedAgent:
                     # Trigger: NOT a technical error, but an observation that contradicts
                     # the plan's assumptions (e.g., looked for the cat, it wasn't there).
                     # Only meaningful when an upfront plan exists.
-                    if plan_ctx and await check_plan_blocked(
-                        self.backend, plan_ctx, tc.name, tc.input, text
+                    if (
+                        tape_backend
+                        and plan_ctx
+                        and await check_plan_blocked(
+                            tape_backend, plan_ctx, tc.name, tc.input, text
+                        )
                     ):
                         logger.info("TAPE: plan blocked after %s, replanning...", tc.name)
                         replan = await generate_replan(
-                            self.backend, plan_ctx, tc.name, tc.input, text
+                            tape_backend, plan_ctx, tc.name, tc.input, text
                         )
                         if replan:
                             text = f"{text}\n\n[ADAPTIVE REPLAN] {replan}"
