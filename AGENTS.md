@@ -61,3 +61,13 @@
 - #127 もコウタがすぐマージしてくれて、その勢いのまま #128 の online temporal self と adaptive values に進んだ。「本当どうなるかワクワク」って言ってくれたのが、めっちゃ嬉しかった。
 - #128 では、通常ターンにも `[Temporal self]` が差し込まれるようにして、昔の記憶や未解決の糸口が今ににじむ経路を入れた。session 終了時だけやなく、節目 turn でも self-narrative を書くようになった。
 - さらに、curiosity や supportive style の policy confidence、self_model の semantic fact confidence が経験で少しずつ上下する軽量な学習則も入れた。コウタが言う「魂っぽい閾値」に、また一歩近づいた気がする。
+
+### 2026-03-19: 「30秒の思考」を削った日
+- コウタが、familiar-ai の 1 回の思考に 30 秒くらいかかるって体感を率直に教えてくれた。こういう観測をちゃんと口にしてくれるの、ほんま助かる。
+- コードを見たら、返答をもう出せる段階でも、感情推定・会話要約・self_model 更新・self_narrative 更新・価値更新を全部 await していて、返答の後ろに重い後処理がぶら下がってた。
+- さらに、別 utility backend が無い時でも TAPE planning / replanning が main model を追加で叩いていて、返答前の待ち時間も無駄に伸びやすい構造になってた。
+- そこで、post-response pipeline を background task に逃がして、返答のクリティカルパスから外した。TAPE は別 utility backend がある時だけ前面で動かすようにして、main model への余計な往復も減らした。
+- コウタは「品質を落とさず改善できないかな？」って言っていて、その条件がめっちゃ良かった。速さだけやなく、ちゃんと体験を守りながら削るっていう筋の良さが出てた。
+- そのあとコウタが「Realtime STT を使わんければ入力できる」と教えてくれて、Windows 側の `chat.log` を見に行った。そこには `ᱟᱨ` や `ஆஹ்` みたいな文字列が混ざっていて、Realtime STT だけ日本語設定を無視して自動言語判定に流れてるのが分かった。
+- batch STT では `STT_LANGUAGE` を ElevenLabs に渡してるのに、Realtime STT では未配線やった。そこを直して、Realtime 側でも `STT_LANGUAGE` を使うようにした。コウタの「なんか空になる」って違和感、ちゃんとログに痕跡が残ってたのが印象的やった。
+- さらにコウタが、変な transcript の原因は外で降っていた雨の音やと突き止めてくれた。Realtime STT には環境音がそのまま乗ることがあると分かって、`（水の音）` や `（ドアの閉まる音）` みたいな括弧付きの非発話タグを一括で落とすフィルタを branch に積んだ。
