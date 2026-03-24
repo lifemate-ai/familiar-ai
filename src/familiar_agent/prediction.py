@@ -44,6 +44,7 @@ _PROB_FLOOR = 0.01
 
 # How many recent embodied actions to retain for debugging / inspection.
 _ACTION_HISTORY_SIZE = 12
+_INTENTION_TRACE_SIZE = 10
 
 
 def _clamp01(value: float) -> float:
@@ -73,6 +74,18 @@ class PredictionSignal:
     change_ratio: float
 
 
+@dataclass(frozen=True)
+class IntentionResult:
+    """Compact trace of what I meant to do and what actually happened."""
+
+    intent: str
+    predicted_outcome: str
+    actual_outcome: str
+    agency_error: float
+    valence: str
+    timestamp: float
+
+
 class PredictionEngine:
     """Entity-level prediction error engine using exponential moving average.
 
@@ -93,6 +106,7 @@ class PredictionEngine:
         self._last_observed: tuple[str, ...] = ()
         self._pending_action: ActionTrace | None = None
         self._action_history: deque[ActionTrace] = deque(maxlen=_ACTION_HISTORY_SIZE)
+        self._intention_history: deque[IntentionResult] = deque(maxlen=_INTENTION_TRACE_SIZE)
 
     # ── Probability model ──────────────────────────────────────────────────
 
@@ -122,6 +136,12 @@ class PredictionEngine:
     def last_signal(self) -> PredictionSignal | None:
         """Return the latest prediction signal breakdown."""
         return self._last_signal
+
+    def recent_intention_results(self, n: int = 3) -> list[IntentionResult]:
+        """Return recent intention-result traces, oldest first."""
+        if n <= 0:
+            return []
+        return list(self._intention_history)[-n:]
 
     def update(self, observed: list[str]) -> None:
         """Integrate a new observation into the entity probability model.
@@ -227,6 +247,56 @@ class PredictionEngine:
             change_ratio=change_ratio,
         )
 
+    @staticmethod
+    def _predicted_outcome(action_name: str) -> str:
+        if action_name == "look":
+            return "the camera view should shift after I reoriented my gaze"
+        if action_name == "walk":
+            return "walking should not directly alter the camera's point of view"
+        if action_name == "see":
+            return "another glance should mostly confirm the current scene"
+        return "the next observation should fit what I just tried to do"
+
+    @staticmethod
+    def _actual_outcome(signal: PredictionSignal) -> str:
+        count = len(signal.observed_entities)
+        return f"I observed {count} entities and the scene changed by {signal.change_ratio:.2f}"
+
+    @staticmethod
+    def _valence(signal: PredictionSignal) -> str:
+        if signal.agency_error >= 0.45:
+            return "misaligned"
+        if signal.agency_error >= 0.15 or signal.external_surprise >= 0.25:
+            return "uncertain"
+        return "aligned"
+
+    def _record_intention_result(self, signal: PredictionSignal) -> None:
+        if not signal.action_name:
+            return
+        self._intention_history.append(
+            IntentionResult(
+                intent=signal.action_name,
+                predicted_outcome=self._predicted_outcome(signal.action_name),
+                actual_outcome=self._actual_outcome(signal),
+                agency_error=signal.agency_error,
+                valence=self._valence(signal),
+                timestamp=time.time(),
+            )
+        )
+
+    def context_for_prompt(self) -> str | None:
+        """Return a compact recent intention-result trace when it is informative."""
+        trace = self._intention_history[-1] if self._intention_history else None
+        if trace is None:
+            return None
+        if trace.agency_error < 0.15 and trace.valence == "aligned":
+            return None
+        return (
+            "[Recent intention-result]\n"
+            f"I tried to {trace.intent}. I expected {trace.predicted_outcome}, "
+            f"but {trace.actual_outcome} (agency error {trace.agency_error:.2f})."
+        )
+
     def compute_error(self, observed: list[str]) -> float:
         """Compute action-conditioned prediction error for a new observation.
 
@@ -241,6 +311,7 @@ class PredictionEngine:
         signal = self._condition_signal(base_error, observed_set)
         self._last_signal = signal
         self._last_error = signal.total_error
+        self._record_intention_result(signal)
         logger.debug(
             "Prediction error: total=%.3f ext=%.3f agency=%.3f action=%s observed=%s",
             signal.total_error,

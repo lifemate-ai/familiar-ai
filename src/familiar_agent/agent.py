@@ -16,6 +16,7 @@ from .backend import create_backend, create_scene_backend, create_utility_backen
 from .config import AgentConfig
 from .desires import DesireSystem, detect_worry_signal
 from .relationship import RelationshipTracker
+from .concern_engine import ConcernEngine
 from .self_state import SelfState
 from .self_narrative import SelfNarrative
 from .exploration import ExplorationTracker
@@ -595,6 +596,7 @@ class EmbodiedAgent:
         self._relationship = RelationshipTracker()
         self._self_state = SelfState()
         self._self_narrative = SelfNarrative()
+        self._concerns = ConcernEngine()
         self._workspace = GlobalWorkspace()
         self._workspace.register_broadcast_listener(self._self_state.on_broadcast)
         self._prediction = PredictionEngine()
@@ -769,6 +771,26 @@ class EmbodiedAgent:
                         materialize_now=False,
                     )
                     logger.info("Curiosity persisted: %s", curiosity)
+
+            pred_signal = self._prediction.last_signal()
+            concerns = getattr(self, "_concerns", None)
+            if concerns is not None:
+                concerns.update_from_turn(
+                    turn_index=self._turn_count,
+                    emotion=emotion,
+                    companion_mood=companion_mood,
+                    curiosity=curiosity,
+                    prediction_signal=pred_signal,
+                )
+
+            self_state = getattr(self, "_self_state", None)
+            if self_state is not None:
+                self_state.apply_turn_context(
+                    emotion=emotion,
+                    companion_mood=companion_mood,
+                    curiosity=curiosity,
+                    prediction_signal=pred_signal,
+                )
 
             await self._maybe_adapt_values(
                 user_input=user_input,
@@ -978,6 +1000,7 @@ class EmbodiedAgent:
         inner_voice: str = "",
         plan_ctx: str = "",
         companion_mood: str = "engaged",
+        continuity_ctx: str = "",
         workspace_ctx: str = "",
     ) -> tuple[str, str]:
         """Return (stable, variable) system prompt parts for prompt caching.
@@ -1009,6 +1032,8 @@ class EmbodiedAgent:
         variable_parts: list[str] = [intero]
         if relationship_ctx:
             variable_parts.append(relationship_ctx)
+        if continuity_ctx:
+            variable_parts.append(continuity_ctx)
         # Morning reconstruction takes precedence on first turn; otherwise use feelings
         if morning_ctx:
             variable_parts.append(morning_ctx)
@@ -1041,6 +1066,24 @@ class EmbodiedAgent:
 
         variable = "\n\n---\n\n".join(variable_parts)
         return stable, variable
+
+    def _self_continuity_context(self) -> str:
+        """Return a compact continuity block from latent concerns and recent action traces."""
+        blocks: list[str] = []
+
+        concerns = getattr(self, "_concerns", None)
+        if concerns is not None:
+            concern_ctx = concerns.context_for_prompt(turn_index=self._turn_count)
+            if concern_ctx:
+                blocks.append(concern_ctx)
+
+        prediction = getattr(self, "_prediction", None)
+        if prediction is not None:
+            trace_ctx = prediction.context_for_prompt()
+            if trace_ctx:
+                blocks.append(trace_ctx)
+
+        return "\n\n".join(blocks)
 
     def _exploration_context(self) -> str:
         """Return exploration history for ICL-based direction steering."""
@@ -1939,6 +1982,7 @@ class EmbodiedAgent:
         # round-trip just makes the main reply slower.
         tape_backend = self._tape_backend()
         tool_names = [t["name"] for t in self._all_tool_defs] if tape_backend else []
+        continuity_ctx = self._self_continuity_context()
         plan_task = (
             generate_plan(tape_backend, user_input, tool_names)
             if tape_backend and not is_desire_turn and user_input.strip()
@@ -1975,6 +2019,7 @@ class EmbodiedAgent:
                     inner_voice=inner_voice,
                     plan_ctx=plan_ctx,
                     companion_mood=companion_mood,
+                    continuity_ctx=continuity_ctx,
                     workspace_ctx=workspace_ctx,
                 ),
                 messages=self.messages,
@@ -2141,7 +2186,10 @@ class EmbodiedAgent:
         )
         result, _ = await self.backend.stream_turn(
             system=self._system_prompt(
-                morning_ctx=morning_ctx, plan_ctx=plan_ctx, workspace_ctx=workspace_ctx
+                morning_ctx=morning_ctx,
+                plan_ctx=plan_ctx,
+                continuity_ctx=continuity_ctx,
+                workspace_ctx=workspace_ctx,
             ),
             messages=self.messages,
             tools=[],
