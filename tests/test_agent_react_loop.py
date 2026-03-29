@@ -666,3 +666,43 @@ async def test_run_skips_tape_plan_when_no_separate_utility_backend():
             p.stop()
 
     plan_mock.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_post_response_pipeline_updates_self_continuity_state():
+    from familiar_agent.agent import EmbodiedAgent
+
+    agent = _make_agent()
+    agent._concerns = MagicMock()
+    agent._prediction.last_signal = MagicMock(
+        return_value=SimpleNamespace(
+            action_name="look",
+            agency_error=0.62,
+            external_surprise=0.18,
+        )
+    )
+    agent._infer_emotion = AsyncMock(return_value="tender")
+    agent._summarize_exchange = AsyncMock(return_value="summary")
+    agent._update_self_model = AsyncMock()
+    agent._maybe_update_self_narrative = AsyncMock()
+    agent._maybe_adapt_values = AsyncMock()
+    agent.extract_curiosity = AsyncMock(return_value="The window light still feels important.")
+
+    desires = MagicMock()
+    desires.boost = MagicMock()
+    desires.curiosity_target = None
+
+    await EmbodiedAgent._run_post_response_pipeline(
+        agent,
+        user_input="どう見えた？",
+        final_text="窓の光が少し気になってる。",
+        camera_used=True,
+        observation_action_name="look",
+        observation_action_input={"direction": "left", "degrees": 30},
+        companion_mood="frustrated",
+        is_desire_turn=False,
+        desires=desires,
+    )
+
+    agent._concerns.update_from_turn.assert_called_once()
+    agent._self_state.apply_turn_context.assert_called_once()

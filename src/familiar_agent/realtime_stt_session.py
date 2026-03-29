@@ -38,6 +38,11 @@ _RECONNECT_BACKOFF_SECS = 2.0
 _BRACKETED_EVENT_RE = re.compile(r"[（(［\[]([^（）()\[\]［］]{1,40})[）)］\]]")
 
 
+def _dedupe_now() -> float:
+    """Return the clock used for realtime transcript deduplication."""
+    return time.monotonic()
+
+
 def _is_only_punct_or_symbol(s: str) -> bool:
     return all(c in "。、！？…・「」『』（）()!?,." or not c.isalnum() for c in s)
 
@@ -226,7 +231,7 @@ class RealtimeSttSession:
             if not normalized:
                 logger.debug("Realtime STT dropped blank normalized transcript: %r", text)
                 continue
-            now = time.time()
+            now = _dedupe_now()
             if (
                 normalized == self._last_normalized_text
                 and now - self._last_time < _DEDUPE_WINDOW_SECS

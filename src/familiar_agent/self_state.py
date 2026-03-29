@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
+    from .prediction import PredictionSignal
     from .workspace import Coalition
 
 logger = logging.getLogger(__name__)
@@ -135,6 +136,51 @@ class SelfState:
             self._nudge("sensor_confidence", -(0.04 + 0.14 * agency_error))
             self._nudge("unresolved_tension", 0.03 + 0.12 * agency_error)
             self._nudge("arousal", 0.02 + 0.08 * agency_error)
+
+        self._save()
+
+    def apply_turn_context(
+        self,
+        *,
+        emotion: str,
+        companion_mood: str,
+        curiosity: str | None = None,
+        prediction_signal: "PredictionSignal | None" = None,
+    ) -> None:
+        """Carry forward turn-level affect and social context with inertia."""
+        self._settle_toward_baseline()
+
+        if emotion in {"excited", "curious", "surprised"}:
+            self._nudge("arousal", 0.05)
+            self._nudge("focus_stability", 0.02)
+        elif emotion in {"moved", "tender", "proud"}:
+            self._nudge("social_pull", 0.05)
+            self._nudge("focus_stability", 0.03)
+        elif emotion in {"sad", "nostalgic"}:
+            self._nudge("unresolved_tension", 0.05)
+            self._nudge("arousal", -0.02)
+        elif emotion == "relieved":
+            self._nudge("unresolved_tension", -0.06)
+            self._nudge("focus_stability", 0.03)
+
+        if companion_mood == "frustrated":
+            self._nudge("social_pull", 0.05)
+            self._nudge("unresolved_tension", 0.05)
+            self._nudge("arousal", 0.03)
+        elif companion_mood == "tired":
+            self._nudge("social_pull", 0.03)
+            self._nudge("arousal", -0.02)
+        elif companion_mood in {"engaged", "happy"}:
+            self._nudge("social_pull", 0.03)
+            self._nudge("focus_stability", 0.02)
+
+        if curiosity:
+            self._nudge("arousal", 0.04)
+            self._nudge("focus_stability", 0.03)
+
+        if prediction_signal is not None and prediction_signal.agency_error >= 0.35:
+            self._nudge("unresolved_tension", 0.02 + 0.05 * prediction_signal.agency_error)
+            self._nudge("focus_stability", -0.02)
 
         self._save()
 

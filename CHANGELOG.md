@@ -19,6 +19,7 @@ This project adheres to [Semantic Versioning](https://semver.org/).
 - Action-conditioned prediction with agency-error tracking for `see` / `look` / `walk`, including scene integration and focused tests
 - Online temporal-self context during ordinary turns, with resurfaced memories, unresolved-thread prompts, and within-session self-narrative capture
 - Lightweight adaptive confidence updates for semantic facts and behavior policies, including revision history for experience-driven value shifts
+- Lightweight layered self continuity with inertial proto-self updates, recent intention-result traces, and persistent active concerns
 
 ### Changed
 - GUI settings dialog now keeps JP labels fully visible (including short labels like `名`), refreshed the app to a bright, soft, rounded light theme, split first-turn startup status from "thinking", and increased GUI font sizing for readability.
@@ -30,6 +31,7 @@ This project adheres to [Semantic Versioning](https://semver.org/).
 - Realtime STT now drops bracketed non-speech event tags like `（水の音）` and `（ドアの閉まる音）` before they reach the UI or input queue
 - Camera settings now support optional `CAMERA_PTZ_*` overrides, with fallback to the existing `CAMERA_*` values and RTSP URL credentials when stream and PTZ endpoints differ
 - Agent replies no longer wait on post-response memory/self-model updates, and TAPE planning is skipped when no separate utility backend is configured
+- System prompts now surface at most one active concern and one recent misaligned intention trace, while post-response updates carry those states forward without adding hot-path LLM calls
 
 ## [0.1.0] - 2026-02-22
 
