@@ -211,3 +211,29 @@ def test_as_coalition_novelty_reflects_prediction_error():
 
     if c_low is not None and c_high is not None:
         assert c_high.novelty >= c_low.novelty
+
+
+def test_intention_result_trace_records_action_conditioned_outcome():
+    pe = PredictionEngine()
+    pe.update(["desk"])
+    pe.record_action("look", {"degrees": 45})
+
+    pe.compute_error(["window"])
+    traces = pe.recent_intention_results()
+
+    assert len(traces) == 1
+    assert traces[0].intent == "look"
+    assert traces[0].agency_error >= 0.0
+
+
+def test_prompt_context_surfaces_recent_misaligned_intention():
+    pe = PredictionEngine()
+    pe.update(["desk"])
+    pe.record_action("look", {"degrees": 60})
+
+    pe.compute_error(["desk"])
+    prompt_ctx = pe.context_for_prompt()
+
+    assert prompt_ctx is not None
+    assert "[Recent intention-result]" in prompt_ctx
+    assert "I tried to look." in prompt_ctx

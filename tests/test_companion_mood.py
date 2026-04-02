@@ -327,6 +327,17 @@ class TestFrustratedBoostsDesire:
         agent._mood = "neutral"
         agent._mood_intensity = 0.0
         agent._mood_set_at = time.time()
+        agent._cached_plan_ctx = ""
+        agent._cached_workspace_ctx = ""
+        agent._cached_temporal_ctx = None
+        agent._cached_companion_mood = "engaged"
+        agent._background_tasks = set()
+
+        from familiar_agent.concern_engine import ConcernEngine
+        from familiar_agent.self_state import SelfState
+
+        agent._concerns = ConcernEngine()
+        agent._self_state = SelfState()
 
         desires = MagicMock(spec=DesireSystem)
         desires.curiosity_target = None

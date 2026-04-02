@@ -16,6 +16,7 @@ from .backend import create_backend, create_scene_backend, create_utility_backen
 from .config import AgentConfig
 from .desires import DesireSystem, detect_worry_signal
 from .relationship import RelationshipTracker
+from .concern_engine import ConcernEngine
 from .self_state import SelfState
 from .self_narrative import SelfNarrative
 from .exploration import ExplorationTracker
@@ -595,6 +596,7 @@ class EmbodiedAgent:
         self._relationship = RelationshipTracker()
         self._self_state = SelfState()
         self._self_narrative = SelfNarrative()
+        self._concerns = ConcernEngine()
         self._workspace = GlobalWorkspace()
         self._workspace.register_broadcast_listener(self._self_state.on_broadcast)
         self._prediction = PredictionEngine()
@@ -756,9 +758,6 @@ class EmbodiedAgent:
                         "Worry signal detected (%.2f): boosting worry_companion",
                         worry_boost,
                     )
-                if companion_mood == "frustrated":
-                    desires.boost("worry_companion", 0.3)
-                    logger.debug("Companion mood frustrated: boosting worry_companion")
 
             curiosity: str | None = None
             if desires is not None and camera_used:
@@ -775,6 +774,26 @@ class EmbodiedAgent:
                         materialize_now=False,
                     )
                     logger.info("Curiosity persisted: %s", curiosity)
+
+            pred_signal = self._prediction.last_signal()
+            concerns = getattr(self, "_concerns", None)
+            if concerns is not None:
+                concerns.update_from_turn(
+                    turn_index=self._turn_count,
+                    emotion=emotion,
+                    companion_mood=companion_mood,
+                    curiosity=curiosity,
+                    prediction_signal=pred_signal,
+                )
+
+            self_state = getattr(self, "_self_state", None)
+            if self_state is not None:
+                self_state.apply_turn_context(
+                    emotion=emotion,
+                    companion_mood=companion_mood,
+                    curiosity=curiosity,
+                    prediction_signal=pred_signal,
+                )
 
             await self._maybe_adapt_values(
                 user_input=user_input,
@@ -810,6 +829,9 @@ class EmbodiedAgent:
                 self._cached_workspace_ctx = deferred_workspace
                 self._cached_companion_mood = deferred_mood
                 self._cached_temporal_ctx = deferred_temporal
+                if desires is not None and deferred_mood == "frustrated":
+                    desires.boost("worry_companion", 0.3)
+                    logger.debug("Companion mood frustrated: boosting worry_companion")
             except Exception as exc:  # noqa: BLE001
                 logger.warning("Deferred pre-response caching failed: %s", exc)
 
@@ -1012,6 +1034,7 @@ class EmbodiedAgent:
         inner_voice: str = "",
         plan_ctx: str = "",
         companion_mood: str = "engaged",
+        continuity_ctx: str = "",
         workspace_ctx: str = "",
     ) -> tuple[str, str]:
         """Return (stable, variable) system prompt parts for prompt caching.
@@ -1043,6 +1066,8 @@ class EmbodiedAgent:
         variable_parts: list[str] = [intero]
         if relationship_ctx:
             variable_parts.append(relationship_ctx)
+        if continuity_ctx:
+            variable_parts.append(continuity_ctx)
         # Morning reconstruction takes precedence on first turn; otherwise use feelings
         if morning_ctx:
             variable_parts.append(morning_ctx)
@@ -1075,6 +1100,24 @@ class EmbodiedAgent:
 
         variable = "\n\n---\n\n".join(variable_parts)
         return stable, variable
+
+    def _self_continuity_context(self) -> str:
+        """Return a compact continuity block from latent concerns and recent action traces."""
+        blocks: list[str] = []
+
+        concerns = getattr(self, "_concerns", None)
+        if concerns is not None:
+            concern_ctx = concerns.context_for_prompt(turn_index=self._turn_count)
+            if concern_ctx:
+                blocks.append(concern_ctx)
+
+        prediction = getattr(self, "_prediction", None)
+        if prediction is not None:
+            trace_ctx = prediction.context_for_prompt()
+            if trace_ctx:
+                blocks.append(trace_ctx)
+
+        return "\n\n".join(blocks)
 
     def _exploration_context(self) -> str:
         """Return exploration history for ICL-based direction steering."""
@@ -1971,6 +2014,7 @@ class EmbodiedAgent:
         # next turn.  First turn uses empty defaults — morning_ctx dominates anyway.
         plan_ctx = self._cached_plan_ctx
         workspace_ctx = self._cached_workspace_ctx
+        continuity_ctx = self._self_continuity_context()
         tape_backend = self._tape_backend()  # still needed for in-loop replanning
         if plan_ctx:
             logger.debug("TAPE plan (cached): %s", plan_ctx[:80])
@@ -1999,6 +2043,7 @@ class EmbodiedAgent:
                     inner_voice=inner_voice,
                     plan_ctx=plan_ctx,
                     companion_mood=companion_mood,
+                    continuity_ctx=continuity_ctx,
                     workspace_ctx=workspace_ctx,
                 ),
                 messages=self.messages,
@@ -2165,7 +2210,10 @@ class EmbodiedAgent:
         )
         result, _ = await self.backend.stream_turn(
             system=self._system_prompt(
-                morning_ctx=morning_ctx, plan_ctx=plan_ctx, workspace_ctx=workspace_ctx
+                morning_ctx=morning_ctx,
+                plan_ctx=plan_ctx,
+                continuity_ctx=continuity_ctx,
+                workspace_ctx=workspace_ctx,
             ),
             messages=self.messages,
             tools=[],

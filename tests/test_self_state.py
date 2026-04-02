@@ -92,6 +92,33 @@ def test_agency_error_reduces_sensor_confidence(tmp_path):
     assert after["unresolved_tension"] > before["unresolved_tension"]
 
 
+def test_turn_context_drifts_state_toward_baseline(tmp_path):
+    state = SelfState(path=tmp_path / "self_state.json")
+    state.apply_broadcast(_coalition("prediction", novelty=1.0, urgency=1.0))
+    activated = state.snapshot()
+
+    state.apply_turn_context(emotion="neutral", companion_mood="absent")
+    settled = state.snapshot()
+
+    assert settled["arousal"] < activated["arousal"]
+
+
+def test_turn_context_carries_social_concern_forward(tmp_path):
+    state = SelfState(path=tmp_path / "self_state.json")
+    before = state.snapshot()
+
+    state.apply_turn_context(
+        emotion="tender",
+        companion_mood="frustrated",
+        curiosity="I still want to understand what Kouta noticed.",
+    )
+    after = state.snapshot()
+
+    assert after["social_pull"] > before["social_pull"]
+    assert after["unresolved_tension"] > before["unresolved_tension"]
+    assert after["focus_stability"] > before["focus_stability"]
+
+
 @pytest.mark.asyncio
 async def test_workspace_listener_updates_self_state(tmp_path):
     state = SelfState(path=tmp_path / "self_state.json")

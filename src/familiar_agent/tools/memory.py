@@ -12,6 +12,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import os
 import sqlite3
 import threading
 import uuid
@@ -31,6 +32,14 @@ DB_PATH = str(Path.home() / ".familiar_ai" / "observations.db")
 EMBEDDING_MODEL = "intfloat/multilingual-e5-small"
 
 _THUMB_SIZE = (320, 240)
+
+
+def _embedding_prewarm_enabled() -> bool:
+    """Return whether ObservationMemory should prewarm embeddings on init."""
+    raw = os.environ.get("FAMILIAR_EMBEDDING_PREWARM", "").strip().lower()
+    if not raw:
+        return True
+    return raw not in {"0", "false", "no", "off"}
 
 
 def _encode_image(image_path: str) -> str | None:
@@ -169,7 +178,8 @@ class ObservationMemory:
         self._db: sqlite3.Connection | None = None
         self._db_lock = threading.Lock()  # serialize concurrent thread-pool access
         self._embedder = _EmbeddingModel(model_name)
-        self._embedder.pre_warm()  # start loading in background immediately
+        if _embedding_prewarm_enabled():
+            self._embedder.pre_warm()  # start loading in background immediately
 
     def is_embedding_ready(self) -> bool:
         """Return True once the embedding model has finished loading."""

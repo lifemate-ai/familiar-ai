@@ -103,6 +103,27 @@ class TestSystemPromptSplit:
         _, variable = agent._system_prompt(plan_ctx="1. look around\n2. say hello")
         assert "1. look around" in variable
 
+    def test_variable_part_can_include_self_continuity_context(self, agent, tmp_path):
+        from familiar_agent.concern_engine import ConcernEngine
+
+        agent._concerns = ConcernEngine(path=tmp_path / "active_concerns.json")
+        agent._turn_count = 3
+        agent._concerns.activate(
+            "Something about Kouta's reaction still feels important.",
+            category="companion",
+            intensity=0.8,
+            turn_index=3,
+        )
+        agent._prediction.update(["desk"])
+        agent._prediction.record_action("look", {"degrees": 60})
+        agent._prediction.compute_error(["desk"])
+
+        continuity_ctx = agent._self_continuity_context()
+        _, variable = agent._system_prompt(continuity_ctx=continuity_ctx)
+
+        assert "[Active concern]" in variable
+        assert "[Recent intention-result]" in variable
+
     def test_stable_part_is_consistent_across_calls(self, agent):
         """Stable part should not change between calls (key for caching)."""
         stable1, _ = agent._system_prompt()

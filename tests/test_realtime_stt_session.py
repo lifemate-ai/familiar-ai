@@ -41,7 +41,7 @@ async def test_committed_relay_drops_same_text_within_dedupe_window(monkeypatch)
     session.on_committed = forwarded.append
 
     ts = iter([100.0, 101.0, 104.5])
-    monkeypatch.setattr("familiar_agent.realtime_stt_session.time.time", lambda: next(ts))
+    monkeypatch.setattr("familiar_agent.realtime_stt_session._dedupe_now", lambda: next(ts))
 
     task = asyncio.create_task(session._committed_relay())
     await committed_q.put("こんにちは")
@@ -71,7 +71,7 @@ async def test_committed_relay_keeps_different_texts(monkeypatch) -> None:
     session._committed_queue = input_q
 
     ts = iter([200.0, 200.5])
-    monkeypatch.setattr("familiar_agent.realtime_stt_session.time.time", lambda: next(ts))
+    monkeypatch.setattr("familiar_agent.realtime_stt_session._dedupe_now", lambda: next(ts))
 
     task = asyncio.create_task(session._committed_relay())
     await committed_q.put("こんにちは")

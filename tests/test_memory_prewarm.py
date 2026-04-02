@@ -141,7 +141,8 @@ class TestObservationMemoryPreWarm:
         db_path = str(tmp_path / "test.db")
 
         with patch.object(_EmbeddingModel, "pre_warm") as mock_pre_warm:
-            ObservationMemory(db_path=db_path)
+            with patch.dict("os.environ", {"FAMILIAR_EMBEDDING_PREWARM": "1"}):
+                ObservationMemory(db_path=db_path)
 
         mock_pre_warm.assert_called_once()
 
@@ -159,7 +160,8 @@ class TestObservationMemoryPreWarm:
 
         with patch.object(_EmbeddingModel, "_load", slow_load):
             start = time.monotonic()
-            ObservationMemory(db_path=db_path)
+            with patch.dict("os.environ", {"FAMILIAR_EMBEDDING_PREWARM": "1"}):
+                ObservationMemory(db_path=db_path)
             elapsed = time.monotonic() - start
 
         # __init__ should complete before the slow _load finishes
