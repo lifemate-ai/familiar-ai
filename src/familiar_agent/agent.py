@@ -609,6 +609,12 @@ class EmbodiedAgent:
         self._mood_intensity: float = 0.0
         self._mood_set_at: float = time.time()
 
+        # Deferred pre-response caches (computed in post-response, used next turn)
+        self._cached_plan_ctx: str = ""
+        self._cached_workspace_ctx: str = ""
+        self._cached_temporal_ctx: str | None = None
+        self._cached_companion_mood: str = "engaged"
+
         self._init_tools()
 
     def _tape_backend(self):
@@ -752,9 +758,6 @@ class EmbodiedAgent:
                         "Worry signal detected (%.2f): boosting worry_companion",
                         worry_boost,
                     )
-                if companion_mood == "frustrated":
-                    desires.boost("worry_companion", 0.3)
-                    logger.debug("Companion mood frustrated: boosting worry_companion")
 
             curiosity: str | None = None
             if desires is not None and camera_used:
@@ -801,6 +804,37 @@ class EmbodiedAgent:
                 is_desire_turn=is_desire_turn,
                 desires=desires,
             )
+
+            # ── Deferred pre-response work (results cached for next turn) ──
+            try:
+                tape_backend = self._tape_backend()
+                tool_names = [t["name"] for t in self._all_tool_defs] if tape_backend else []
+                deferred_plan_task = (
+                    generate_plan(tape_backend, user_input, tool_names)
+                    if tape_backend and not is_desire_turn and user_input.strip()
+                    else _noop_str()
+                )
+                (
+                    deferred_plan,
+                    deferred_workspace,
+                    deferred_mood,
+                    deferred_temporal,
+                ) = await asyncio.gather(
+                    deferred_plan_task,
+                    self._gather_workspace_context(desires=desires),
+                    self._infer_companion_mood(user_input),
+                    self._online_temporal_context(desires=desires),
+                )
+                self._cached_plan_ctx = deferred_plan
+                self._cached_workspace_ctx = deferred_workspace
+                self._cached_companion_mood = deferred_mood
+                self._cached_temporal_ctx = deferred_temporal
+                if desires is not None and deferred_mood == "frustrated":
+                    desires.boost("worry_companion", 0.3)
+                    logger.debug("Companion mood frustrated: boosting worry_companion")
+            except Exception as exc:  # noqa: BLE001
+                logger.warning("Deferred pre-response caching failed: %s", exc)
+
         except Exception as exc:  # noqa: BLE001
             logger.warning("Post-response pipeline failed: %s", exc)
 
@@ -1937,18 +1971,17 @@ class EmbodiedAgent:
             (
                 memories,
                 feelings,
-                companion_mood,
                 semantic_facts,
                 behavior_policies,
-                temporal_ctx,
             ) = await asyncio.gather(
                 self._memory.recall_async(user_input, n=recall_n),
                 self._memory.recent_feelings_async(n=4),
-                self._infer_companion_mood(user_input),
                 self._memory.recall_semantic_facts_async(user_input, n=3),
                 self._memory.recall_behavior_policies_async(user_input, n=2),
-                self._online_temporal_context(desires=desires),
             )
+            # Use cached values from previous turn's post-response pipeline
+            companion_mood = self._cached_companion_mood
+            temporal_ctx = self._cached_temporal_ctx
             memory_parts = []
             if memories:
                 memory_parts.append(self._memory.format_for_context(memories))
@@ -1976,26 +2009,17 @@ class EmbodiedAgent:
 
         self.messages.append(self.backend.make_user_message(user_input_with_ctx))
 
-        # TAPE mechanism 1 + Global Workspace: run in parallel — both are independent
-        # of each other and of the ReAct loop setup.
-        # TAPE only runs when a separate utility backend exists; otherwise the extra
-        # round-trip just makes the main reply slower.
-        tape_backend = self._tape_backend()
-        tool_names = [t["name"] for t in self._all_tool_defs] if tape_backend else []
+        # Use cached plan & workspace context from previous turn's post-response pipeline.
+        # These are computed in the background after each response and are ready for the
+        # next turn.  First turn uses empty defaults — morning_ctx dominates anyway.
+        plan_ctx = self._cached_plan_ctx
+        workspace_ctx = self._cached_workspace_ctx
         continuity_ctx = self._self_continuity_context()
-        plan_task = (
-            generate_plan(tape_backend, user_input, tool_names)
-            if tape_backend and not is_desire_turn and user_input.strip()
-            else _noop_str()
-        )
-        plan_ctx, workspace_ctx = await asyncio.gather(
-            plan_task,
-            self._gather_workspace_context(desires=desires),
-        )
+        tape_backend = self._tape_backend()  # still needed for in-loop replanning
         if plan_ctx:
-            logger.debug("TAPE plan: %s", plan_ctx[:80])
+            logger.debug("TAPE plan (cached): %s", plan_ctx[:80])
         if workspace_ctx:
-            logger.debug("GlobalWorkspace broadcast: %s", workspace_ctx[:80])
+            logger.debug("GlobalWorkspace broadcast (cached): %s", workspace_ctx[:80])
 
         if on_phase and startup_phase:
             on_phase("thinking")

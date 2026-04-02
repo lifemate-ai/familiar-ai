@@ -43,6 +43,10 @@ def _make_agent(*, with_tts: bool = False, with_camera: bool = False, with_mcp: 
     agent._last_context_tokens = 0
     agent._post_compact = False
     agent._background_tasks = set()
+    agent._cached_plan_ctx = ""
+    agent._cached_workspace_ctx = ""
+    agent._cached_temporal_ctx = None
+    agent._cached_companion_mood = "engaged"
     agent._started_at = 0.0
     agent.messages = []
     agent._me_md = ""
@@ -525,14 +529,11 @@ async def test_run_subsequent_turns_skip_morning_reconstruction():
 async def test_run_injects_online_temporal_context_into_user_message():
     agent = _make_agent()
     agent._turn_count = 1  # next run is a normal turn, not the first turn
+    # Temporal context is now read from cache (populated by post-response pipeline)
+    agent._cached_temporal_ctx = "[Temporal self]\n[Resurfaced memory]: 朝の空を探した"
     agent.backend.stream_turn = AsyncMock(return_value=(_turn("end_turn", text="reply"), "reply"))
 
-    patches = dict(_HEAVY_PATCHES)
-    patches["familiar_agent.agent.EmbodiedAgent._online_temporal_context"] = AsyncMock(
-        return_value="[Temporal self]\n[Resurfaced memory]: 朝の空を探した"
-    )
-
-    ps = [patch(t, n) for t, n in patches.items()]
+    ps = [patch(t, n) for t, n in _HEAVY_PATCHES.items()]
     for p in ps:
         p.start()
     try:
