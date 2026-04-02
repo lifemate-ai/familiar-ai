@@ -43,6 +43,10 @@ def _make_agent(*, with_tts: bool = False, with_camera: bool = False, with_mcp: 
     agent._last_context_tokens = 0
     agent._post_compact = False
     agent._background_tasks = set()
+    agent._cached_plan_ctx = ""
+    agent._cached_workspace_ctx = ""
+    agent._cached_temporal_ctx = None
+    agent._cached_companion_mood = "engaged"
     agent._started_at = 0.0
     agent.messages = []
     agent._me_md = ""

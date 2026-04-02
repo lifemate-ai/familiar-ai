@@ -107,6 +107,10 @@ class TestInferCompanionMood:
         agent._last_context_tokens = 0
         agent._post_compact = False
         agent._background_tasks = set()
+        agent._cached_plan_ctx = ""
+        agent._cached_workspace_ctx = ""
+        agent._cached_temporal_ctx = None
+        agent._cached_companion_mood = "engaged"
 
         from familiar_agent.tools.memory import ObservationMemory, MemoryTool
         from familiar_agent.tools.tom import ToMTool
