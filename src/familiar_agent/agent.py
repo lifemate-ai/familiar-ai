@@ -259,6 +259,26 @@ SYSTEM_PROMPT = """
 )
 """
 
+# Response coherence check — catch logical self-contradictions before delivery
+_COHERENCE_CHECK_PROMPT = """\
+You are a logical consistency checker. Given the recent conversation and the agent's \
+planned response, determine whether the response contains a logical error, rule violation, \
+or self-contradiction.
+
+Examples of violations:
+- In shiritori (word-chain game): responding with a word that ends in 'ん'
+- Claiming something that directly contradicts what was just said
+- Giving an answer that violates the stated rules of an ongoing activity
+
+Recent conversation:
+{context}
+
+Agent's planned response:
+{response}
+
+If the response is logically consistent, reply with exactly: OK
+If there is a violation, reply with a brief description of the violation (one sentence)."""
+
 # Emotion inference prompt — short, cheap to run
 _EMOTION_PROMPT = """\
 Read this text and pick the single best emotion label:
@@ -586,6 +606,7 @@ class EmbodiedAgent:
         self._session_output_tokens: int = 0
         self._last_context_tokens: int = 0
         self._post_compact: bool = False
+        self._coherence_retried: bool = False
 
         self._camera: CameraTool | None = None
         self._mobility: MobilityTool | None = None
@@ -1455,6 +1476,46 @@ class EmbodiedAgent:
         valid = {"engaged", "tired", "frustrated", "absent", "happy"}
         return label if label in valid else "engaged"
 
+    async def _check_response_coherence(self, response: str) -> str | None:
+        """Check whether the agent's response contains a logical error or rule violation.
+
+        Uses the utility backend for a lightweight reflection pass.  Returns None if
+        the response is coherent, or a short violation description if not.
+        Skipped when no dedicated utility backend exists (same heuristic as TAPE).
+        """
+        if self._utility_backend is self.backend:
+            return None
+        if not response or response == "(no response)":
+            return None
+
+        # Build a compact context from the last few messages (user + assistant text only)
+        context_parts: list[str] = []
+        for msg in self.messages[-6:]:
+            role = msg.get("role", "")
+            content = msg.get("content", "")
+            if isinstance(content, str) and content:
+                context_parts.append(f"{role}: {content[:200]}")
+            elif isinstance(content, list):
+                for block in content:
+                    if isinstance(block, dict) and block.get("type") == "text":
+                        context_parts.append(f"{role}: {block['text'][:200]}")
+                        break
+        context = "\n".join(context_parts[-6:])
+
+        try:
+            result = await self._utility_backend.complete(
+                _COHERENCE_CHECK_PROMPT.format(context=context, response=response[:300]),
+                max_tokens=60,
+            )
+            result = result.strip()
+            if result.upper().startswith("OK"):
+                return None
+            logger.info("Coherence check caught violation: %s", result)
+            return result
+        except Exception as e:
+            logger.debug("Coherence check failed (non-critical): %s", e)
+            return None
+
     async def _summarize_exchange(self, user_input: str, agent_response: str) -> str:
         """Distill an exchange into one sentence for memory storage."""
         result = await self._utility_backend.complete(
@@ -2079,6 +2140,25 @@ class EmbodiedAgent:
             if result.stop_reason == "end_turn":
                 self.messages.append(self.backend.make_assistant_message(result, raw_content))
                 final_text = result.text or "(no response)"
+
+                # Coherence gate: ask utility backend whether the response contains
+                # a logical error (e.g. shiritori word ending in 'ん').  If a
+                # violation is found, inject a correction nudge and let the main
+                # loop re-generate.  Only fires once to avoid infinite loops.
+                if not getattr(self, "_coherence_retried", False):
+                    violation = await self._check_response_coherence(final_text)
+                    if violation:
+                        self._coherence_retried = True
+                        self.messages.append(
+                            self.backend.make_user_message(
+                                f"[SELF-CHECK] Your previous response has a problem: "
+                                f"{violation}. Please correct it and respond again."
+                            )
+                        )
+                        say_used = False
+                        continue
+
+                self._coherence_retried = False
 
                 # Auto-say: if the model wrote text but never called say(), speak it aloud.
                 if self._tts and not say_used and final_text and final_text != "(no response)":
