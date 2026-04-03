@@ -96,10 +96,10 @@ class CameraTool:
         """Background thread to keep camera buffer fresh and optionally show preview."""
         source = self._get_stream_url()
 
-        # Note: previously redirected fd 2 (stderr) to suppress ffmpeg warnings,
-        # but this breaks Textual TUI which uses stderr. Suppression is now skipped;
-        # ffmpeg warnings are handled by logging configuration instead.
-        _saved_stderr_fd: int | None = None
+        # Suppress ffmpeg C-level warnings (SEI type 764 spam from Tapo).
+        # Cannot redirect stderr (breaks Textual TUI), so use OPENCV env vars instead.
+        os.environ["OPENCV_FFMPEG_LOGLEVEL"] = "-8"  # AV_LOG_QUIET
+        os.environ["OPENCV_LOG_LEVEL"] = "SILENT"
 
         try:
             if isinstance(source, str) and source.startswith("rtsp://"):
