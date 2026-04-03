@@ -25,19 +25,32 @@ from ._ui_helpers import (
 
 
 def setup_logging(debug: bool = False) -> None:
-    """Setup basic logging to a file ONLY (to keep the screen clean)."""
+    """Setup basic logging to a file ONLY (to keep the screen clean).
+
+    Explicitly removes any StreamHandlers from the root logger to prevent
+    log lines from leaking into the TUI.  This handles the case where
+    a library import triggers logging before basicConfig is called,
+    causing Python to auto-add a StreamHandler to the root logger.
+    """
     log_dir = Path.home() / ".cache" / "familiar-ai"
     log_dir.mkdir(parents=True, exist_ok=True)
     log_file = log_dir / "app.log"
 
     level = logging.DEBUG if debug else logging.INFO
 
-    # Root logger configuration - FileHandler only
-    logging.basicConfig(
-        level=level,
-        format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
-        handlers=[logging.FileHandler(log_file, encoding="utf-8")],
+    root = logging.getLogger()
+    # Remove any existing handlers (especially auto-added StreamHandlers)
+    for handler in root.handlers[:]:
+        root.removeHandler(handler)
+
+    # Add file handler only
+    file_handler = logging.FileHandler(log_file, encoding="utf-8")
+    file_handler.setFormatter(
+        logging.Formatter("%(asctime)s [%(levelname)s] %(name)s: %(message)s")
     )
+    root.addHandler(file_handler)
+    root.setLevel(level)
+
     # Reduce noise from 3rd party libs
     logging.getLogger("httpx").setLevel(logging.WARNING)
     logging.getLogger("anthropic").setLevel(logging.WARNING)
@@ -136,6 +149,9 @@ async def repl(agent: EmbodiedAgent, desires: DesireSystem, debug: bool = False)
                 queued_input = None
 
             if queued_input is None and input_queue.empty():
+                # Skip desire-driven turns when auto_desire is disabled
+                if not getattr(agent, "config", None) or not agent.config.auto_desire:
+                    continue
                 # Genuine idle — check desires, but respect cooldown after conversation
                 if not should_fire_idle_desire(
                     agent_running=False,
@@ -363,6 +379,10 @@ def main() -> None:
     os.environ.setdefault("HF_HUB_DISABLE_PROGRESS_BARS", "1")
     os.environ.setdefault("TOKENIZERS_PARALLELISM", "false")
 
+    # Setup logging FIRST — before any library import can add a StreamHandler
+    debug = "--debug" in sys.argv
+    setup_logging(debug=debug)
+
     # Use uvloop for faster I/O throughput when available (Linux / WSL2)
     try:
         import uvloop
@@ -375,11 +395,8 @@ def main() -> None:
         _mcp_command(sys.argv[2:])
         return
 
-    debug = "--debug" in sys.argv
     use_gui = "--gui" in sys.argv
     use_tui = "--no-tui" not in sys.argv and not use_gui
-
-    setup_logging(debug=debug)
 
     config = AgentConfig()
     if not config.api_key:

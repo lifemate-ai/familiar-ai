@@ -1357,6 +1357,9 @@ class FamiliarWindow(QMainWindow):
                 now = time.time()
                 if self._closing:
                     continue
+                # Skip desire-driven turns when auto_desire is disabled (default OFF)
+                if not getattr(self._agent.config, "auto_desire", False):
+                    continue
                 if not should_fire_idle_desire(
                     agent_running=self._agent_running,
                     has_pending_input=not self._input_queue.empty(),
