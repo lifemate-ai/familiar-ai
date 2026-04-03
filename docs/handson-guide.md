@@ -178,7 +178,7 @@ ffmpeg -version
 ### Step 3: familiar-ai をダウンロード
 
 ```bash
-git clone --branch v0.4 https://github.com/lifemate-ai/familiar-ai
+git clone --branch v0.5 https://github.com/lifemate-ai/familiar-ai
 cd familiar-ai
 ```
 
