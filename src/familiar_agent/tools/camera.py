@@ -96,23 +96,10 @@ class CameraTool:
         """Background thread to keep camera buffer fresh and optionally show preview."""
         source = self._get_stream_url()
 
-        # Suppress C-level ffmpeg/h264 warnings from Tapo SEI metadata (type 764).
-        # OPENCV_FFMPEG_CAPTURE_OPTIONS only affects AVFormatContext options and does not
-        # suppress codec-level av_log output on all platforms (notably Windows).
-        # Redirect fd 2 (stderr) to devnull for this thread's entire lifetime.
-        # All meaningful errors are already routed through Python's logger above.
+        # Note: previously redirected fd 2 (stderr) to suppress ffmpeg warnings,
+        # but this breaks Textual TUI which uses stderr. Suppression is now skipped;
+        # ffmpeg warnings are handled by logging configuration instead.
         _saved_stderr_fd: int | None = None
-        _devnull_fd: int | None = None
-        if isinstance(source, str):
-            try:
-                devnull_path = "nul" if os.name == "nt" else "/dev/null"
-                _devnull_fd = os.open(devnull_path, os.O_WRONLY)
-                _saved_stderr_fd = os.dup(2)
-                os.dup2(_devnull_fd, 2)
-                os.close(_devnull_fd)
-                _devnull_fd = None
-            except OSError:
-                pass  # Non-critical; warnings will still appear but app continues
 
         try:
             if isinstance(source, str) and source.startswith("rtsp://"):
@@ -150,11 +137,7 @@ class CameraTool:
                 self._cap.release()
                 self._cap = None
         finally:
-            if _saved_stderr_fd is not None:
-                os.dup2(_saved_stderr_fd, 2)
-                os.close(_saved_stderr_fd)
-            if _devnull_fd is not None:
-                os.close(_devnull_fd)
+            pass
 
     async def _ensure_connected(self) -> bool:
         """Ensure ONVIF connection is established for PTZ (optional)."""
