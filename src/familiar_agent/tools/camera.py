@@ -116,9 +116,7 @@ class CameraTool:
 
         try:
             if isinstance(source, str) and source.startswith("rtsp://"):
-                os.environ["OPENCV_FFMPEG_CAPTURE_OPTIONS"] = (
-                    "rtsp_transport;tcp|stimeout;10000000|analyzeduration;5000000|probesize;5000000"
-                )
+                os.environ["OPENCV_FFMPEG_CAPTURE_OPTIONS"] = "rtsp_transport;tcp"
             self._cap = cv2.VideoCapture(
                 source, cv2.CAP_FFMPEG if isinstance(source, str) else cv2.CAP_ANY
             )
