@@ -23,6 +23,9 @@ from typing import TYPE_CHECKING, Any
 if TYPE_CHECKING:
     from ..workspace import Coalition
 
+import hashlib
+from collections import OrderedDict
+
 import numpy as np
 from ..sqlite_migrations import apply_migrations, default_migration_dir
 
@@ -88,6 +91,8 @@ class _EmbeddingModel:
     ensures SentenceTransformer is instantiated exactly once.
     """
 
+    _QUERY_CACHE_SIZE = 128
+
     def __init__(self, model_name: str = EMBEDDING_MODEL):
         self._model_name = model_name
         self._model: Any = None
@@ -95,6 +100,8 @@ class _EmbeddingModel:
         self._fallback_dim = 384
         self._lock = threading.Lock()
         self._load_event = threading.Event()
+        self._query_cache: OrderedDict[str, list[float]] = OrderedDict()
+        self._doc_cache: OrderedDict[str, list[float]] = OrderedDict()
 
     def _load(self) -> None:
         if self._model is not None or self._failed:
@@ -136,35 +143,79 @@ class _EmbeddingModel:
     def _zero_vectors(self, n: int) -> list[list[float]]:
         return [[0.0] * self._fallback_dim for _ in range(n)]
 
+    @staticmethod
+    def _cache_key(text: str) -> str:
+        return hashlib.md5(text.encode()).hexdigest()
+
+    def _get_cached(
+        self, cache: OrderedDict[str, list[float]], texts: list[str]
+    ) -> tuple[list[int], list[str], list[list[float] | None]]:
+        """Return (miss_indices, miss_texts, results_with_holes)."""
+        results: list[list[float] | None] = []
+        miss_indices: list[int] = []
+        miss_texts: list[str] = []
+        for i, t in enumerate(texts):
+            key = self._cache_key(t)
+            if key in cache:
+                cache.move_to_end(key)
+                results.append(cache[key])
+            else:
+                miss_indices.append(i)
+                miss_texts.append(t)
+                results.append(None)
+        return miss_indices, miss_texts, results
+
+    def _put_cached(
+        self, cache: OrderedDict[str, list[float]], texts: list[str], vecs: list[list[float]]
+    ) -> None:
+        for t, v in zip(texts, vecs):
+            key = self._cache_key(t)
+            cache[key] = v
+            cache.move_to_end(key)
+        while len(cache) > self._QUERY_CACHE_SIZE:
+            cache.popitem(last=False)
+
     def encode_document(self, texts: list[str]) -> list[list[float]]:
         self._load()
         if self._model is None:
             return self._zero_vectors(len(texts))
         prefixed = [f"passage: {t}" for t in texts]
-        try:
-            return self._model.encode(
-                prefixed, normalize_embeddings=True, show_progress_bar=False
-            ).tolist()
-        except Exception as e:
-            logger.warning("Embedding encode_document failed; using fallback vectors: %s", e)
-            self._model = None
-            self._failed = True
-            return self._zero_vectors(len(texts))
+        miss_idx, miss_texts, results = self._get_cached(self._doc_cache, prefixed)
+        if miss_texts:
+            try:
+                new_vecs = self._model.encode(
+                    miss_texts, normalize_embeddings=True, show_progress_bar=False
+                ).tolist()
+            except Exception as e:
+                logger.warning("Embedding encode_document failed; using fallback vectors: %s", e)
+                self._model = None
+                self._failed = True
+                return self._zero_vectors(len(texts))
+            self._put_cached(self._doc_cache, miss_texts, new_vecs)
+            for j, idx in enumerate(miss_idx):
+                results[idx] = new_vecs[j]
+        return results  # type: ignore[return-value]
 
     def encode_query(self, texts: list[str]) -> list[list[float]]:
         self._load()
         if self._model is None:
             return self._zero_vectors(len(texts))
         prefixed = [f"query: {t}" for t in texts]
-        try:
-            return self._model.encode(
-                prefixed, normalize_embeddings=True, show_progress_bar=False
-            ).tolist()
-        except Exception as e:
-            logger.warning("Embedding encode_query failed; using fallback vectors: %s", e)
-            self._model = None
-            self._failed = True
-            return self._zero_vectors(len(texts))
+        miss_idx, miss_texts, results = self._get_cached(self._query_cache, prefixed)
+        if miss_texts:
+            try:
+                new_vecs = self._model.encode(
+                    miss_texts, normalize_embeddings=True, show_progress_bar=False
+                ).tolist()
+            except Exception as e:
+                logger.warning("Embedding encode_query failed; using fallback vectors: %s", e)
+                self._model = None
+                self._failed = True
+                return self._zero_vectors(len(texts))
+            self._put_cached(self._query_cache, miss_texts, new_vecs)
+            for j, idx in enumerate(miss_idx):
+                results[idx] = new_vecs[j]
+        return results  # type: ignore[return-value]
 
 
 # ── ObservationMemory ─────────────────────────────────────────

@@ -65,7 +65,7 @@ async def test_check_plan_blocked_returns_true() -> None:
         plan="1. see() to find the cat\n2. say() to report",
         tool_name="see",
         tool_args={},
-        result="Image captured: empty room, no animals visible.",
+        result="Error: camera not found. Unable to capture image.",
     )
     assert result is True
 

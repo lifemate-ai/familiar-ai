@@ -441,8 +441,8 @@ class FamiliarApp(App):
                 raw = str(tool_input.get("text", ""))
                 clean = re.sub(r"\[.*?\]", "", raw).strip()
                 if clean:
-                    log.write(f"{name_tag} {clean}")
-                    self._append_log(f"{self._agent_name} ▶ {clean}")
+                    log.write(f"[bold magenta]{self._agent_name} 🔊[/bold magenta] {clean}")
+                    self._append_log(f"{self._agent_name} 🔊 {clean}")
             else:
                 label = _format_action(name, tool_input)
                 log.write(f"[dim]{label}[/dim]")
@@ -510,6 +510,9 @@ class FamiliarApp(App):
 
     async def _desire_tick(self) -> None:
         """Check desires and fire autonomous actions when idle."""
+        # Skip if auto_desire is disabled (default OFF)
+        if not getattr(self.agent.config, "auto_desire", False):
+            return
         now = time.time()
         if not should_fire_idle_desire(
             agent_running=self._agent_running,

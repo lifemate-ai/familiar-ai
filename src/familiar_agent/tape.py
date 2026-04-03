@@ -92,6 +92,47 @@ async def generate_plan(backend, user_input: str, tool_names: list[str]) -> str:
 # ── TAPE mechanism 2: adaptive replanning ─────────────────────────────────────
 
 
+_BLOCKED_KEYWORDS = [
+    "not found",
+    "見つから",
+    "error",
+    "エラー",
+    "failed",
+    "失敗",
+    "unable",
+    "できな",
+    "obstacle",
+    "障害",
+    "blocked",
+    "timeout",
+    "タイムアウト",
+    "refused",
+    "拒否",
+    "no such",
+    "存在しない",
+    "unreachable",
+    "接続できな",
+    "permission denied",
+]
+
+
+def check_plan_blocked_heuristic(
+    plan: str,
+    tool_name: str,
+    tool_args: dict,
+    result: str,
+) -> bool:
+    """Heuristic check whether observation blocks the plan.
+
+    Replaces the LLM-based check with keyword matching for speed.
+    Returns False when no plan exists or no blocking signal detected.
+    """
+    if not plan:
+        return False
+    result_lower = result[:500].lower()
+    return any(kw in result_lower for kw in _BLOCKED_KEYWORDS)
+
+
 async def check_plan_blocked(
     backend,
     plan: str,
@@ -99,18 +140,20 @@ async def check_plan_blocked(
     tool_args: dict,
     result: str,
 ) -> bool:
-    """Ask the LLM whether this observation blocks the current plan.
+    """Check whether this observation blocks the current plan.
 
-    This is the core of TAPE's adaptive replanning: the trigger is NOT a
-    technical tool failure, but an observation that contradicts the plan's
-    assumptions — e.g., looking for the cat and not finding it, or trying
-    to move and finding an obstacle.
-
-    Only called when a plan exists (plan != "").  Returns False on any error
-    so that failures in the check never break the agent loop.
+    Uses fast heuristic by default. Falls back to LLM only if
+    FAMILIAR_TAPE_LLM_REPLAN=1 is set.
     """
     if not plan:
         return False
+    # Fast path: heuristic (no LLM call)
+    import os
+
+    if not os.environ.get("FAMILIAR_TAPE_LLM_REPLAN"):
+        return check_plan_blocked_heuristic(plan, tool_name, tool_args, result)
+
+    # Slow path: LLM-based (opt-in)
     args_summary = ", ".join(f"{k}={v}" for k, v in list(tool_args.items())[:3])
     result_summary = result[:300]
     prompt = _PLAN_BLOCKED_PROMPT.format(

@@ -53,7 +53,7 @@ _TOOL_TIMEOUTS: dict[str, float] = {
     "see": 12.0,
     "look": 8.0,
     "walk": 12.0,
-    "say": 25.0,
+    "say": 60.0,
     "remember": 20.0,
     "recall": 20.0,
     "tom": 20.0,
@@ -973,6 +973,10 @@ class EmbodiedAgent:
         elif name in coding_tools:
             return await self._coding.call(name, tool_input)
         elif self._mcp:
+            # Wait for background MCP init if still running
+            mcp_task = getattr(self, "_mcp_start_task", None)
+            if mcp_task and not mcp_task.done():
+                await mcp_task
             return await self._mcp.call(name, tool_input)
         else:
             return f"Tool '{name}' not available (check configuration).", None
@@ -2019,9 +2023,9 @@ class EmbodiedAgent:
         if on_phase:
             on_phase("startup" if startup_phase else "thinking")
 
-        # Start MCP connections on first turn (lazy, idempotent)
+        # Start MCP connections in background (non-blocking) and memory worker
         if self._mcp and not self._mcp.is_started:
-            await self._mcp.start()
+            self._mcp_start_task = asyncio.ensure_future(self._mcp.start())
         if memory_worker and not memory_worker.is_running:
             await memory_worker.start()
 
@@ -2145,7 +2149,13 @@ class EmbodiedAgent:
                 # a logical error (e.g. shiritori word ending in 'ん').  If a
                 # violation is found, inject a correction nudge and let the main
                 # loop re-generate.  Only fires once to avoid infinite loops.
-                if not getattr(self, "_coherence_retried", False):
+                # Disabled by default for latency; set FAMILIAR_COHERENCE_CHECK=1 to enable.
+                _coherence_enabled = os.environ.get("FAMILIAR_COHERENCE_CHECK", "").strip() in (
+                    "1",
+                    "true",
+                    "yes",
+                )
+                if _coherence_enabled and not getattr(self, "_coherence_retried", False):
                     violation = await self._check_response_coherence(final_text)
                     if violation:
                         self._coherence_retried = True
@@ -2161,7 +2171,15 @@ class EmbodiedAgent:
                 self._coherence_retried = False
 
                 # Auto-say: if the model wrote text but never called say(), speak it aloud.
-                if self._tts and not say_used and final_text and final_text != "(no response)":
+                # Gated by config.auto_say (default OFF).
+                _auto_say_enabled = getattr(self.config, "auto_say", False)
+                if (
+                    _auto_say_enabled
+                    and self._tts
+                    and not say_used
+                    and final_text
+                    and final_text != "(no response)"
+                ):
                     if on_action:
                         on_action("say", {"text": final_text})
                     await self._tts.call("say", {"text": final_text})

@@ -188,6 +188,25 @@ class AgentConfig:
     scene_api_key: str = field(default_factory=lambda: os.environ.get("SCENE_API_KEY", ""))
     scene_model: str = field(default_factory=lambda: os.environ.get("SCENE_MODEL", ""))
 
+    # ── Autonomous behavior ───────────────────────────────────────
+    # Desire-driven idle turns are OFF by default.
+    # Auto-say (speak text responses aloud) is ON by default.
+    # Set FAMILIAR_AUTO=1 to enable all, or toggle individually:
+    #   FAMILIAR_AUTO_DESIRE=1  — enable desire-driven idle turns
+    #   FAMILIAR_AUTO_SAY=0     — disable auto-say
+    auto_desire: bool = field(
+        default_factory=lambda: (
+            os.environ.get("FAMILIAR_AUTO_DESIRE", "").strip().lower() in ("1", "true", "yes")
+            or os.environ.get("FAMILIAR_AUTO", "").strip().lower() in ("1", "true", "yes")
+        )
+    )
+    auto_say: bool = field(
+        default_factory=lambda: (
+            os.environ.get("FAMILIAR_AUTO_SAY", "").strip().lower() in ("1", "true", "yes")
+            or os.environ.get("FAMILIAR_AUTO", "").strip().lower() in ("1", "true", "yes")
+        )
+    )
+
     max_tokens: int = 4096
     camera: CameraConfig = field(default_factory=CameraConfig)
     mobility: MobilityConfig = field(default_factory=MobilityConfig)
