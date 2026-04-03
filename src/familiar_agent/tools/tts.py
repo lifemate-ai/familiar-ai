@@ -143,12 +143,11 @@ class TTSTool:
         if len(text) > 200:
             text = text[:197] + "..."
 
-        url = f"https://api.elevenlabs.io/v1/text-to-speech/{self.voice_id}"
+        url = f"https://api.elevenlabs.io/v1/text-to-speech/{self.voice_id}?output_format=pcm_16000"
         headers = {"xi-api-key": self.api_key, "Content-Type": "application/json"}
         payload = {
             "text": text,
             "model_id": "eleven_v3",
-            "output_format": "pcm_16000",  # raw 16-bit mono PCM — no ffmpeg conversion needed
             "voice_settings": {"stability": 0.5, "similarity_boost": 0.75},
         }
 
