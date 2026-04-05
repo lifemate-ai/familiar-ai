@@ -1,0 +1,45 @@
+name: Prepare Release PR
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: Release version to prepare (X.Y.Z)
+        required: true
+        type: string
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  prepare-release-pr:
+    runs-on: ubuntu-latest
+    if: github.ref_name == 'develop'
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Prepare release files
+        run: python scripts/release_flow.py prepare "${{ inputs.version }}"
+
+      - name: Create release PR
+        uses: peter-evans/create-pull-request@v7
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          branch: release/v${{ inputs.version }}
+          base: main
+          commit-message: chore(release): prepare v${{ inputs.version }}
+          title: chore(release): prepare v${{ inputs.version }}
+          body: |
+            ## Summary
+            - bump `pyproject.toml` to `${{ inputs.version }}`
+            - roll `CHANGELOG.md` `Unreleased` into the `${{ inputs.version }}` release section
+            - prepare the release branch for merge into `main`
+          draft: true
+          delete-branch: true
