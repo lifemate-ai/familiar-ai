@@ -92,7 +92,9 @@ Or: `winget install astral-sh.uv`
 
 ### 2. Install ffmpeg
 
-ffmpeg is **required** for camera image capture and audio playback.
+ffmpeg is **required** for camera image capture and camera-speaker playback via go2rtc.
+Local PC audio playback can also use built-in OS players (`afplay` on macOS) or the
+pure-Python fallback.
 
 | OS | Command |
 |----|---------|
@@ -153,13 +155,17 @@ cp persona-template/en.md ME.md
 
 **macOS / Linux / WSL2:**
 ```bash
-./run.sh             # Textual TUI (recommended)
+./run.sh             # Textual TUI (backward-compatible default)
+./run-gui.sh         # Desktop GUI launcher
+./run.sh --gui       # Desktop GUI (same as run-gui.sh)
 ./run.sh --no-tui    # Plain REPL
 ```
 
 **Windows:**
 ```bat
-run.bat              # Textual TUI (recommended)
+run.bat              # Textual TUI (backward-compatible default)
+run-gui.bat          # Desktop GUI launcher
+run.bat --gui        # Desktop GUI (same as run-gui.bat)
 run.bat --no-tui     # Plain REPL
 ```
 
@@ -277,6 +283,7 @@ API_KEY=sk-...
 ```
 
 Run `./run.sh` (macOS/Linux/WSL2) or `run.bat` (Windows) and start chatting. Add hardware as you go.
+If you want the desktop GUI directly, use `./run-gui.sh` or `run-gui.bat`.
 
 ### Wi-Fi PTZ camera (Tapo C220)
 
@@ -355,14 +362,17 @@ Set `TTS_OUTPUT=remote` (or `both`). Requires [go2rtc](https://github.com/AlexxI
 
 #### B) Local PC speaker
 
-The default (`TTS_OUTPUT=local`). Tries players in order: **paplay** → **mpv** → **ffplay**. Also used as a fallback when `TTS_OUTPUT=remote` and go2rtc is unavailable.
+The default (`TTS_OUTPUT=local`). Tries players in order:
+**afplay (macOS)** → **paplay** → **mpv** → **sounddevice**.
+On Windows, MP3 playback can also fall back to built-in **MCI** if no external player is available.
+Local playback is also used as a fallback when `TTS_OUTPUT=remote` and go2rtc is unavailable.
 
 | OS | Install |
 |----|---------|
-| macOS | `brew install mpv` |
+| macOS | No extra player required (`afplay` is built in). Optional: `brew install mpv` |
 | Ubuntu / Debian | `sudo apt install mpv` (or `paplay` via `pulseaudio-utils`) |
 | WSL2 / WSLg | `sudo apt install pulseaudio-utils` — set `PULSE_SERVER=unix:/mnt/wslg/PulseServer` in `.env` |
-| Windows | [mpv.io/installation](https://mpv.io/installation/) — download and add to PATH, **or** `winget install ffmpeg` |
+| Windows | [mpv.io/installation](https://mpv.io/installation/) — download and add to PATH. Without it, familiar-ai still tries built-in/Python fallbacks |
 
 > If no audio player is available, speech is still generated — it just won't play.
 

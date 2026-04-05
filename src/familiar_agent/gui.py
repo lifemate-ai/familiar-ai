@@ -11,7 +11,7 @@ Provides a native desktop window with:
 Launch via:
     uv run familiar --gui
 
-or via run.bat --gui / run.sh --gui
+or via run-gui.bat / run-gui.sh
 """
 
 from __future__ import annotations
