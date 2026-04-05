@@ -16,6 +16,8 @@ from familiar_agent.setup import (
     SetupConfig,
     generate_env_file,
     is_first_run,
+    migrate_legacy_env_file,
+    save_setup_config,
     validate_anthropic_key,
     validate_camera_connection,
     discover_onvif_cameras,
@@ -52,20 +54,23 @@ def test_is_first_run_default_is_cwd():
 
 def test_setup_config_defaults():
     """SetupConfig has sensible defaults for optional fields."""
-    config = SetupConfig(anthropic_api_key="sk-ant-test")
-    assert config.anthropic_api_key == "sk-ant-test"
-    assert config.anthropic_model == ""  # empty = use default
+    config = SetupConfig(api_key="sk-ant-test")
+    assert config.platform == "anthropic"
+    assert config.api_key == "sk-ant-test"
+    assert config.model == ""  # empty = use default
     assert config.camera_host == ""
     assert config.camera_username == ""
     assert config.camera_password == ""
     assert config.camera_onvif_port == "2020"
     assert config.elevenlabs_api_key == ""
+    assert config.auto_desire is False
+    assert config.auto_say is True
 
 
 def test_setup_config_with_camera():
     """SetupConfig stores camera settings."""
     config = SetupConfig(
-        anthropic_api_key="sk-ant-test",
+        api_key="sk-ant-test",
         camera_host="192.168.1.100",
         camera_username="admin",
         camera_password="secret",
@@ -81,18 +86,19 @@ def test_setup_config_with_camera():
 
 
 def test_generate_env_contains_required_key(tmp_path: Path):
-    """Generated .env contains the Anthropic API key."""
-    config = SetupConfig(anthropic_api_key="sk-ant-abc123")
+    """Generated .env contains the unified API key and platform."""
+    config = SetupConfig(platform="anthropic", api_key="sk-ant-abc123")
     env_path = tmp_path / ".env"
     generate_env_file(config, path=env_path)
     content = env_path.read_text()
-    assert "ANTHROPIC_API_KEY=sk-ant-abc123" in content
+    assert "PLATFORM=anthropic" in content
+    assert "API_KEY=sk-ant-abc123" in content
 
 
 def test_generate_env_includes_camera_when_provided(tmp_path: Path):
     """Generated .env includes camera settings when camera host is given."""
     config = SetupConfig(
-        anthropic_api_key="sk-ant-test",
+        api_key="sk-ant-test",
         camera_host="192.168.1.50",
         camera_username="admin",
         camera_password="pass",
@@ -107,7 +113,7 @@ def test_generate_env_includes_camera_when_provided(tmp_path: Path):
 
 def test_generate_env_skips_empty_optional_camera(tmp_path: Path):
     """Generated .env omits CAMERA_* lines when camera_host is empty."""
-    config = SetupConfig(anthropic_api_key="sk-ant-test", camera_host="")
+    config = SetupConfig(api_key="sk-ant-test", camera_host="")
     env_path = tmp_path / ".env"
     generate_env_file(config, path=env_path)
     content = env_path.read_text()
@@ -116,7 +122,7 @@ def test_generate_env_skips_empty_optional_camera(tmp_path: Path):
 
 def test_generate_env_includes_elevenlabs_when_provided(tmp_path: Path):
     """Generated .env includes ElevenLabs key when provided."""
-    config = SetupConfig(anthropic_api_key="sk-ant-test", elevenlabs_api_key="el-key-123")
+    config = SetupConfig(api_key="sk-ant-test", elevenlabs_api_key="el-key-123")
     env_path = tmp_path / ".env"
     generate_env_file(config, path=env_path)
     content = env_path.read_text()
@@ -125,7 +131,7 @@ def test_generate_env_includes_elevenlabs_when_provided(tmp_path: Path):
 
 def test_generate_env_skips_empty_elevenlabs(tmp_path: Path):
     """Generated .env omits ELEVENLABS_API_KEY when not provided."""
-    config = SetupConfig(anthropic_api_key="sk-ant-test", elevenlabs_api_key="")
+    config = SetupConfig(api_key="sk-ant-test", elevenlabs_api_key="")
     env_path = tmp_path / ".env"
     generate_env_file(config, path=env_path)
     content = env_path.read_text()
@@ -134,19 +140,51 @@ def test_generate_env_skips_empty_elevenlabs(tmp_path: Path):
 
 def test_generate_env_creates_parent_dirs(tmp_path: Path):
     """generate_env_file creates parent directories if they don't exist."""
-    config = SetupConfig(anthropic_api_key="sk-ant-test")
+    config = SetupConfig(api_key="sk-ant-test")
     env_path = tmp_path / "subdir" / "nested" / ".env"
     generate_env_file(config, path=env_path)
     assert env_path.exists()
 
 
 def test_generate_env_includes_custom_model(tmp_path: Path):
-    """Generated .env includes ANTHROPIC_MODEL when specified."""
-    config = SetupConfig(anthropic_api_key="sk-ant-test", anthropic_model="claude-sonnet-4-6")
+    """Generated .env includes MODEL when specified."""
+    config = SetupConfig(api_key="sk-ant-test", model="claude-sonnet-4-6")
     env_path = tmp_path / ".env"
     generate_env_file(config, path=env_path)
     content = env_path.read_text()
-    assert "ANTHROPIC_MODEL=claude-sonnet-4-6" in content
+    assert "MODEL=claude-sonnet-4-6" in content
+
+
+def test_save_setup_config_preserves_blank_sensitive_fields(tmp_path: Path):
+    env_path = tmp_path / ".env"
+    env_path.write_text("API_KEY=keep-me\nCAMERA_PASSWORD=secret\n", encoding="utf-8")
+
+    save_setup_config(
+        SetupConfig(platform="anthropic", api_key="", camera_password=""),
+        path=env_path,
+        preserve_empty_sensitive=True,
+    )
+
+    content = env_path.read_text(encoding="utf-8")
+    assert "API_KEY=keep-me" in content
+    assert "CAMERA_PASSWORD=secret" in content
+
+
+def test_migrate_legacy_env_file_adds_unified_keys(tmp_path: Path):
+    env_path = tmp_path / ".env"
+    env_path.write_text(
+        "ANTHROPIC_API_KEY=sk-ant-old\nANTHROPIC_MODEL=claude-sonnet-4-6\n",
+        encoding="utf-8",
+    )
+
+    migrated, notes = migrate_legacy_env_file(env_path)
+
+    content = env_path.read_text(encoding="utf-8")
+    assert migrated is True
+    assert notes
+    assert "PLATFORM=anthropic" in content
+    assert "API_KEY=sk-ant-old" in content
+    assert "MODEL=claude-sonnet-4-6" in content
 
 
 # ---------------------------------------------------------------------------
