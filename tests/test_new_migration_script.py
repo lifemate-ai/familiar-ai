@@ -5,10 +5,28 @@ import subprocess
 from pathlib import Path
 
 
+def _bash_executable() -> str:
+    if os.name != "nt":
+        return "bash"
+
+    candidates = [
+        Path(os.environ.get("ProgramW6432", r"C:\Program Files")) / "Git" / "bin" / "bash.exe",
+        Path(os.environ.get("ProgramFiles", r"C:\Program Files")) / "Git" / "bin" / "bash.exe",
+        Path(os.environ.get("ProgramFiles(x86)", r"C:\Program Files (x86)"))
+        / "Git"
+        / "bin"
+        / "bash.exe",
+    ]
+    for candidate in candidates:
+        if candidate.exists():
+            return str(candidate)
+    return "bash"
+
+
 def _run_script(tmp_path: Path, *args: str) -> Path:
     script = Path.cwd() / "scripts" / "new_migration.sh"
     result = subprocess.run(
-        ["bash", str(script), *args, "--dir", str(tmp_path)],
+        [_bash_executable(), str(script), *args, "--dir", str(tmp_path)],
         check=True,
         capture_output=True,
         text=True,
@@ -81,7 +99,7 @@ esac
 
     result = subprocess.run(
         [
-            "bash",
+            _bash_executable(),
             str(script),
             "Add memory jobs table",
             "--date",
