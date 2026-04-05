@@ -33,6 +33,13 @@ def _optional_int_env(*names: str) -> int | None:
     return int(value)
 
 
+def _bool_env(*names: str, default: bool = False) -> bool:
+    value = _env_value(*names, default="")
+    if not value:
+        return default
+    return value.strip().lower() in ("1", "true", "yes", "on")
+
+
 @dataclass
 class CameraConfig:
     host: str = field(
@@ -147,11 +154,13 @@ class AgentConfig:
     # Platform: "anthropic" | "gemini" | "openai" | "kimi" | "glm"
     platform: str = field(default_factory=lambda: os.environ.get("PLATFORM", "anthropic"))
 
-    # Unified API key (used for whichever platform is selected)
-    api_key: str = field(default_factory=lambda: os.environ.get("API_KEY", ""))
+    # Unified API key (used for whichever platform is selected).
+    # Legacy ANTHROPIC_API_KEY is still accepted for backward compatibility.
+    api_key: str = field(default_factory=lambda: _env_value("API_KEY", "ANTHROPIC_API_KEY"))
 
-    # Model name — platform-specific defaults applied in create_backend()
-    model: str = field(default_factory=lambda: os.environ.get("MODEL", ""))
+    # Model name — platform-specific defaults applied in create_backend().
+    # Legacy ANTHROPIC_MODEL is still accepted for backward compatibility.
+    model: str = field(default_factory=lambda: _env_value("MODEL", "ANTHROPIC_MODEL"))
 
     # OpenAI-compatible only: base URL and tool-calling mode
     # TOOLS_MODE: "native" = use function-calling API, "prompt" = inject into system prompt
@@ -172,6 +181,8 @@ class AgentConfig:
     # Effort level for adaptive thinking: "high" (default) | "medium" | "low" | "max"
     # "max" is Opus 4.6 only. Ignored unless THINKING_MODE=adaptive (or auto on supported models).
     thinking_effort: str = field(default_factory=lambda: os.environ.get("THINKING_EFFORT", "high"))
+
+    realtime_stt: bool = field(default_factory=lambda: _bool_env("REALTIME_STT", default=False))
 
     # ── Utility backend (optional) ─────────────────────────────────────
     # Separate backend for non-conversation LLM calls (day summaries, emotion
