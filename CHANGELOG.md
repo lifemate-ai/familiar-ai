@@ -8,6 +8,7 @@ This project adheres to [Semantic Versioning](https://semver.org/).
 ## [Unreleased]
 
 ### Added
+- GitHub Actions-based release automation for the new `develop -> main -> tag` flow, including a manual release PR workflow and an automatic tag/release workflow on `main`
 - Realtime STT via ElevenLabs Scribe v2 Realtime WebSocket API
   - Always-on, hands-free voice input with VAD auto-commit
   - Works in both REPL (`--no-tui`) and TUI modes
@@ -23,6 +24,7 @@ This project adheres to [Semantic Versioning](https://semver.org/).
 - Lightweight layered self continuity with inertial proto-self updates, recent intention-result traces, and persistent active concerns
 
 ### Changed
+- Lint and test workflows now run for both `develop` and `main`, matching the new default-branch strategy
 - GUI settings dialog now keeps JP labels fully visible (including short labels like `名`), refreshed the app to a bright, soft, rounded light theme, split first-turn startup status from "thinking", and increased GUI font sizing for readability.
 - Local TTS playback now prefers `afplay` on macOS, documents the actual platform-specific fallback chain, and CI now runs the test suite on Ubuntu, macOS, and Windows runners
 - Interoception now reflects internal self-state signals in addition to time, uptime, social context, and mood
