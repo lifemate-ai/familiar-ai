@@ -3,6 +3,8 @@ from __future__ import annotations
 import os
 import shutil
 import subprocess
+
+import pytest
 from pathlib import Path
 
 
@@ -56,6 +58,7 @@ def test_new_migration_script_increments_sequence(tmp_path) -> None:
     assert second.name.startswith("2026-03-03-002_")
 
 
+@pytest.mark.skipif(os.name == "nt", reason="fake cygpath shim is only needed off Windows")
 def test_new_migration_script_accepts_windows_style_dir_with_cygpath(tmp_path) -> None:
     script = Path.cwd() / "scripts" / "new_migration.sh"
     fake_cygdrive = tmp_path / "cygdrive" / "c"
