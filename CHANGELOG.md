@@ -35,6 +35,9 @@ This project adheres to [Semantic Versioning](https://semver.org/).
 - Agent replies no longer wait on post-response memory/self-model updates, and TAPE planning is skipped when no separate utility backend is configured
 - System prompts now surface at most one active concern and one recent misaligned intention trace, while post-response updates carry those states forward without adding hot-path LLM calls
 
+### Fixed
+- `scripts/new_migration.sh` now accepts Windows-style `--dir` paths in Git Bash so cross-platform CI migration tests pass on `windows-latest`
+
 ## [0.1.0] - 2026-02-22
 
 ### Added

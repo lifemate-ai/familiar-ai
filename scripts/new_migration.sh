@@ -68,6 +68,13 @@ if [[ ! "$migration_date" =~ ^[0-9]{4}-[0-9]{2}-[0-9]{2}$ ]]; then
   exit 1
 fi
 
+# GitHub Windows runners pass temp dirs as C:\...; normalize separators for bash file ops.
+case "$migration_dir" in
+  [A-Za-z]:\\*|[A-Za-z]:/*)
+    migration_dir="${migration_dir//\\//}"
+    ;;
+esac
+
 slug="$(printf '%s' "$name" | tr '[:upper:]' '[:lower:]' | sed -E 's/[^a-z0-9]+/_/g; s/^_+|_+$//g')"
 if [[ -z "$slug" ]]; then
   slug="migration"
