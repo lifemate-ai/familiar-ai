@@ -29,7 +29,7 @@ from ._ui_helpers import (
     format_tool_result as _format_tool_result,
     should_fire_idle_desire,
 )
-from .realtime_stt_session import create_realtime_stt_session, RealtimeSttSession
+from .realtime_stt_session import create_realtime_stt_controller, RealtimeSttController
 
 if TYPE_CHECKING:
     from .agent import EmbodiedAgent
@@ -165,6 +165,7 @@ class FamiliarApp(App):
         Binding("ctrl+c", "quit", _t("quit_label"), show=True, priority=True),
         Binding("ctrl+l", "clear_history", _t("clear_label"), show=True),
         Binding("ctrl+t", "toggle_listen", "🎙 Voice", show=True),
+        Binding("ctrl+r", "restart_realtime_stt", "↻ STT", show=True),
         Binding("escape", "cancel_turn", "🛑 Cancel", show=False),
         Binding("space", "start_ptt", "🎙 PTT", show=False),
     ]
@@ -190,7 +191,7 @@ class FamiliarApp(App):
         # Push-to-Talk state
         self._ptt_active: bool = False
         # Realtime STT (hands-free, always-on)
-        self._realtime_stt: RealtimeSttSession | None = create_realtime_stt_session()
+        self._realtime_stt: RealtimeSttController | None = create_realtime_stt_controller()
 
     def _open_log_file(self) -> Path:
         log_dir = Path.home() / ".cache" / "familiar-ai"
@@ -576,12 +577,31 @@ class FamiliarApp(App):
 
             self._realtime_stt.on_partial = _on_partial
             self._realtime_stt.on_committed = _on_committed
+            self._realtime_stt.on_restart = lambda reason: self._log_system(
+                f"🎤 Realtime STT restarting ({reason})"
+            )
             await self._realtime_stt.start(loop, self._input_queue)
             self._log_system("\U0001f3a4 Realtime STT ON (ElevenLabs)")
         except Exception as e:
             logger.warning("Realtime STT init failed: %s", e)
             self._log_system(f"\u26a0 Realtime STT init failed: {e}")
             self._realtime_stt = None
+
+    async def action_restart_realtime_stt(self) -> None:
+        """Reconnect realtime STT after a loop or transient transport issue."""
+        if not self._realtime_stt:
+            self._log_system("Realtime STT not configured")
+            return
+        try:
+            restarted = await self._realtime_stt.restart(reason="manual")
+        except Exception as exc:
+            logger.warning("Realtime STT restart failed: %s", exc)
+            self._log_system(f"⚠ Realtime STT restart failed: {exc}")
+            return
+        if restarted:
+            self._log_system("🎤 Realtime STT restarted")
+        else:
+            self._log_system("Realtime STT restart unavailable before startup")
 
     async def action_toggle_listen(self) -> None:
         """Toggle microphone recording for voice input."""

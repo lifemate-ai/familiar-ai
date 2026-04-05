@@ -24,6 +24,8 @@ import time
 from collections.abc import Callable
 from typing import TYPE_CHECKING
 
+from .voice_guard import VoiceLoopGuard, get_shared_voice_guard
+
 if TYPE_CHECKING:
     from .tools.realtime_stt import RealtimeSttClient
     from .tools.mic import MicCapture
@@ -88,14 +90,22 @@ class RealtimeSttSession:
                       (called *before* the text is placed on the queue).
     """
 
-    def __init__(self, api_key: str, language_code: str = "ja") -> None:
+    def __init__(
+        self,
+        api_key: str,
+        language_code: str = "ja",
+        *,
+        voice_guard: VoiceLoopGuard | None = None,
+    ) -> None:
         self._api_key = api_key
         self._language_code = language_code.strip()
+        self._voice_guard = voice_guard or get_shared_voice_guard()
         self._stt_client: RealtimeSttClient | None = None
         self._mic_capture: MicCapture | None = None
         self._relay_task: asyncio.Task | None = None
         self._partial_task: asyncio.Task | None = None
         self._monitor_task: asyncio.Task | None = None
+        self._restart_task: asyncio.Task[bool] | None = None
         self._committed_queue: asyncio.Queue[str | None] | None = None
         self._incoming_committed: asyncio.Queue[str] = asyncio.Queue()
         self._incoming_partial: asyncio.Queue[str] = asyncio.Queue()
@@ -111,7 +121,7 @@ class RealtimeSttSession:
         # Display callbacks (set by caller before start())
         self.on_partial: Callable[[str], None] | None = None
         self.on_committed: Callable[[str], None] | None = None
-        self.on_restart: Callable[[str], None] | None = None
+        self.on_watchdog_restart: Callable[[str], None] | None = None
 
     @property
     def active(self) -> bool:
@@ -122,6 +132,11 @@ class RealtimeSttSession:
     def connected(self) -> bool:
         """True while the websocket transport is currently live."""
         return bool(self._stt_client and self._stt_client.connected)
+
+    @property
+    def gated(self) -> bool:
+        """True while TTS is currently gating STT commit/partial handling."""
+        return self._voice_guard.gated
 
     async def start(
         self,
@@ -159,7 +174,10 @@ class RealtimeSttSession:
         if self._mic_capture:
             self._mic_capture.stop()
             self._mic_capture = None
+        current_task = asyncio.current_task()
         for task in (self._relay_task, self._partial_task, self._monitor_task):
+            if task is current_task:
+                continue
             if task:
                 task.cancel()
                 try:
@@ -172,10 +190,19 @@ class RealtimeSttSession:
         if self._stt_client:
             await self._stt_client.close()
             self._stt_client = None
+        restart_task = self._restart_task
+        if restart_task and restart_task is not current_task and not restart_task.done():
+            restart_task.cancel()
+            try:
+                await restart_task
+            except asyncio.CancelledError:
+                pass
+        if restart_task is not current_task:
+            self._restart_task = None
         logger.info("Realtime STT session stopped")
 
     async def restart(self, reason: str = "manual") -> bool:
-        """Reconnect the realtime STT session using the stored loop/queue."""
+        """Reconnect the realtime STT transport and microphone pipeline."""
         if self._loop is None or self._committed_queue is None:
             logger.debug("Realtime STT restart skipped before initial start (%s)", reason)
             return False
@@ -235,6 +262,18 @@ class RealtimeSttSession:
             return
         await client.send_audio(pcm16le)
 
+    def _schedule_restart(self, reason: str) -> None:
+        if self._stopping:
+            return
+        if self._restart_task and not self._restart_task.done():
+            return
+        if self.on_watchdog_restart:
+            try:
+                self.on_watchdog_restart(reason)
+            except Exception:
+                logger.exception("Realtime STT watchdog callback failed")
+        self._restart_task = asyncio.create_task(self.restart(reason))
+
     async def _committed_relay(self) -> None:
         assert self._committed_queue is not None
         while True:
@@ -253,6 +292,12 @@ class RealtimeSttSession:
             ):
                 logger.debug("Dropped duplicate realtime STT transcript: %s", text)
                 continue
+            decision = self._voice_guard.check_transcript(text)
+            if decision.blocked:
+                logger.info("Realtime STT gated transcript (%s): %r", decision.reason, text)
+                if decision.should_restart:
+                    self._schedule_restart("watchdog_loop")
+                continue
             self._last_normalized_text = normalized
             self._last_time = now
             if self.on_committed:
@@ -265,11 +310,64 @@ class RealtimeSttSession:
             if _looks_like_audio_event(text):
                 logger.debug("Realtime STT dropped audio-event partial: %r", text)
                 continue
+            if self._voice_guard.should_gate_partial(text):
+                logger.debug("Realtime STT gated partial transcript: %r", text)
+                continue
             if self.on_partial:
                 self.on_partial(text)
 
 
-def create_realtime_stt_session() -> RealtimeSttSession | None:
+class RealtimeSttController:
+    """UI-facing controller that wraps realtime STT session start/stop/restart."""
+
+    def __init__(self, session: RealtimeSttSession) -> None:
+        self._session = session
+        self._loop: asyncio.AbstractEventLoop | None = None
+        self._committed_queue: asyncio.Queue[str | None] | None = None
+        self.on_partial: Callable[[str], None] | None = None
+        self.on_committed: Callable[[str], None] | None = None
+        self.on_restart: Callable[[str], None] | None = None
+
+    @property
+    def active(self) -> bool:
+        return self._session.active
+
+    @property
+    def connected(self) -> bool:
+        return self._session.connected
+
+    @property
+    def gated(self) -> bool:
+        return self._session.gated
+
+    async def start(
+        self,
+        loop: asyncio.AbstractEventLoop,
+        committed_queue: asyncio.Queue[str | None],
+    ) -> None:
+        self._loop = loop
+        self._committed_queue = committed_queue
+        self._session.on_partial = self.on_partial
+        self._session.on_committed = self.on_committed
+        self._session.on_watchdog_restart = self.on_restart
+        await self._session.start(loop, committed_queue)
+
+    async def stop(self) -> None:
+        await self._session.stop()
+
+    async def restart(self, reason: str = "manual") -> bool:
+        if self._loop is None or self._committed_queue is None:
+            logger.debug("Realtime STT controller restart skipped before start (%s)", reason)
+            return False
+        self._session.on_partial = self.on_partial
+        self._session.on_committed = self.on_committed
+        self._session.on_watchdog_restart = self.on_restart
+        return await self._session.restart(reason)
+
+
+def create_realtime_stt_session(
+    voice_guard: VoiceLoopGuard | None = None,
+) -> RealtimeSttSession | None:
     """Create a session if ``REALTIME_STT=true`` and the API key is available.
 
     Returns ``None`` when realtime STT is not configured.
@@ -284,16 +382,12 @@ def create_realtime_stt_session() -> RealtimeSttSession | None:
         logger.warning("REALTIME_STT=true but ELEVENLABS_API_KEY is not set")
         return None
 
-    return RealtimeSttSession(api_key, language_code=language_code)
-
-
-RealtimeSttController = RealtimeSttSession
+    return RealtimeSttSession(api_key, language_code=language_code, voice_guard=voice_guard)
 
 
 def create_realtime_stt_controller() -> RealtimeSttController | None:
-    """Compatibility shim for the GUI bootstrap path.
-
-    PR2 only needs a restart-capable controller surface for GUI startup and
-    diagnostics. The richer voice-guard behavior lands in PR3.
-    """
-    return create_realtime_stt_session()
+    """Create a guard-aware controller if realtime STT is configured."""
+    session = create_realtime_stt_session()
+    if session is None:
+        return None
+    return RealtimeSttController(session)
