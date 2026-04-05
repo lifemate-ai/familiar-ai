@@ -190,7 +190,7 @@ class TestStreamTurnThinkingIntegration:
             )
 
     def _run(self, coro):
-        return asyncio.get_event_loop().run_until_complete(coro)
+        return asyncio.run(coro)
 
     def test_adaptive_thinking_passes_thinking_kwarg(self):
         backend = self._make_backend("claude-sonnet-4-6", "adaptive")
