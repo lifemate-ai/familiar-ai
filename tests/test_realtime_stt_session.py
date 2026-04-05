@@ -9,11 +9,14 @@ from types import SimpleNamespace
 import pytest
 
 from familiar_agent.realtime_stt_session import (
+    RealtimeSttController,
     RealtimeSttSession,
     _normalize_for_dedupe,
+    create_realtime_stt_controller,
     create_realtime_stt_session,
     should_skip_stt,
 )
+from familiar_agent.voice_guard import VoiceLoopGuard
 
 
 def test_normalize_for_dedupe_collapses_spacing_and_trailing_punctuation() -> None:
@@ -198,6 +201,64 @@ async def test_partial_relay_drops_audio_event_tags() -> None:
     assert shown == ["こんにちは"]
 
 
+@pytest.mark.asyncio
+async def test_committed_relay_drops_recent_tts_echo(monkeypatch) -> None:
+    ts = iter([300.0, 300.1, 300.2, 300.3])
+    monkeypatch.setattr("familiar_agent.realtime_stt_session._dedupe_now", lambda: next(ts))
+    monkeypatch.setattr("familiar_agent.voice_guard._guard_now", lambda: next(ts))
+
+    guard = VoiceLoopGuard(suppression_window_secs=1.0)
+    guard.on_tts_start("こんにちは")
+    guard.on_tts_end("こんにちは", played=True)
+
+    session = RealtimeSttSession("dummy", voice_guard=guard)
+    committed_q: asyncio.Queue[str] = asyncio.Queue()
+    input_q: asyncio.Queue[str | None] = asyncio.Queue()
+    session._incoming_committed = committed_q
+    session._committed_queue = input_q
+
+    task = asyncio.create_task(session._committed_relay())
+    await committed_q.put("こんにちは。")
+    await asyncio.sleep(0.05)
+    task.cancel()
+    with contextlib.suppress(asyncio.CancelledError):
+        await task
+
+    assert input_q.empty()
+
+
+@pytest.mark.asyncio
+async def test_committed_relay_schedules_restart_after_loop_watchdog(monkeypatch) -> None:
+    stt_ts = iter([400.0, 401.0, 402.0, 403.0])
+    guard_ts = iter([410.0, 410.1, 410.2, 410.3, 410.4])
+    monkeypatch.setattr("familiar_agent.realtime_stt_session._dedupe_now", lambda: next(stt_ts))
+    monkeypatch.setattr("familiar_agent.voice_guard._guard_now", lambda: next(guard_ts))
+
+    guard = VoiceLoopGuard(suppression_window_secs=2.0, loop_trigger_count=3)
+    guard.on_tts_start("おはよう")
+    guard.on_tts_end("おはよう", played=True)
+
+    session = RealtimeSttSession("dummy", voice_guard=guard)
+    committed_q: asyncio.Queue[str] = asyncio.Queue()
+    input_q: asyncio.Queue[str | None] = asyncio.Queue()
+    session._incoming_committed = committed_q
+    session._committed_queue = input_q
+
+    scheduled: list[str] = []
+    monkeypatch.setattr(session, "_schedule_restart", lambda reason: scheduled.append(reason))
+
+    task = asyncio.create_task(session._committed_relay())
+    await committed_q.put("おはよう")
+    await committed_q.put("おはよう")
+    await committed_q.put("おはよう")
+    await asyncio.sleep(0.05)
+    task.cancel()
+    with contextlib.suppress(asyncio.CancelledError):
+        await task
+
+    assert scheduled == ["watchdog_loop"]
+
+
 def test_create_realtime_stt_session_uses_stt_language(monkeypatch) -> None:
     monkeypatch.setenv("REALTIME_STT", "true")
     monkeypatch.setenv("ELEVENLABS_API_KEY", "key")
@@ -207,3 +268,13 @@ def test_create_realtime_stt_session_uses_stt_language(monkeypatch) -> None:
 
     assert session is not None
     assert session._language_code == "ja"
+
+
+def test_create_realtime_stt_controller_wraps_configured_session(monkeypatch) -> None:
+    monkeypatch.setenv("REALTIME_STT", "true")
+    monkeypatch.setenv("ELEVENLABS_API_KEY", "key")
+
+    controller = create_realtime_stt_controller()
+
+    assert controller is not None
+    assert isinstance(controller, RealtimeSttController)
