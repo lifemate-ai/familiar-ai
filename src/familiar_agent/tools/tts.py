@@ -344,13 +344,36 @@ async def _play_local(tmp_path: str) -> bool:
     """Play audio file on the local PC speaker. Returns True on success.
 
     Try order:
-    1. paplay (PulseAudio native — most reliable on WSL2/WSLg when PULSE_SERVER is set)
-    2. mpv (auto audio backend selection)
-    3. sounddevice (pure Python fallback, no system tools required)
+    1. afplay (macOS built-in)
+    2. paplay (PulseAudio native — most reliable on WSL2/WSLg when PULSE_SERVER is set)
+    3. mpv (auto audio backend selection)
+    4. sounddevice (pure Python fallback, no system tools required)
 
     Note: file is always WAV (pcm_16000) so paplay needs no ffmpeg conversion.
     """
     pulse_env = _pulse_env()
+
+    # --- afplay (macOS built-in) ---
+    if sys.platform == "darwin":
+        afplay = shutil.which("afplay")
+        if afplay:
+            try:
+                proc = await asyncio.create_subprocess_exec(
+                    afplay,
+                    tmp_path,
+                    stdout=asyncio.subprocess.DEVNULL,
+                    stderr=asyncio.subprocess.PIPE,
+                )
+                _, stderr = await proc.communicate()
+                if proc.returncode == 0:
+                    return True
+                logger.warning(
+                    "afplay failed (exit %d): %s",
+                    proc.returncode,
+                    stderr.decode(errors="replace")[:120],
+                )
+            except (FileNotFoundError, OSError) as e:
+                logger.warning("Could not launch afplay: %s", e)
 
     # --- paplay (PulseAudio native, WAV only) ---
     paplay = shutil.which("paplay")

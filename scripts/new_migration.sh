@@ -68,6 +68,22 @@ if [[ ! "$migration_date" =~ ^[0-9]{4}-[0-9]{2}-[0-9]{2}$ ]]; then
   exit 1
 fi
 
+display_dir="$migration_dir"
+used_windows_dir=0
+
+# GitHub Windows runners pass temp dirs as C:\...; use cygpath for bash file ops.
+case "$migration_dir" in
+  [A-Za-z]:\\*|[A-Za-z]:/*)
+    used_windows_dir=1
+    display_dir="${migration_dir//\\//}"
+    if command -v cygpath >/dev/null 2>&1; then
+      migration_dir="$(cygpath -u "$migration_dir")"
+    else
+      migration_dir="$display_dir"
+    fi
+    ;;
+esac
+
 slug="$(printf '%s' "$name" | tr '[:upper:]' '[:lower:]' | sed -E 's/[^a-z0-9]+/_/g; s/^_+|_+$//g')"
 if [[ -z "$slug" ]]; then
   slug="migration"
@@ -97,7 +113,7 @@ if [[ -e "$target" ]]; then
   exit 1
 fi
 
-cat > "$target" <<'PY'
+cat > "$target" <<'PY2'
 """TODO: describe migration."""
 
 from __future__ import annotations
@@ -110,6 +126,11 @@ def upgrade(conn: sqlite3.Connection) -> None:
     # Example:
     # conn.execute("CREATE TABLE example (id INTEGER PRIMARY KEY)")
     pass
-PY
+PY2
 
-echo "$target"
+display_target="$target"
+if ((used_windows_dir)); then
+  display_target="$display_dir/${migration_date}-${next_seq}_${slug}.py"
+fi
+
+echo "$display_target"
