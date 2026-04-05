@@ -226,6 +226,8 @@ API_KEY=sk-ant-ここにPart0で取得したキーを貼り付け
 > **ポイント**: `.env.example` には色々な項目が書いてありますが、**今は `PLATFORM` と `API_KEY` の2つだけで十分**です。他の項目は後で必要になったら設定します。
 >
 > `.env.example` に `ANTHROPIC_API_KEY=` という古い形式の行がある場合は、代わりに上記の `PLATFORM=` と `API_KEY=` を使ってください。両方書いても動きますが、新しい形式を推奨します。
+>
+> GUI から始めたい場合は、`./run-gui.sh`（Windows は `run-gui.bat`）を起動すると、`API_KEY` 未設定時にセットアップダイアログから入力できます。
 
 ### Step 6: AI のパーソナリティを設定
 
