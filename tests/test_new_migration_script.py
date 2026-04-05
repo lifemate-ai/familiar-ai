@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+import shutil
 import subprocess
 from pathlib import Path
 
@@ -8,6 +9,12 @@ from pathlib import Path
 def _bash_executable() -> str:
     if os.name != "nt":
         return "bash"
+
+    git_exe = shutil.which("git.exe") or shutil.which("git")
+    if git_exe:
+        git_bash = Path(git_exe).with_name("bash.exe")
+        if git_bash.exists():
+            return str(git_bash)
 
     candidates = [
         Path(os.environ.get("ProgramW6432", r"C:\Program Files")) / "Git" / "bin" / "bash.exe",
