@@ -260,7 +260,7 @@ async def test_validate_camera_connection_failure():
 @pytest.mark.asyncio
 async def test_discover_onvif_cameras_returns_list():
     """discover_onvif_cameras() returns a list (possibly empty if no cameras)."""
-    with patch("familiar_agent.setup._ws_discover") as mock_discover:
+    with patch("familiar_agent.setup.discover_network_cameras") as mock_discover:
         mock_discover.return_value = []
         result = await discover_onvif_cameras()
     assert isinstance(result, list)
@@ -269,11 +269,10 @@ async def test_discover_onvif_cameras_returns_list():
 @pytest.mark.asyncio
 async def test_discover_onvif_cameras_parses_host():
     """Discovered camera entries include a 'host' field."""
-    fake_service = MagicMock()
-    fake_service.getXAddrs.return_value = ["http://192.168.1.42:80/onvif/device_service"]
-
-    with patch("familiar_agent.setup._ws_discover") as mock_discover:
-        mock_discover.return_value = [fake_service]
+    with patch("familiar_agent.setup.discover_network_cameras") as mock_discover:
+        mock_discover.return_value = [
+            {"host": "192.168.1.42", "address": "http://192.168.1.42:80/onvif/device_service"}
+        ]
         result = await discover_onvif_cameras()
 
     assert len(result) == 1
@@ -283,7 +282,7 @@ async def test_discover_onvif_cameras_parses_host():
 @pytest.mark.asyncio
 async def test_discover_onvif_cameras_handles_discovery_error():
     """discover_onvif_cameras() returns empty list when discovery raises."""
-    with patch("familiar_agent.setup._ws_discover") as mock_discover:
+    with patch("familiar_agent.setup.discover_network_cameras") as mock_discover:
         mock_discover.side_effect = Exception("Network error")
         result = await discover_onvif_cameras()
     assert result == []
