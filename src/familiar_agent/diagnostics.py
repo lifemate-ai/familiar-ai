@@ -8,6 +8,7 @@ from typing import TYPE_CHECKING, Any
 
 from .realtime_stt_session import RealtimeSttSession
 from .setup import validate_camera_connection
+from .tools.mic import probe_sounddevice_input
 
 if TYPE_CHECKING:
     from .config import AgentConfig
@@ -182,6 +183,9 @@ async def test_realtime_stt_connection_from_config(config: "AgentConfig") -> tup
         return False, "REALTIME_STT is disabled."
     if not config.tts.elevenlabs_api_key:
         return False, "ELEVENLABS_API_KEY is not set."
+    mic_ok, mic_detail = probe_sounddevice_input()
+    if not mic_ok:
+        return False, mic_detail
 
     session = RealtimeSttSession(
         config.tts.elevenlabs_api_key,
@@ -193,4 +197,9 @@ async def test_realtime_stt_connection_from_config(config: "AgentConfig") -> tup
         return False, str(exc)
     finally:
         await session.stop()
-    return True, "Realtime STT websocket connected."
+    return True, f"Realtime STT websocket connected. Mic: {mic_detail}"
+
+
+setattr(test_backend_connection, "__test__", False)
+setattr(test_camera_connection_from_config, "__test__", False)
+setattr(test_realtime_stt_connection_from_config, "__test__", False)

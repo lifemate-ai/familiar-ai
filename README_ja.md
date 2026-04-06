@@ -296,6 +296,18 @@ ELEVENLABS_API_KEY=sk_...   # TTSと同じキー
 STT_LANGUAGE=ja            # 日本語なら推奨。バッチSTT / Realtime STT の両方で使います
 ```
 
+WSL2/WSLg では、Realtime STT は PulseAudio の再生設定だけでなく、
+`sounddevice` / PortAudio からマイク入力が見えている必要があります。
+`pulseaudio-utils` と `libasound2-plugins` を入れて
+`PULSE_SERVER=unix:/mnt/wslg/PulseServer` を設定したうえで、次を確認してください:
+
+```bash
+uv run python -m sounddevice
+```
+
+ここで入力デバイスが出ない、または `Error querying device -1` になる場合は、
+familiar-ai からもマイク入力を利用できません。
+
 ---
 
 ## FAQ
