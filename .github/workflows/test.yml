@@ -3,8 +3,9 @@ name: Test
 on:
   push:
     branches: [main, develop]
+  # Run CI on stacked PRs too. `pull_request.branches` filters by base branch,
+  # so limiting it to main/develop skips PRs targeting intermediate stack branches.
   pull_request:
-    branches: [main, develop]
 
 jobs:
   test:
