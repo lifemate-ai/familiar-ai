@@ -391,6 +391,19 @@ STT_LANGUAGE=ja            # recommended for Japanese; used by both batch and re
 
 familiar-ai streams microphone audio to ElevenLabs Scribe v2 and auto-commits transcripts when you pause speaking. No button press required. Coexists with the push-to-talk mode (Ctrl+T).
 
+On WSL2/WSLg, realtime STT also depends on `sounddevice` / PortAudio being able to
+see your microphone input, not just PulseAudio playback. Install
+`pulseaudio-utils` and `libasound2-plugins`, set
+`PULSE_SERVER=unix:/mnt/wslg/PulseServer`, then verify:
+
+```bash
+uv run python -m sounddevice
+```
+
+If that command shows no input devices or reports `Error querying device -1`,
+familiar-ai will not be able to capture microphone audio until PortAudio can
+see the WSLg input bridge.
+
 ---
 
 ## TUI

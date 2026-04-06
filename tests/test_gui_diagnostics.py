@@ -1,9 +1,17 @@
 from __future__ import annotations
 
+from unittest.mock import AsyncMock
 from types import SimpleNamespace
 from unittest.mock import MagicMock
 
-from familiar_agent.diagnostics import build_gui_diagnostics, format_gui_diagnostics
+import pytest
+
+from familiar_agent.diagnostics import (
+    RealtimeSttSession,
+    build_gui_diagnostics,
+    format_gui_diagnostics,
+    test_realtime_stt_connection_from_config,
+)
 from familiar_agent.gui import FamiliarWindow
 
 
@@ -91,3 +99,47 @@ def test_gui_copy_diagnostics_uses_clipboard(monkeypatch) -> None:
 
     assert "familiar-ai diagnostics" in captured["text"]
     win._log.append_line.assert_called_once_with("📋 Diagnostics copied")
+
+
+@pytest.mark.asyncio
+async def test_realtime_stt_connection_reports_microphone_preflight_failure(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    config = SimpleNamespace(
+        realtime_stt=True,
+        tts=SimpleNamespace(elevenlabs_api_key="sk-test"),
+        stt=SimpleNamespace(language="ja"),
+    )
+
+    monkeypatch.setattr(
+        "familiar_agent.diagnostics.probe_sounddevice_input",
+        lambda: (False, "sounddevice cannot see an input device"),
+    )
+
+    ok, message = await test_realtime_stt_connection_from_config(config)
+
+    assert ok is False
+    assert message == "sounddevice cannot see an input device"
+
+
+@pytest.mark.asyncio
+async def test_realtime_stt_connection_includes_microphone_summary(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    config = SimpleNamespace(
+        realtime_stt=True,
+        tts=SimpleNamespace(elevenlabs_api_key="sk-test"),
+        stt=SimpleNamespace(language="ja"),
+    )
+
+    monkeypatch.setattr(
+        "familiar_agent.diagnostics.probe_sounddevice_input",
+        lambda: (True, "Mic @ 48000 Hz"),
+    )
+    monkeypatch.setattr(RealtimeSttSession, "_connect_client", AsyncMock(return_value=None))
+    monkeypatch.setattr(RealtimeSttSession, "stop", AsyncMock(return_value=None))
+
+    ok, message = await test_realtime_stt_connection_from_config(config)
+
+    assert ok is True
+    assert message == "Realtime STT websocket connected. Mic: Mic @ 48000 Hz"

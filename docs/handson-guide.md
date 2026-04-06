@@ -376,12 +376,19 @@ PC のスピーカーから AI の声が聞こえたら成功です！
 >
 > WSL2 の場合は追加で:
 > ```bash
-> sudo apt install -y pulseaudio-utils
+> sudo apt install -y pulseaudio-utils libasound2-plugins
 > ```
 > `.env` に以下を追加:
 > ```env
 > PULSE_SERVER=unix:/mnt/wslg/PulseServer
 > ```
+> Realtime STT も使う場合は、さらに
+> ```bash
+> uv run python -m sounddevice
+> ```
+> で入力デバイスが見えていることを確認してください。ここで
+> `Error querying device -1` や入力デバイスなしになる場合、
+> familiar-ai からはマイクを使えません。
 
 ---
 
@@ -626,6 +633,12 @@ USB カメラは自動では WSL2 に見えません。[Step 3-1 の手順](#31-
    ```env
    PULSE_SERVER=unix:/mnt/wslg/PulseServer
    ```
+   Realtime STT を使う場合は、追加で
+   ```bash
+   sudo apt install -y pulseaudio-utils libasound2-plugins
+   uv run python -m sounddevice
+   ```
+   を実行し、`sounddevice` から入力デバイスが見えていることを確認してください。
 
 ### Q. `./run.sh: Permission denied` と出る
 

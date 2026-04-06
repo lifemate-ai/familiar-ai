@@ -21,6 +21,8 @@ import os
 
 import aiohttp
 
+from .mic import describe_sounddevice_input_failure
+
 if TYPE_CHECKING:
     pass
 
@@ -135,7 +137,7 @@ class STTTool:
                         chunks.append(chunk)
                         time.sleep(0.01)  # yield slightly; this is already in a thread
         except sd.PortAudioError as e:
-            logger.warning("STT: PortAudio error (no mic?): %s", e)
+            logger.warning("STT: %s", describe_sounddevice_input_failure(e))
             return None
 
         if not chunks:
