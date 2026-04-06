@@ -122,6 +122,9 @@ cp .env.example .env
 # Edit .env with your settings
 ```
 
+If you prefer the desktop flow, `./run-gui.sh` (or `run-gui.bat`) can now open
+the setup dialog for you on first launch when `API_KEY` is still missing.
+
 **Minimum required:**
 
 | Variable | Description |

@@ -45,9 +45,7 @@ class TestHandleBtwCommand:
         backend = MagicMock()
         backend.complete = AsyncMock(return_value="quick answer")
 
-        result = asyncio.get_event_loop().run_until_complete(
-            handle_btw_command("what time is it?", backend)
-        )
+        result = asyncio.run(handle_btw_command("what time is it?", backend))
 
         backend.complete.assert_called_once()
         assert "what time is it?" in backend.complete.call_args[0][0]
@@ -62,7 +60,7 @@ class TestHandleBtwCommand:
         backend.complete = AsyncMock(return_value="answer")
         agent = MagicMock()
 
-        asyncio.get_event_loop().run_until_complete(handle_btw_command("quick question", backend))
+        asyncio.run(handle_btw_command("quick question", backend))
 
         # agent.run should not be involved
         agent.run.assert_not_called()
@@ -75,7 +73,7 @@ class TestHandleBtwCommand:
         backend = MagicMock()
         backend.complete = AsyncMock(return_value="")
 
-        result = asyncio.get_event_loop().run_until_complete(handle_btw_command("", backend))
+        result = asyncio.run(handle_btw_command("", backend))
         # Should not call backend for empty input
         backend.complete.assert_not_called()
         assert not result

@@ -140,7 +140,7 @@ class TestCompactMessages:
         for i in range(10):
             agent.messages.append(_make_msg("user" if i % 2 == 0 else "assistant", f"msg{i}"))
 
-        asyncio.get_event_loop().run_until_complete(agent._compact_messages(keep_last=6))
+        asyncio.run(agent._compact_messages(keep_last=6))
 
         # Last 6 original messages + 1 summary marker at front
         assert len(agent.messages) == 7
@@ -151,7 +151,7 @@ class TestCompactMessages:
         for i in range(8):
             agent.messages.append(_make_msg("user" if i % 2 == 0 else "assistant", f"m{i}"))
 
-        asyncio.get_event_loop().run_until_complete(agent._compact_messages(keep_last=4))
+        asyncio.run(agent._compact_messages(keep_last=4))
 
         first = agent.messages[0]
         assert first["role"] == "user"
@@ -163,7 +163,7 @@ class TestCompactMessages:
         for i in range(8):
             agent.messages.append(_make_msg("user" if i % 2 == 0 else "assistant", f"m{i}"))
 
-        asyncio.get_event_loop().run_until_complete(agent._compact_messages(keep_last=4))
+        asyncio.run(agent._compact_messages(keep_last=4))
 
         agent.backend.complete.assert_called_once()
 
@@ -174,7 +174,7 @@ class TestCompactMessages:
             agent.messages.append(_make_msg("user", f"m{i}"))
 
         original = list(agent.messages)
-        asyncio.get_event_loop().run_until_complete(agent._compact_messages(keep_last=6))
+        asyncio.run(agent._compact_messages(keep_last=6))
 
         assert agent.messages == original
         agent.backend.complete.assert_not_called()
@@ -185,7 +185,7 @@ class TestCompactMessages:
         for i in range(10):
             agent.messages.append(_make_msg("user" if i % 2 == 0 else "assistant", f"m{i}"))
 
-        asyncio.get_event_loop().run_until_complete(agent._compact_messages(keep_last=4))
+        asyncio.run(agent._compact_messages(keep_last=4))
 
         assert agent._post_compact is True
 
@@ -238,7 +238,7 @@ class TestPostCompactionRecall:
         agent._memory.save_async = AsyncMock()
         agent._should_compact = MagicMock(return_value=False)
 
-        asyncio.get_event_loop().run_until_complete(agent.run("hello"))
+        asyncio.run(agent.run("hello"))
 
         # recall_async should have been called with n > 3 (post-compact boost)
         call_args = agent._memory.recall_async.call_args
