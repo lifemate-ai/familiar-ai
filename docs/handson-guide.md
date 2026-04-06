@@ -613,6 +613,15 @@ USB カメラは自動では WSL2 に見えません。[Step 3-1 の手順](#31-
    応答があれば接続できています。
 3. **ローカルアカウント** を使っているか確認（TP-Link クラウドアカウントでは接続できません）
 4. ONVIF ポートがデフォルトの `2020` でない場合、`.env` に `CAMERA_ONVIF_PORT=` を設定
+5. IP アドレスが分からない場合は discovery tool を試す:
+   ```bash
+   uv run familiar-discover-cameras
+   ```
+   見つからない場合は:
+   ```bash
+   uv run familiar-discover-cameras --scan
+   ```
+   で WS-Discovery / mDNS / SSDP に加えて、やや遅い TCP fallback scan も有効にできます。
 
 ### Q. 音が出ない（ElevenLabs）
 
