@@ -189,7 +189,9 @@ async def _discover_mdns_cameras(timeout: float = 3.0) -> list[dict[str, str]]:
                     found.append(
                         {
                             "host": host,
-                            "address": f"{scheme}://{host}:{port}" if port else f"{scheme}://{host}",
+                            "address": f"{scheme}://{host}:{port}"
+                            if port
+                            else f"{scheme}://{host}",
                             "source": "mdns",
                             "port": str(port) if port else "",
                             "name": str(getattr(info, "server", "") or name).rstrip("."),
@@ -309,7 +311,9 @@ def get_local_network_prefix() -> str | None:
 
 async def _probe_camera_port(host: str, port: int, timeout: float) -> dict[str, str] | None:
     try:
-        reader, writer = await asyncio.wait_for(asyncio.open_connection(host, port), timeout=timeout)
+        reader, writer = await asyncio.wait_for(
+            asyncio.open_connection(host, port), timeout=timeout
+        )
     except Exception:
         return None
     try:
@@ -359,7 +363,9 @@ async def _discover_port_scan_cameras(timeout: float = 3.0) -> list[dict[str, st
 
 def _build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="Discover ONVIF / network cameras on the LAN")
-    parser.add_argument("--timeout", type=float, default=3.0, help="per-strategy timeout in seconds")
+    parser.add_argument(
+        "--timeout", type=float, default=3.0, help="per-strategy timeout in seconds"
+    )
     parser.add_argument(
         "--scan",
         action="store_true",
