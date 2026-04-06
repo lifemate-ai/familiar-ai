@@ -84,7 +84,7 @@ class TestAnthropicBackendTracksUsage:
         fake_client.beta.messages.stream = MagicMock(return_value=fake_stream_cm)
         backend.client = fake_client
 
-        result, _ = asyncio.get_event_loop().run_until_complete(
+        result, _ = asyncio.run(
             backend.stream_turn(
                 system=("sys", "var"),
                 messages=[{"role": "user", "content": "hi"}],

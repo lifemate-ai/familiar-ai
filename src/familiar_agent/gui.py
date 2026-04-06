@@ -26,7 +26,7 @@ import re
 import sys
 import time
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, cast
 from urllib.parse import quote
 
 import qasync
@@ -62,13 +62,31 @@ from ._ui_helpers import (
     format_tool_result,
     should_fire_idle_desire,
 )
-from .realtime_stt_session import create_realtime_stt_session
+from .bootstrap import resolve_env_path
+from .diagnostics import (
+    build_gui_diagnostics,
+    format_gui_diagnostics,
+    test_backend_connection,
+    test_camera_connection_from_config,
+    test_realtime_stt_connection_from_config,
+)
+from .realtime_stt_session import create_realtime_stt_controller
+from .settings_schema import (
+    SECTION_LABELS,
+    SetupConfig,
+    SettingField,
+    iter_setting_fields,
+    sections_for_mode,
+    setup_config_from_agent_config,
+    validate_setup_config,
+)
+from .setup import save_setup_config
 
 if TYPE_CHECKING:
     from familiar_agent.agent import EmbodiedAgent
     from familiar_agent.config import AgentConfig
     from familiar_agent.desires import DesireSystem
-    from familiar_agent.realtime_stt_session import RealtimeSttSession
+    from familiar_agent.realtime_stt_session import RealtimeSttController
 
 logger = logging.getLogger(__name__)
 
@@ -159,10 +177,8 @@ def _px(size: int) -> int:
     return max(1, int(round(size * _FONT_SCALE)))
 
 
-# Resolve .env path: project root, then cwd fallback
-_ENV_PATH: Path = Path(__file__).resolve().parents[2] / ".env"
-if not _ENV_PATH.exists():
-    _ENV_PATH = Path.cwd() / ".env"
+# Resolve .env path once for settings / setup flows.
+_ENV_PATH: Path = resolve_env_path()
 
 
 # ---------------------------------------------------------------------------
@@ -698,11 +714,16 @@ class SettingsDialog(QDialog):
         self,
         config: "AgentConfig",
         env_path: Path,
+        *,
+        setup_mode: bool = False,
         parent: QWidget | None = None,
     ) -> None:
         super().__init__(parent)
         self._env_path = env_path
-        self.setWindowTitle(_t("settings_window_title"))
+        self._setup_mode = setup_mode
+        self._setup = setup_config_from_agent_config(config)
+        self._field_widgets: dict[str, QWidget] = {}
+        self.setWindowTitle("Set up familiar-ai" if setup_mode else _t("settings_window_title"))
         self.setMinimumWidth(760)
         self.setModal(True)
 
@@ -710,124 +731,30 @@ class SettingsDialog(QDialog):
         vbox.setContentsMargins(16, 16, 16, 12)
         vbox.setSpacing(12)
 
+        if setup_mode:
+            intro = QLabel(
+                "Enter the minimum settings to get familiar-ai running. "
+                "You can fill the rest in later from Settings."
+            )
+            intro.setWordWrap(True)
+            intro.setStyleSheet(
+                f"color: {_TEXT_SECONDARY}; font-size: {_px(12)}px; background: transparent;"
+            )
+            vbox.addWidget(intro)
+
         tabs = QTabWidget()
         vbox.addWidget(tabs)
 
-        def _style_form(form: QFormLayout) -> None:
-            form.setHorizontalSpacing(16)
-            form.setVerticalSpacing(11)
-            form.setFieldGrowthPolicy(QFormLayout.FieldGrowthPolicy.ExpandingFieldsGrow)
-            form.setFormAlignment(Qt.AlignmentFlag.AlignTop | Qt.AlignmentFlag.AlignLeft)
-
-        def _form_label(key_or_text: str) -> QLabel:
-            try:
-                text = _t(key_or_text)
-            except KeyError:
-                text = key_or_text
-            label = QLabel(text)
-            # Keep enough width so short JP labels like 「名」 never get clipped.
-            label.setMinimumWidth(180)
-            label.setStyleSheet(
-                f"color: {_TEXT_PRIMARY}; font-size: {_px(13)}px; font-weight: 600;"
-                f"padding-right: 6px; background: transparent;"
-            )
-            return label
-
-        # ── Tab 1: Agent ──────────────────────────────────────────
-        agent_tab = QWidget()
-        agent_tab.setStyleSheet("background: transparent;")
-        af = QFormLayout(agent_tab)
-        _style_form(af)
-
-        self._agent_name = QLineEdit(config.agent_name)
-        self._companion_name = QLineEdit(config.companion_name)
-        self._platform = QComboBox()
-        self._platform.addItems(["anthropic", "google", "openai", "kimi", "glm"])
-        _set_combo(self._platform, config.platform)
-        self._api_key = QLineEdit(config.api_key)
-        self._api_key.setEchoMode(QLineEdit.EchoMode.Password)
-        self._api_key.setPlaceholderText(_t("settings_placeholder_unchanged"))
-        self._model = QLineEdit(config.model)
-
-        af.addRow(_form_label("settings_field_agent_name"), self._agent_name)
-        af.addRow(_form_label("settings_field_companion_name"), self._companion_name)
-        af.addRow(_form_label("settings_field_platform"), self._platform)
-        af.addRow(_form_label("settings_field_api_key"), self._api_key)
-        af.addRow(_form_label("settings_field_model"), self._model)
-        tabs.addTab(agent_tab, _t("settings_tab_agent"))
-
-        # ── Tab 2: Voice ──────────────────────────────────────────
-        voice_tab = QWidget()
-        voice_tab.setStyleSheet("background: transparent;")
-        vf = QFormLayout(voice_tab)
-        _style_form(vf)
-
-        self._el_api_key = QLineEdit(config.tts.elevenlabs_api_key)
-        self._el_api_key.setEchoMode(QLineEdit.EchoMode.Password)
-        self._el_api_key.setPlaceholderText(_t("settings_placeholder_unchanged"))
-        self._voice_id = QLineEdit(config.tts.voice_id)
-        self._tts_output = QComboBox()
-        self._tts_output.addItems(["local", "remote", "both"])
-        _set_combo(self._tts_output, config.tts.output)
-        self._stt_language = QLineEdit(config.stt.language)
-
-        vf.addRow(_form_label("settings_field_elevenlabs_api_key"), self._el_api_key)
-        vf.addRow(_form_label("settings_field_voice_id"), self._voice_id)
-        vf.addRow(_form_label("settings_field_tts_output"), self._tts_output)
-        vf.addRow(_form_label("settings_field_stt_language"), self._stt_language)
-        tabs.addTab(voice_tab, _t("settings_tab_voice"))
-
-        # ── Tab 3: Camera ─────────────────────────────────────────
-        cam_tab = QWidget()
-        cam_tab.setStyleSheet("background: transparent;")
-        cf = QFormLayout(cam_tab)
-        _style_form(cf)
-
-        self._cam_host = QLineEdit(config.camera.host)
-        self._cam_user = QLineEdit(config.camera.username)
-        self._cam_pass = QLineEdit(config.camera.password)
-        self._cam_pass.setEchoMode(QLineEdit.EchoMode.Password)
-        self._cam_pass.setPlaceholderText(_t("settings_placeholder_unchanged"))
-        self._cam_port = QLineEdit(str(config.camera.port))
-        self._cam_ptz_host = QLineEdit(config.camera.ptz_host_override)
-        self._cam_ptz_user = QLineEdit(config.camera.ptz_username_override)
-        self._cam_ptz_pass = QLineEdit()
-        self._cam_ptz_pass.setEchoMode(QLineEdit.EchoMode.Password)
-        self._cam_ptz_pass.setPlaceholderText(_t("settings_placeholder_unchanged"))
-        self._cam_ptz_port = QLineEdit(
-            str(config.camera.ptz_port_override)
-            if config.camera.ptz_port_override is not None
-            else ""
-        )
-
-        cf.addRow(_form_label("settings_field_camera_host"), self._cam_host)
-        cf.addRow(_form_label("settings_field_camera_username"), self._cam_user)
-        cf.addRow(_form_label("settings_field_camera_password"), self._cam_pass)
-        cf.addRow(_form_label("settings_field_camera_onvif_port"), self._cam_port)
-        cf.addRow(_form_label("PTZ host override:"), self._cam_ptz_host)
-        cf.addRow(_form_label("PTZ username override:"), self._cam_ptz_user)
-        cf.addRow(_form_label("PTZ password override:"), self._cam_ptz_pass)
-        cf.addRow(_form_label("PTZ port override:"), self._cam_ptz_port)
-        tabs.addTab(cam_tab, _t("settings_tab_camera"))
-
-        # ── Tab 4: Advanced ───────────────────────────────────────
-        adv_tab = QWidget()
-        adv_tab.setStyleSheet("background: transparent;")
-        advf = QFormLayout(adv_tab)
-        _style_form(advf)
-
-        self._thinking_mode = QComboBox()
-        self._thinking_mode.addItems(["auto", "adaptive", "extended", "disabled"])
-        _set_combo(self._thinking_mode, config.thinking_mode)
-        self._thinking_effort = QComboBox()
-        self._thinking_effort.addItems(["low", "medium", "high", "max"])
-        _set_combo(self._thinking_effort, config.thinking_effort)
-        self._memory_path = QLineEdit(config.memory.db_path)
-
-        advf.addRow(_form_label("settings_field_thinking_mode"), self._thinking_mode)
-        advf.addRow(_form_label("settings_field_thinking_effort"), self._thinking_effort)
-        advf.addRow(_form_label("settings_field_memory_db_path"), self._memory_path)
-        tabs.addTab(adv_tab, _t("settings_tab_advanced"))
+        for section in sections_for_mode(setup_mode=setup_mode):
+            tab = QWidget()
+            tab.setStyleSheet("background: transparent;")
+            form = QFormLayout(tab)
+            self._style_form(form)
+            for field in iter_setting_fields(section=section, setup_mode=setup_mode):
+                widget = self._create_field_widget(field)
+                self._field_widgets[field.attr] = widget
+                form.addRow(self._form_label(field.label), widget)
+            tabs.addTab(tab, _t(SECTION_LABELS[section]))
 
         # Buttons
         btn_box = QDialogButtonBox(
@@ -838,49 +765,17 @@ class SettingsDialog(QDialog):
         vbox.addWidget(btn_box)
 
     def _save(self) -> None:
-        from dotenv import set_key
-
-        env_str = str(self._env_path)
-
-        # Non-sensitive fields: always write
-        plain_pairs = [
-            ("AGENT_NAME", self._agent_name.text()),
-            ("COMPANION_NAME", self._companion_name.text()),
-            ("PLATFORM", self._platform.currentText()),
-            ("MODEL", self._model.text()),
-            ("ELEVENLABS_VOICE_ID", self._voice_id.text()),
-            ("TTS_OUTPUT", self._tts_output.currentText()),
-            ("STT_LANGUAGE", self._stt_language.text()),
-            ("CAMERA_HOST", self._cam_host.text()),
-            ("CAMERA_USERNAME", self._cam_user.text()),
-            ("CAMERA_ONVIF_PORT", self._cam_port.text()),
-            ("THINKING_MODE", self._thinking_mode.currentText()),
-            ("THINKING_EFFORT", self._thinking_effort.currentText()),
-            ("MEMORY_DB_PATH", self._memory_path.text()),
-        ]
-        ptz_override_pairs = [
-            ("CAMERA_PTZ_HOST", self._cam_ptz_host.text()),
-            ("CAMERA_PTZ_USERNAME", self._cam_ptz_user.text()),
-            ("CAMERA_PTZ_PORT", self._cam_ptz_port.text()),
-        ]
-        # Sensitive fields: skip if empty (placeholder shown)
-        masked_pairs = [
-            ("API_KEY", self._api_key.text()),
-            ("ELEVENLABS_API_KEY", self._el_api_key.text()),
-            ("CAMERA_PASSWORD", self._cam_pass.text()),
-            ("CAMERA_PTZ_PASSWORD", self._cam_ptz_pass.text()),
-        ]
-
+        config = self._build_setup_config()
+        errors = validate_setup_config(config, setup_mode=self._setup_mode)
+        if errors:
+            QMessageBox.warning(self, "Setup incomplete", "\n".join(errors))
+            return
         try:
-            self._env_path.touch(exist_ok=True)
-            for key, value in plain_pairs:
-                if value:
-                    set_key(env_str, key, value)
-            for key, value in ptz_override_pairs:
-                set_key(env_str, key, value)
-            for key, value in masked_pairs:
-                if value:
-                    set_key(env_str, key, value)
+            save_setup_config(
+                config,
+                path=self._env_path,
+                preserve_empty_sensitive=True,
+            )
         except Exception as exc:
             QMessageBox.warning(self, _t("settings_save_failed_title"), str(exc))
             return
@@ -888,9 +783,71 @@ class SettingsDialog(QDialog):
         QMessageBox.information(
             self,
             _t("settings_saved_title"),
-            _t("settings_saved_message"),
+            (
+                "Configuration saved. familiar-ai will use it on the next launch."
+                if self._setup_mode
+                else _t("settings_saved_message")
+            ),
         )
         self.accept()
+
+    @staticmethod
+    def _style_form(form: QFormLayout) -> None:
+        form.setHorizontalSpacing(16)
+        form.setVerticalSpacing(11)
+        form.setFieldGrowthPolicy(QFormLayout.FieldGrowthPolicy.ExpandingFieldsGrow)
+        form.setFormAlignment(Qt.AlignmentFlag.AlignTop | Qt.AlignmentFlag.AlignLeft)
+
+    def _form_label(self, key_or_text: str) -> QLabel:
+        try:
+            text = _t(key_or_text)
+        except KeyError:
+            text = key_or_text
+        label = QLabel(text)
+        label.setMinimumWidth(180)
+        label.setStyleSheet(
+            f"color: {_TEXT_PRIMARY}; font-size: {_px(13)}px; font-weight: 600;"
+            f"padding-right: 6px; background: transparent;"
+        )
+        return label
+
+    def _create_field_widget(self, field: SettingField) -> QWidget:
+        value = getattr(self._setup, field.attr)
+        if field.widget == "combo":
+            combo = QComboBox()
+            combo.addItems(list(field.options))
+            _set_combo(combo, str(value))
+            return combo
+        if field.widget == "bool":
+            combo = QComboBox()
+            combo.addItems(["false", "true"])
+            _set_combo(combo, "true" if bool(value) else "false")
+            return combo
+        line = QLineEdit(str(value))
+        if field.widget == "password":
+            line.setEchoMode(QLineEdit.EchoMode.Password)
+        if field.placeholder_key:
+            line.setPlaceholderText(_t(field.placeholder_key))
+        return line
+
+    def _read_field_value(self, field: SettingField) -> str | bool:
+        widget = self._field_widgets[field.attr]
+        if isinstance(widget, QComboBox):
+            current = widget.currentText()
+            if field.widget == "bool":
+                return current == "true"
+            return current
+        if isinstance(widget, QLineEdit):
+            return widget.text()
+        raise TypeError(f"Unsupported widget for {field.attr}")
+
+    def _build_setup_config(self) -> SetupConfig:
+        values: dict[str, str | bool] = {}
+        for field in iter_setting_fields(setup_mode=self._setup_mode):
+            values[field.attr] = self._read_field_value(field)
+        for field in iter_setting_fields(setup_mode=False):
+            values.setdefault(field.attr, cast(str | bool, getattr(self._setup, field.attr)))
+        return SetupConfig(**cast(dict[str, Any], values))
 
 
 def _set_combo(combo: QComboBox, value: str) -> None:
@@ -908,14 +865,19 @@ def _set_combo(combo: QComboBox, value: str) -> None:
 class FamiliarWindow(QMainWindow):
     """Main application window."""
 
-    def __init__(self, agent: "EmbodiedAgent", desires: "DesireSystem") -> None:
+    def __init__(self, config: "AgentConfig", desires: "DesireSystem") -> None:
         super().__init__()
-        self._agent = agent
+        self._config = config
+        self._agent: EmbodiedAgent | None = None
         self._desires = desires
-        self._agent_display_name = (self._agent.config.agent_name or "Agent").strip() or "Agent"
-        self._companion_display_name = (self._agent.config.companion_name or "You").strip() or "You"
+        self._agent_display_name = (config.agent_name or "Agent").strip() or "Agent"
+        self._companion_display_name = (config.companion_name or "You").strip() or "You"
         self._input_queue: asyncio.Queue[str | None] = asyncio.Queue()
         self._agent_running = False
+        self._agent_ready = False
+        self._agent_init_failed = False
+        self._startup_status = "Starting familiar-ai..."
+        self._last_error = ""
         self._closing = False
         self._shutdown_requested = False
         self._shutdown_done = False
@@ -924,27 +886,32 @@ class FamiliarWindow(QMainWindow):
         self._agent_task: asyncio.Task[str] | None = None
         self._queue_task: asyncio.Task[None] | None = None
         self._init_task: asyncio.Task[None] | None = None
+        self._startup_status_task: asyncio.Task[None] | None = None
         self._look_preview_task: asyncio.Task[None] | None = None
         self._look_preview_until: float = 0.0
         self._look_preview_disabled = False
-        self._realtime_stt: RealtimeSttSession | None = create_realtime_stt_session()
+        self._realtime_stt: RealtimeSttController | None = create_realtime_stt_controller()
         self._realtime_stt_task: asyncio.Task[None] | None = None
         self._last_lag_tick = time.perf_counter()
         self._lag_timer = QTimer(self)
         self._lag_timer.setInterval(int(_GUI_LOOP_LAG_CHECK_SEC * 1000))
         self._lag_timer.timeout.connect(self._report_event_loop_lag)
         self._lag_timer.start()
+        self._status_timer = QTimer(self)
+        self._status_timer.setInterval(350)
+        self._status_timer.timeout.connect(self._refresh_status_card)
+        self._status_timer.start()
 
         self.setWindowTitle("familiar-ai")
         self.resize(1020, 720)
         self.setStyleSheet(f"background: {_BG_BASE};")
         self._build_ui()
+        self._set_input_enabled(False)
+        self._stream.set_status(self._startup_status)
+        self._refresh_status_card()
 
         self._queue_task = self._create_task(self._process_queue())
-        if not self._agent.is_embedding_ready:
-            self._init_task = self._create_task(self._show_init_status())
-        if self._realtime_stt:
-            self._realtime_stt_task = self._create_task(self._start_realtime_stt())
+        self._init_task = self._create_task(self._initialize_agent())
 
     def _create_task(self, coro) -> asyncio.Task[Any]:
         """Create an asyncio task from GUI sync callbacks safely.
@@ -976,7 +943,12 @@ class FamiliarWindow(QMainWindow):
         return f"rtsp://{auth}{host}:554/stream1"
 
     def _camera_rtsp_url(self) -> str | None:
-        cam = self._agent.config.camera
+        config = getattr(self, "_config", None) or getattr(
+            getattr(self, "_agent", None), "config", None
+        )
+        if config is None:
+            return None
+        cam = config.camera
         return self._build_rtsp_url(cam.host, cam.username, cam.password)
 
     @staticmethod
@@ -1133,7 +1105,79 @@ class FamiliarWindow(QMainWindow):
         )
         settings_btn.clicked.connect(self._open_settings)
         header_layout.addWidget(settings_btn)
+
+        self._restart_stt_btn = QPushButton("↻ STT")
+        self._restart_stt_btn.setToolTip("Restart realtime STT")
+        self._restart_stt_btn.setFixedHeight(48)
+        self._restart_stt_btn.setMinimumWidth(130)
+        self._restart_stt_btn.setStyleSheet(
+            f"QPushButton {{ background: #f7fbff; border-radius: 16px;"
+            f" border: 1px solid {_BORDER};"
+            f" padding: 0 16px; font-size: {_px(12)}px; color: {_TEXT_SECONDARY}; }}"
+            f"QPushButton:hover {{ background: #eef6ff; color: {_TEXT_PRIMARY}; }}"
+            f"QPushButton:disabled {{ background: rgba(127,115,148,0.12); color: {_TEXT_SECONDARY}; }}"
+        )
+        self._restart_stt_btn.setEnabled(self._realtime_stt is not None)
+        self._restart_stt_btn.clicked.connect(self._on_restart_stt_clicked)
+        header_layout.addWidget(self._restart_stt_btn)
         left_layout.addWidget(header)
+
+        status_card = QWidget()
+        status_card.setStyleSheet(
+            f"background: {_BG_SURFACE}; border-radius: 16px; border: 1px solid {_BORDER};"
+        )
+        status_layout = QVBoxLayout(status_card)
+        status_layout.setContentsMargins(16, 12, 16, 12)
+        status_layout.setSpacing(8)
+
+        self._status_headline = QLabel("Starting up")
+        self._status_headline.setStyleSheet(
+            f"color: {_TEXT_PRIMARY}; font-size: {_px(13)}px; font-weight: 700; background: transparent;"
+        )
+        status_layout.addWidget(self._status_headline)
+
+        self._status_detail = QLabel(self._startup_status)
+        self._status_detail.setWordWrap(True)
+        self._status_detail.setStyleSheet(
+            f"color: {_TEXT_SECONDARY}; font-size: {_px(11)}px; background: transparent;"
+        )
+        status_layout.addWidget(self._status_detail)
+
+        self._status_readiness = QLabel("")
+        self._status_readiness.setWordWrap(True)
+        self._status_readiness.setStyleSheet(
+            f"color: {_TEXT_SECONDARY}; font-size: {_px(10)}px; background: transparent;"
+            f"font-family: {_MONO_FONT_STACK};"
+        )
+        status_layout.addWidget(self._status_readiness)
+
+        self._status_error_label = QLabel("")
+        self._status_error_label.setWordWrap(True)
+        self._status_error_label.setStyleSheet(
+            "color: #c13f4d; font-size: 12px; background: transparent;"
+        )
+        status_layout.addWidget(self._status_error_label)
+
+        status_actions = QHBoxLayout()
+        status_actions.setSpacing(8)
+        self._copy_diag_btn = QPushButton("Copy diagnostics")
+        self._copy_diag_btn.clicked.connect(self._copy_diagnostics)
+        status_actions.addWidget(self._copy_diag_btn)
+
+        self._test_api_btn = QPushButton("Test API")
+        self._test_api_btn.clicked.connect(lambda: self._create_task(self._run_backend_test()))
+        status_actions.addWidget(self._test_api_btn)
+
+        self._test_camera_btn = QPushButton("Test camera")
+        self._test_camera_btn.clicked.connect(lambda: self._create_task(self._run_camera_test()))
+        status_actions.addWidget(self._test_camera_btn)
+
+        self._test_stt_btn = QPushButton("Test STT")
+        self._test_stt_btn.clicked.connect(lambda: self._create_task(self._run_stt_test()))
+        status_actions.addWidget(self._test_stt_btn)
+        status_actions.addStretch()
+        status_layout.addLayout(status_actions)
+        left_layout.addWidget(status_card)
 
         # Chat log
         self._log = ChatLog(
@@ -1246,15 +1290,111 @@ class FamiliarWindow(QMainWindow):
         splitter.setStretchFactor(1, 1)
         root.addWidget(splitter)
 
+    def _set_input_enabled(self, enabled: bool) -> None:
+        self._input.setEnabled(enabled)
+        self._send_btn.setEnabled(enabled)
+
+    def _set_startup_status(self, text: str) -> None:
+        self._startup_status = text
+        if not self._agent_running and not self._stream.has_content():
+            self._stream.set_status(text)
+        self.setWindowTitle(f"familiar-ai  ⏳ {text}")
+        self._refresh_status_card()
+
+    def _set_last_error(self, message: str | None) -> None:
+        self._last_error = (message or "").strip()
+        self._refresh_status_card()
+
+    def _refresh_status_card(self) -> None:
+        snapshot = build_gui_diagnostics(self)
+        headline = getattr(self, "_status_headline", None)
+        detail = getattr(self, "_status_detail", None)
+        readiness = getattr(self, "_status_readiness", None)
+        error = getattr(self, "_status_error_label", None)
+        if headline is not None:
+            headline.setText(snapshot.headline)
+        if detail is not None:
+            detail.setText(snapshot.detail)
+        if readiness is not None:
+            readiness.setText(
+                f"{snapshot.readiness}\nqueue={snapshot.queue_backlog} | stt_connected={snapshot.realtime_stt_connected}"
+            )
+        if error is not None:
+            error.setText(f"Last error: {snapshot.last_error}" if snapshot.last_error else "")
+
+    def _copy_diagnostics(self) -> None:
+        snapshot = build_gui_diagnostics(self)
+        QApplication.clipboard().setText(format_gui_diagnostics(snapshot))
+        self._log.append_line("📋 Diagnostics copied")
+
+    async def _run_backend_test(self) -> None:
+        config = getattr(self, "_config", None) or getattr(
+            getattr(self, "_agent", None), "config", None
+        )
+        if config is None:
+            self._log.append_line("[error] Backend test unavailable before configuration")
+            return
+        self._log.append_line("🧪 Testing backend connection...")
+        ok, message = await test_backend_connection(config)
+        if ok:
+            self._set_last_error(None)
+            self._log.append_line(f"✅ Backend OK: {message}")
+        else:
+            self._set_last_error(f"Backend test failed: {message}")
+            self._log.append_line(f"[error] Backend test failed: {message}")
+
+    async def _run_camera_test(self) -> None:
+        config = getattr(self, "_config", None) or getattr(
+            getattr(self, "_agent", None), "config", None
+        )
+        if config is None:
+            self._log.append_line("[error] Camera test unavailable before configuration")
+            return
+        self._log.append_line("🧪 Testing camera connection...")
+        ok, message = await test_camera_connection_from_config(config)
+        if ok:
+            self._set_last_error(None)
+            self._log.append_line("✅ Camera OK")
+        else:
+            self._set_last_error(f"Camera test failed: {message}")
+            self._log.append_line(f"[error] Camera test failed: {message}")
+
+    async def _run_stt_test(self) -> None:
+        config = getattr(self, "_config", None) or getattr(
+            getattr(self, "_agent", None), "config", None
+        )
+        if config is None:
+            self._log.append_line("[error] Realtime STT test unavailable before configuration")
+            return
+        self._log.append_line("🧪 Testing realtime STT connection...")
+        ok, message = await test_realtime_stt_connection_from_config(config)
+        if ok:
+            self._set_last_error(None)
+            self._log.append_line(f"✅ Realtime STT OK: {message}")
+        else:
+            self._set_last_error(f"Realtime STT test failed: {message}")
+            self._log.append_line(f"[error] Realtime STT test failed: {message}")
+
     # ------------------------------------------------------------------
     # Callbacks
     # ------------------------------------------------------------------
 
     def _open_settings(self) -> None:
-        dlg = SettingsDialog(self._agent.config, _ENV_PATH, self)
+        config = getattr(self, "_config", None) or getattr(
+            getattr(self, "_agent", None), "config", None
+        )
+        if config is None:
+            return
+        dlg = SettingsDialog(config, _ENV_PATH, parent=self)
         dlg.exec()
 
+    def _on_restart_stt_clicked(self) -> None:
+        self._create_task(self._restart_realtime_stt(reason="manual"))
+
     def _on_send(self) -> None:
+        if getattr(self, "_agent", None) is None and not getattr(self, "_agent_ready", True):
+            self._stream.set_status(getattr(self, "_startup_status", "Initializing familiar-ai..."))
+            return
         text = self._input.text().strip()
         if not text:
             return
@@ -1289,6 +1429,12 @@ class FamiliarWindow(QMainWindow):
         self._stream.clear_status()
         self._log.append_line(f"[{self._companion_display_name}] {spoken}")
 
+    def _on_realtime_stt_restart(self, reason: str) -> None:
+        if self._closing:
+            return
+        label = "watchdog" if reason == "watchdog_loop" else reason
+        self._log.append_line(f"🎤 Realtime STT restarting ({label})")
+
     async def _start_realtime_stt(self) -> None:
         """Initialize realtime STT and feed transcripts into the GUI input queue."""
         assert self._realtime_stt is not None
@@ -1296,12 +1442,36 @@ class FamiliarWindow(QMainWindow):
             loop = asyncio.get_event_loop()
             self._realtime_stt.on_partial = self._on_realtime_stt_partial
             self._realtime_stt.on_committed = self._on_realtime_stt_committed
+            self._realtime_stt.on_restart = self._on_realtime_stt_restart
             await self._realtime_stt.start(loop, self._input_queue)
+            self._set_last_error(None)
             self._log.append_line("🎤 Realtime STT ON (ElevenLabs)")
         except Exception as exc:
             logger.warning("Realtime STT init failed: %s", exc)
+            self._set_last_error(f"Realtime STT init failed: {exc}")
             self._log.append_line(f"[error] Realtime STT init failed: {exc}")
             self._realtime_stt = None
+            restart_btn = getattr(self, "_restart_stt_btn", None)
+            if restart_btn is not None:
+                restart_btn.setEnabled(False)
+
+    async def _restart_realtime_stt(self, reason: str = "manual") -> None:
+        controller = self._realtime_stt
+        if controller is None:
+            self._log.append_line("[error] Realtime STT is not configured")
+            return
+        try:
+            restarted = await controller.restart(reason=reason)
+        except Exception as exc:
+            logger.warning("Realtime STT restart failed: %s", exc)
+            self._set_last_error(f"Realtime STT restart failed: {exc}")
+            self._log.append_line(f"[error] Realtime STT restart failed: {exc}")
+            return
+        if restarted:
+            self._set_last_error(None)
+            self._log.append_line("🎤 Realtime STT restarted")
+        else:
+            self._log.append_line("[error] Realtime STT restart unavailable before startup")
 
     def _on_cancel_clicked(self) -> None:
         self._cancel_turn(reason="user")
@@ -1357,8 +1527,11 @@ class FamiliarWindow(QMainWindow):
                 now = time.time()
                 if self._closing:
                     continue
+                if not getattr(self, "_agent_ready", True):
+                    continue
                 # Skip desire-driven turns when auto_desire is disabled (default OFF)
-                if not getattr(self._agent.config, "auto_desire", False):
+                agent_config = getattr(getattr(self, "_agent", None), "config", None)
+                if agent_config is not None and not getattr(agent_config, "auto_desire", False):
                     continue
                 if not should_fire_idle_desire(
                     agent_running=self._agent_running,
@@ -1388,6 +1561,15 @@ class FamiliarWindow(QMainWindow):
 
             if text is None:
                 break
+            while (
+                not getattr(self, "_agent_ready", True)
+                and getattr(self, "_agent", None) is None
+                and not self._closing
+                and not getattr(self, "_agent_init_failed", False)
+            ):
+                await asyncio.sleep(0.05)
+            if not getattr(self, "_agent_ready", True) and getattr(self, "_agent", None) is None:
+                break
             last_interaction = time.time()
             logger.debug(
                 "GUI dequeued input (remaining queue=%d, running=%s)",
@@ -1397,10 +1579,14 @@ class FamiliarWindow(QMainWindow):
             await self._run_agent(text)
 
     async def _run_agent(self, user_input: str, inner_voice: str = "") -> None:
+        if self._agent is None:
+            self._stream.set_status(self._startup_status)
+            return
         turn_started = time.perf_counter()
         self._agent_running = True
         self._cancel_requested = False
         self._set_turn_ui_state(True)
+        self._refresh_status_card()
         logger.info(
             "GUI turn start (user_input=%d chars, inner_voice=%s, queue=%d)",
             len(user_input),
@@ -1441,6 +1627,7 @@ class FamiliarWindow(QMainWindow):
             phase_started = time.perf_counter()
             if not self._stream.has_content():
                 _update_thinking_status()
+            self._refresh_status_card()
 
         say_fired = False
 
@@ -1506,6 +1693,7 @@ class FamiliarWindow(QMainWindow):
                 self._log.append_line("[interrupted]")
         except Exception as exc:
             logger.exception("Agent run error")
+            self._set_last_error(str(exc))
             self._log.append_line(f"[error] {exc}")
         finally:
             thinking_timer.stop()
@@ -1513,6 +1701,7 @@ class FamiliarWindow(QMainWindow):
             self._agent_task = None
             self._agent_running = False
             self._set_turn_ui_state(False)
+            self._refresh_status_card()
             logger.info(
                 "GUI turn end (duration=%.2fs, cancelled=%s, queue=%d)",
                 time.perf_counter() - turn_started,
@@ -1522,17 +1711,50 @@ class FamiliarWindow(QMainWindow):
             self._cancel_requested = False
 
     async def _show_init_status(self) -> None:
-        """Update window title with elapsed time until embedding model is ready."""
-        if self._agent.is_embedding_ready:
-            return
+        """Update status until the agent and embedding model are ready."""
         start = time.time()
-        while not self._agent.is_embedding_ready:
+        while not self._closing:
             elapsed = int(time.time() - start)
-            self.setWindowTitle(f"familiar-ai  ⏳ {_t('initializing')}... ({elapsed}s)")
+            agent = getattr(self, "_agent", None)
+            if getattr(self, "_agent_init_failed", False):
+                return
+            if agent is None:
+                self._set_startup_status(f"{_t('initializing')} agent... ({elapsed}s)")
+            elif not agent.is_embedding_ready:
+                self._set_startup_status(f"{_t('initializing')} memory... ({elapsed}s)")
+            else:
+                break
             await asyncio.sleep(0.5)
+        if self._closing or getattr(self, "_agent", None) is None:
+            return
         elapsed = int(time.time() - start)
         self._log.append_line(f"✅ {_t('initializing_done')} ({elapsed}s)")
+        self._stream.clear_status()
         self.setWindowTitle("familiar-ai")
+
+    async def _initialize_agent(self) -> None:
+        """Build EmbodiedAgent after the window is already visible."""
+        self._set_startup_status(f"{_t('initializing')} agent...")
+        self._startup_status_task = self._create_task(self._show_init_status())
+        try:
+            from .agent import EmbodiedAgent  # noqa: PLC0415
+
+            agent = await asyncio.to_thread(EmbodiedAgent, self._config)
+            self._agent = agent
+            if not agent.is_embedding_ready:
+                self._set_startup_status(f"{_t('initializing')} memory...")
+            self._agent_ready = True
+            self._set_last_error(None)
+            self._set_input_enabled(True)
+            if self._realtime_stt and self._realtime_stt_task is None:
+                self._realtime_stt_task = self._create_task(self._start_realtime_stt())
+        except Exception as exc:
+            self._agent_init_failed = True
+            logger.exception("Agent initialization failed")
+            self._set_startup_status("Initialization failed")
+            self._set_last_error(f"Agent initialization failed: {exc}")
+            self._log.append_line(f"[error] Agent initialization failed: {exc}")
+            self._set_input_enabled(False)
 
     # ------------------------------------------------------------------
     # Cleanup
@@ -1580,6 +1802,7 @@ class FamiliarWindow(QMainWindow):
     async def _shutdown(self) -> None:
         """Best-effort async cleanup on window close."""
         self._lag_timer.stop()
+        self._status_timer.stop()
         self._cancel_turn(reason="shutdown")
         if self._realtime_stt_task and not self._realtime_stt_task.done():
             self._realtime_stt_task.cancel()
@@ -1599,13 +1822,17 @@ class FamiliarWindow(QMainWindow):
             self._queue_task.cancel()
         if self._init_task and not self._init_task.done():
             self._init_task.cancel()
+        startup_status_task = getattr(self, "_startup_status_task", None)
+        if startup_status_task and not startup_status_task.done():
+            startup_status_task.cancel()
         try:
             if self._agent_task and not self._agent_task.done():
                 try:
                     await asyncio.wait_for(asyncio.shield(self._agent_task), timeout=1.0)
                 except (asyncio.TimeoutError, asyncio.CancelledError, Exception):
                     pass
-            await asyncio.wait_for(self._agent.close(), timeout=3.0)
+            if self._agent is not None:
+                await asyncio.wait_for(self._agent.close(), timeout=3.0)
         except (asyncio.TimeoutError, Exception):
             pass
         self._shutdown_done = True
@@ -1616,7 +1843,7 @@ class FamiliarWindow(QMainWindow):
 # ---------------------------------------------------------------------------
 
 
-def run_gui(agent: "EmbodiedAgent", desires: "DesireSystem") -> None:
+def run_gui(config: "AgentConfig", desires: "DesireSystem") -> None:
     """Launch the PySide6 GUI with qasync event loop."""
     import signal
 
@@ -1632,7 +1859,7 @@ def run_gui(agent: "EmbodiedAgent", desires: "DesireSystem") -> None:
     loop = qasync.QEventLoop(qt_app)
     asyncio.set_event_loop(loop)
 
-    window = FamiliarWindow(agent, desires)
+    window = FamiliarWindow(config, desires)
     if icon_path:
         icon = QIcon(str(icon_path))
         if not icon.isNull():
@@ -1657,3 +1884,22 @@ def run_gui(agent: "EmbodiedAgent", desires: "DesireSystem") -> None:
     # pools, etc.) keep the process alive after the Qt event loop exits.
     # Force-exit so the CMD window closes cleanly — same pattern as the REPL.
     os._exit(0)
+
+
+def run_setup_wizard(config: "AgentConfig", env_path: Path | None = None) -> bool:
+    """Launch the setup dialog without constructing the full main window."""
+    existing = QApplication.instance()
+    qt_app = existing if isinstance(existing, QApplication) else QApplication(sys.argv)
+    _apply_global_style(qt_app)
+    icon_path = resolve_app_icon_path()
+    if icon_path:
+        icon = QIcon(str(icon_path))
+        if not icon.isNull():
+            qt_app.setWindowIcon(icon)
+
+    dialog = SettingsDialog(config, env_path or _ENV_PATH, setup_mode=True)
+    if icon_path:
+        icon = QIcon(str(icon_path))
+        if not icon.isNull():
+            dialog.setWindowIcon(icon)
+    return dialog.exec() == int(QDialog.DialogCode.Accepted)
