@@ -15,6 +15,8 @@ import urllib.request
 from pathlib import Path
 from urllib.parse import quote
 
+from ..voice_guard import VoiceLoopGuard, get_shared_voice_guard
+
 logger = logging.getLogger(__name__)
 
 
@@ -116,6 +118,7 @@ class TTSTool:
         go2rtc_url: str = "http://localhost:1984",
         go2rtc_stream: str = "tapo_cam",
         output: str = "local",
+        voice_guard: VoiceLoopGuard | None = None,
     ) -> None:
         self.api_key = api_key
         self.voice_id = voice_id
@@ -123,6 +126,7 @@ class TTSTool:
         self.go2rtc_stream = go2rtc_stream
         # "local" = PC speaker only, "remote" = camera speaker only, "both" = both simultaneously
         self.output = output
+        self._voice_guard = voice_guard or get_shared_voice_guard()
         # Serialize concurrent say() calls so audio never overlaps
         self._lock = asyncio.Lock()
         # Ensure go2rtc is running at startup
@@ -152,24 +156,33 @@ class TTSTool:
         }
 
         async with self._lock:
-            async with aiohttp.ClientSession() as session:
-                async with session.post(url, json=payload, headers=headers) as resp:
-                    if resp.status != 200:
-                        err = await resp.text()
-                        return f"TTS API failed ({resp.status}): {err[:80]}"
-                    content_type = resp.headers.get("Content-Type", "")
-                    audio_data = await resp.read()
-
-            # ElevenLabs may return MP3 even when PCM was requested (model-dependent).
-            # Detect by content-type and save to the correct format.
-            is_mp3 = "mpeg" in content_type or audio_data[:3] in (b"ID3", b"\xff\xfb", b"\xff\xf3")
-            if is_mp3:
-                tmp_path = _write_tmp_audio(audio_data, suffix=".mp3")
-            else:
-                tmp_path = _write_pcm_as_wav(audio_data, sample_rate=16000)
-
+            voice_guard = getattr(self, "_voice_guard", None)
+            if voice_guard is None:
+                voice_guard = get_shared_voice_guard()
+                self._voice_guard = voice_guard
+            played_via: list[str] = []
+            tmp_path: str | None = None
+            voice_guard.on_tts_start(text)
             try:
-                played_via: list[str] = []
+                async with aiohttp.ClientSession() as session:
+                    async with session.post(url, json=payload, headers=headers) as resp:
+                        if resp.status != 200:
+                            err = await resp.text()
+                            return f"TTS API failed ({resp.status}): {err[:80]}"
+                        content_type = resp.headers.get("Content-Type", "")
+                        audio_data = await resp.read()
+
+                # ElevenLabs may return MP3 even when PCM was requested (model-dependent).
+                # Detect by content-type and save to the correct format.
+                is_mp3 = "mpeg" in content_type or audio_data[:3] in (
+                    b"ID3",
+                    b"\xff\xfb",
+                    b"\xff\xf3",
+                )
+                if is_mp3:
+                    tmp_path = _write_tmp_audio(audio_data, suffix=".mp3")
+                else:
+                    tmp_path = _write_pcm_as_wav(audio_data, sample_rate=16000)
 
                 if output in ("remote", "both"):
                     ok, msg = await asyncio.to_thread(
@@ -191,10 +204,12 @@ class TTSTool:
                     return "TTS playback failed (no working audio player found)"
                 return f"Said: {text[:50]}... (via {', '.join(played_via)})"
             finally:
-                try:
-                    os.unlink(tmp_path)
-                except OSError:
-                    pass
+                voice_guard.on_tts_end(text, played=bool(played_via))
+                if tmp_path is not None:
+                    try:
+                        os.unlink(tmp_path)
+                    except OSError:
+                        pass
 
     def get_tool_definitions(self) -> list[dict]:
         return [

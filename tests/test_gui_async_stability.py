@@ -32,6 +32,7 @@ class _ManualRealtimeStt:
     def __init__(self) -> None:
         self.on_partial: Callable[[str], None] | None = None
         self.on_committed: Callable[[str], None] | None = None
+        self.on_restart: Callable[[str], None] | None = None
         self._queue: asyncio.Queue[str | None] | None = None
         self.started = False
 
@@ -43,6 +44,12 @@ class _ManualRealtimeStt:
 
     async def stop(self) -> None:
         self.started = False
+
+    async def restart(self, reason: str = "manual") -> bool:
+        if self.on_restart:
+            self.on_restart(reason)
+        self.started = True
+        return True
 
     async def emit_committed(self, text: str) -> None:
         assert self._queue is not None
@@ -77,6 +84,7 @@ def _make_window_stub() -> FamiliarWindow:
     win._send_btn = MagicMock()
     win._stop_btn = MagicMock()
     win._lag_timer = MagicMock()
+    win._status_timer = MagicMock()
     win._last_lag_tick = time.perf_counter()
     win.setEnabled = MagicMock()  # type: ignore[method-assign]
     win.setWindowTitle = MagicMock()  # type: ignore[method-assign]

@@ -176,6 +176,40 @@ async def test_say_returns_error_on_api_failure():
 
 
 @pytest.mark.asyncio
+async def test_say_notifies_voice_guard_on_success():
+    tool = _make_tts()
+    tool._voice_guard = MagicMock()
+
+    mock_response = MagicMock()
+    mock_response.status = 200
+    mock_response.read = AsyncMock(return_value=b"fake_mp3_data")
+    mock_response.__aenter__ = AsyncMock(return_value=mock_response)
+    mock_response.__aexit__ = AsyncMock(return_value=False)
+
+    mock_session = MagicMock()
+    mock_session.post = MagicMock(return_value=mock_response)
+    mock_session.__aenter__ = AsyncMock(return_value=mock_session)
+    mock_session.__aexit__ = AsyncMock(return_value=False)
+
+    with (
+        patch("aiohttp.ClientSession", return_value=mock_session),
+        patch("familiar_agent.tools.tts._play_local", new=AsyncMock(return_value=True)),
+        patch("os.unlink"),
+        patch("tempfile.NamedTemporaryFile") as mock_tmp,
+    ):
+        tmp_file = MagicMock()
+        tmp_file.__enter__ = MagicMock(return_value=tmp_file)
+        tmp_file.__exit__ = MagicMock(return_value=False)
+        tmp_file.name = "/tmp/fake.mp3"
+        mock_tmp.return_value = tmp_file
+
+        await tool.say("hello world")
+
+    tool._voice_guard.on_tts_start.assert_called_once_with("hello world")
+    tool._voice_guard.on_tts_end.assert_called_once_with("hello world", played=True)
+
+
+@pytest.mark.asyncio
 async def test_say_serializes_concurrent_calls():
     """Concurrent say() calls must be serialized (lock prevents overlap)."""
     tool = _make_tts()
