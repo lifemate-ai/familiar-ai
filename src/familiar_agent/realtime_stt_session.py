@@ -100,6 +100,7 @@ class RealtimeSttSession:
         self._incoming_committed: asyncio.Queue[str] = asyncio.Queue()
         self._incoming_partial: asyncio.Queue[str] = asyncio.Queue()
         self._connect_lock = asyncio.Lock()
+        self._restart_lock = asyncio.Lock()
         self._loop: asyncio.AbstractEventLoop | None = None
         self._stopping = False
 
@@ -110,6 +111,7 @@ class RealtimeSttSession:
         # Display callbacks (set by caller before start())
         self.on_partial: Callable[[str], None] | None = None
         self.on_committed: Callable[[str], None] | None = None
+        self.on_restart: Callable[[str], None] | None = None
 
     @property
     def active(self) -> bool:
@@ -171,6 +173,19 @@ class RealtimeSttSession:
             await self._stt_client.close()
             self._stt_client = None
         logger.info("Realtime STT session stopped")
+
+    async def restart(self, reason: str = "manual") -> bool:
+        """Reconnect the realtime STT session using the stored loop/queue."""
+        if self._loop is None or self._committed_queue is None:
+            logger.debug("Realtime STT restart skipped before initial start (%s)", reason)
+            return False
+
+        async with self._restart_lock:
+            logger.warning("Restarting realtime STT session (%s)", reason)
+            await self.stop()
+            await self.start(self._loop, self._committed_queue)
+            logger.info("Realtime STT session restarted (%s)", reason)
+            return True
 
     # ── internal relay tasks ─────────────────────────────────────────
 
@@ -270,3 +285,15 @@ def create_realtime_stt_session() -> RealtimeSttSession | None:
         return None
 
     return RealtimeSttSession(api_key, language_code=language_code)
+
+
+RealtimeSttController = RealtimeSttSession
+
+
+def create_realtime_stt_controller() -> RealtimeSttController | None:
+    """Compatibility shim for the GUI bootstrap path.
+
+    PR2 only needs a restart-capable controller surface for GUI startup and
+    diagnostics. The richer voice-guard behavior lands in PR3.
+    """
+    return create_realtime_stt_session()

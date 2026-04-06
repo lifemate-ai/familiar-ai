@@ -11,9 +11,11 @@ import time
 from pathlib import Path
 
 from .agent import EmbodiedAgent
+from .bootstrap import load_app_bootstrap
 from .config import AgentConfig
 from .desires import DesireSystem
 from .realtime_stt_session import create_realtime_stt_session
+from .setup import run_cli_setup_wizard
 from ._i18n import BANNER, _t
 from ._ui_helpers import (
     DESIRE_COOLDOWN,
@@ -397,26 +399,48 @@ def main() -> None:
 
     use_gui = "--gui" in sys.argv
     use_tui = "--no-tui" not in sys.argv and not use_gui
+    bootstrap = load_app_bootstrap()
+
+    if bootstrap.migrated:
+        for note in bootstrap.messages:
+            print(f"[migration] {note}")
+
+    if bootstrap.needs_setup:
+        if use_gui:
+            from .gui import run_setup_wizard
+
+            if not run_setup_wizard(AgentConfig(), bootstrap.env_path):
+                return
+        else:
+            if not sys.stdin.isatty():
+                print("Error: API_KEY not set.")
+                print("  Run with --gui to open the setup wizard, or create .env manually.")
+                sys.exit(1)
+            if not run_cli_setup_wizard(bootstrap.env_path):
+                return
+
+        bootstrap = load_app_bootstrap(bootstrap.env_path)
+        if bootstrap.needs_setup:
+            print("Setup incomplete: API_KEY is still missing.")
+            return
 
     config = AgentConfig()
-    if not config.api_key:
-        print("Error: API_KEY not set.")
-        print("  Set PLATFORM=gemini|anthropic|openai and API_KEY=<your key>.")
-        sys.exit(1)
-
-    agent = EmbodiedAgent(config)
-    desires = DesireSystem(companion_name=config.companion_name)
 
     if use_gui:
         from .gui import run_gui
 
-        run_gui(agent, desires)
+        desires = DesireSystem(companion_name=config.companion_name)
+        run_gui(config, desires)
     elif use_tui:
+        agent = EmbodiedAgent(config)
+        desires = DesireSystem(companion_name=config.companion_name)
         from .tui import FamiliarApp
 
         app = FamiliarApp(agent, desires)
         app.run(mouse=False)
     else:
+        agent = EmbodiedAgent(config)
+        desires = DesireSystem(companion_name=config.companion_name)
         _run_repl(agent, desires, debug=debug)
 
 
