@@ -288,6 +288,21 @@ API_KEY=sk-...
 Run `./run.sh` (macOS/Linux/WSL2) or `run.bat` (Windows) and start chatting. Add hardware as you go.
 If you want the desktop GUI directly, use `./run-gui.sh` or `run-gui.bat`.
 
+### Find Wi-Fi cameras automatically
+
+If you do not know your camera's IP yet, familiar-ai now ships with a small discovery tool:
+
+```bash
+uv run familiar-discover-cameras
+```
+
+This combines **WS-Discovery**, **mDNS / zeroconf**, and **SSDP**. For harder networks, you can
+opt into a slower TCP fallback scan:
+
+```bash
+uv run familiar-discover-cameras --scan
+```
+
 ### Wi-Fi PTZ camera (Tapo C220)
 
 1. In the Tapo app: **Settings → Advanced → Camera Account** — create a local account (not TP-Link account)

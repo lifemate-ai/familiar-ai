@@ -21,6 +21,7 @@ This project adheres to [Semantic Versioning](https://semver.org/).
 - Voice guard protection for TTS-driven realtime STT loops, including speak-time gating, echo fingerprint suppression, watchdog reconnects, and manual STT restart controls in GUI/TUI
 - Dedicated `run-gui.sh` / `run-gui.bat` launchers for opening the desktop GUI without changing the existing TUI defaults
 - Support for full RTSP URLs in `CAMERA_HOST` (enables ATOMCam and other non-standard RTSP paths)
+- A dedicated `familiar-discover-cameras` tool that combines WS-Discovery, mDNS/zeroconf, SSDP, and an opt-in TCP fallback scan for Wi-Fi camera setup
 - Persistent latent self state driven by workspace broadcasts, with prompt-visible interoception updates and dedicated test coverage
 - Action-conditioned prediction with agency-error tracking for `see` / `look` / `walk`, including scene integration and focused tests
 - Online temporal-self context during ordinary turns, with resurfaced memories, unresolved-thread prompts, and within-session self-narrative capture

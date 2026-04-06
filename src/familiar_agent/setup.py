@@ -15,10 +15,10 @@ import logging
 import re
 from pathlib import Path
 from typing import Any
-from urllib.parse import urlparse
 
 from dotenv import dotenv_values, set_key, unset_key
 
+from .camera_discovery import discover_network_cameras
 from .settings_schema import SetupConfig, setup_config_to_env_values
 
 logger = logging.getLogger(__name__)
@@ -194,45 +194,14 @@ async def validate_camera_connection(
         return False, str(exc)
 
 
-async def _ws_discover() -> list[Any]:
-    """Run ONVIF WS-Discovery and return raw service objects."""
-    try:
-        import asyncio
-        from wsdiscovery import WSDiscovery  # type: ignore[import]
-
-        def _sync() -> list[Any]:
-            wsd = WSDiscovery()
-            wsd.start()
-            svcs = wsd.searchServices()
-            wsd.stop()
-            return svcs
-
-        return await asyncio.to_thread(_sync)
-    except ImportError:
-        logger.debug("wsdiscovery not available — camera auto-discovery disabled")
-        return []
-
-
 async def discover_onvif_cameras(timeout: float = 3.0) -> list[dict[str, str]]:
-    """Scan the local network for ONVIF cameras via WS-Discovery."""
-    import asyncio
+    """Discover cameras on the local network.
 
+    The historical public API is kept for setup/tests, but discovery now uses a
+    unified backend that combines WS-Discovery, mDNS/zeroconf, and SSDP.
+    """
     try:
-        services = await asyncio.wait_for(_ws_discover(), timeout=timeout)
+        return await discover_network_cameras(timeout=timeout, include_port_scan=False)
     except Exception as exc:
         logger.debug("Camera discovery error: %s", exc)
         return []
-
-    results: list[dict[str, str]] = []
-    for svc in services:
-        try:
-            addrs = svc.getXAddrs()
-            if not addrs:
-                continue
-            parsed = urlparse(addrs[0])
-            host = parsed.hostname or ""
-            if host:
-                results.append({"host": host, "address": addrs[0]})
-        except Exception:
-            continue
-    return results

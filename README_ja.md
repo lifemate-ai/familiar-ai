@@ -238,6 +238,21 @@ API_KEY=sk-...
 
 `./run.sh`（macOS/Linux/WSL2）または `run.bat`（Windows）を実行してチャットを始めましょう。ハードウェアはあとから追加できます。
 
+### Wi-Fi カメラを自動検出する
+
+カメラのIPアドレスがまだ分からない場合は、付属の discovery tool を使えます:
+
+```bash
+uv run familiar-discover-cameras
+```
+
+このツールは **WS-Discovery**、**mDNS / zeroconf**、**SSDP** をまとめて試します。
+見つからない場合だけ、やや遅い TCP fallback scan も試せます:
+
+```bash
+uv run familiar-discover-cameras --scan
+```
+
 ### Wi-Fi PTZカメラ（Tapo C220）
 
 1. Tapoアプリで: **設定 → 詳細設定 → カメラアカウント** — ローカルアカウントを作成（TP-Linkアカウントではなく）

@@ -28,6 +28,7 @@ camera = [
     "opencv-python>=4.00",
     "onvif-zeep-async>=4.0.0",
     "Pillow>=10.0.0",
+    "zeroconf>=0.132.2",
 ]
 voice = [
     "openai-whisper",
@@ -41,6 +42,7 @@ all = [
 
 [project.scripts]
 familiar = "familiar_agent.main:main"
+familiar-discover-cameras = "familiar_agent.camera_discovery:main"
 
 [build-system]
 requires = ["hatchling"]
@@ -83,6 +85,7 @@ camera = [
     "opencv-python>=4.00",
     "onvif-zeep-async>=4.0.0",
     "Pillow>=10.0.0",
+    "zeroconf>=0.132.2",
 ]
 voice = [
     "openai-whisper",
