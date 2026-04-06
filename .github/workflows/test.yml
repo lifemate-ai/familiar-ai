@@ -22,5 +22,9 @@ jobs:
         with:
           version: "latest"
 
+      - name: Install Linux GUI test deps
+        if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y libegl1
+
       - name: Run tests
         run: uv run --group dev pytest --tb=short -q
