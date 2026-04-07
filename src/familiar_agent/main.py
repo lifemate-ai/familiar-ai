@@ -22,6 +22,7 @@ from ._ui_helpers import (
     IDLE_CHECK_INTERVAL,
     desire_tick_prompt,
     format_action as _format_action,
+    get_dynamic_cooldown,
     should_fire_idle_desire,
 )
 
@@ -87,6 +88,7 @@ async def repl(agent: EmbodiedAgent, desires: DesireSystem, debug: bool = False)
     # so user input is captured even while the agent is busy.
     input_queue: asyncio.Queue[str | None] = asyncio.Queue()
     last_interaction_time: float = time.time()
+    last_user_input_time: float = time.time()
 
     async def _stdin_reader() -> None:
         """Read stdin continuously into the queue."""
@@ -135,6 +137,7 @@ async def repl(agent: EmbodiedAgent, desires: DesireSystem, debug: bool = False)
                 # Process all buffered user messages before doing anything autonomous
                 for user_input in pending:
                     last_interaction_time = time.time()
+                    last_user_input_time = time.time()
                     await _handle_user(
                         user_input, agent, desires, on_action, on_text, debug, input_queue
                     )
@@ -160,7 +163,7 @@ async def repl(agent: EmbodiedAgent, desires: DesireSystem, debug: bool = False)
                     has_pending_input=not input_queue.empty(),
                     last_interaction=last_interaction_time,
                     now=time.time(),
-                    cooldown=DESIRE_COOLDOWN,
+                    cooldown=get_dynamic_cooldown(last_user_input_time, time.time()),
                 ):
                     continue  # Still in post-conversation cooldown
 
@@ -191,6 +194,7 @@ async def repl(agent: EmbodiedAgent, desires: DesireSystem, debug: bool = False)
                         interrupt_queue=input_queue,
                     )
                     desires.satisfy(desire_name)
+                    last_interaction_time = time.time()  # reset cooldown after desire fire
                     desires.curiosity_target = None
                 elif pending_items:
                     # Had pending input but no desire — process it as user message

@@ -27,6 +27,7 @@ from ._ui_helpers import (
     desire_tick_prompt,
     format_action as _format_action,
     format_tool_result as _format_tool_result,
+    get_dynamic_cooldown,
     should_fire_idle_desire,
 )
 from .realtime_stt_session import create_realtime_stt_controller, RealtimeSttController
@@ -178,6 +179,7 @@ class FamiliarApp(App):
         self._companion_name = agent.config.companion_name
         self._input_queue: asyncio.Queue[str | None] = asyncio.Queue()
         self._last_interaction = time.time()
+        self._last_user_input_time: float = time.time()
         self._agent_running = False
         self._current_text_buf = ""  # buffer for streaming text
         self._log_path = self._open_log_file()
@@ -334,6 +336,7 @@ class FamiliarApp(App):
 
         self._log_user(text)
         self._last_interaction = time.time()
+        self._last_user_input_time = time.time()
         await self._input_queue.put(text)
 
     # ── agent loop ─────────────────────────────────────────────────
@@ -520,7 +523,7 @@ class FamiliarApp(App):
             has_pending_input=not self._input_queue.empty(),
             last_interaction=self._last_interaction,
             now=now,
-            cooldown=DESIRE_COOLDOWN,
+            cooldown=get_dynamic_cooldown(self._last_user_input_time, now),
         ):
             return
 
@@ -532,7 +535,7 @@ class FamiliarApp(App):
             has_pending_input=not self._input_queue.empty(),
             last_interaction=self._last_interaction,
             now=time.time(),
-            cooldown=DESIRE_COOLDOWN,
+            cooldown=get_dynamic_cooldown(self._last_user_input_time, time.time()),
         ):
             return
 
@@ -570,6 +573,7 @@ class FamiliarApp(App):
                         f"[bold cyan]\U0001f3a4 {self._companion_name}[/bold cyan] {text}"
                     )
                     self._last_interaction = time.time()
+                    self._last_user_input_time = time.time()
                     stream = self.query_one("#stream", Static)
                     stream.update("")
                 except Exception:
@@ -642,6 +646,7 @@ class FamiliarApp(App):
             if text.strip():
                 self._log_user(text)
                 self._last_interaction = time.time()
+                self._last_user_input_time = time.time()
                 await self._input_queue.put(text)
         except Exception as e:
             self._log_system(f"STT error: {e}")

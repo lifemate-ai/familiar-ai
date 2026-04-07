@@ -225,6 +225,16 @@ def _format_tom_result(result: str) -> str | None:
 
 IDLE_CHECK_INTERVAL: float = 10.0  # seconds between desire checks when idle
 DESIRE_COOLDOWN: float = float(os.environ.get("DESIRE_COOLDOWN", "90"))  # configurable
+CONVERSATION_WINDOW: float = float(os.environ.get("CONVERSATION_WINDOW", "300"))
+DESIRE_COOLDOWN_CONVO: float = float(os.environ.get("DESIRE_COOLDOWN_CONVO", "300"))
+DESIRE_COOLDOWN_IDLE: float = float(os.environ.get("DESIRE_COOLDOWN_IDLE", "1800"))
+
+
+def get_dynamic_cooldown(last_user_input: float, now: float) -> float:
+    """会話状態に基づいてdesire cooldownを動的に返す。"""
+    if now - last_user_input < CONVERSATION_WINDOW:
+        return DESIRE_COOLDOWN_CONVO  # 会話中: デフォルト5分
+    return DESIRE_COOLDOWN_IDLE  # 非会話: デフォルト30分
 
 
 def should_fire_idle_desire(
