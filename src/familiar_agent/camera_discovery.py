@@ -19,7 +19,7 @@ from urllib.parse import urlparse
 logger = logging.getLogger(__name__)
 
 _CAMERA_PORTS = (554, 80, 2020)
-_MDNS_SERVICE_TYPES = ("_rtsp._tcp.local.", "_http._tcp.local.")
+_MDNS_SERVICE_TYPES = ("_onvif._tcp.local.", "_rtsp._tcp.local.", "_http._tcp.local.")
 _SSDP_MULTICAST_ADDR = ("239.255.255.250", 1900)
 _SSDP_REQUEST = "\r\n".join(
     [
@@ -48,6 +48,53 @@ def _normalize_camera(entry: dict[str, str]) -> dict[str, str]:
         "port": str(entry.get("port", "") or "").strip(),
         "name": str(entry.get("name", "") or "").strip(),
     }
+
+
+def _decode_zeroconf_properties(raw: Any) -> dict[str, str]:
+    properties: dict[str, str] = {}
+    if not isinstance(raw, dict):
+        return properties
+    for key, value in raw.items():
+        key_text = key.decode("utf-8", errors="ignore") if isinstance(key, bytes) else str(key)
+        if isinstance(value, bytes):
+            value_text = value.decode("utf-8", errors="ignore")
+        else:
+            value_text = str(value)
+        properties[key_text] = value_text
+    return properties
+
+
+def _build_mdns_address(host: str, port: int, service_type: str, properties: dict[str, str]) -> str:
+    explicit = properties.get("url") or properties.get("uri")
+    if explicit:
+        if "://" in explicit:
+            return explicit
+        path = explicit if explicit.startswith("/") else f"/{explicit}"
+    elif service_type.startswith("_onvif"):
+        path = "/onvif/device_service"
+    elif service_type.startswith("_rtsp"):
+        txt_path = properties.get("path") or properties.get("rtsp_path") or properties.get("stream")
+        path = ""
+        if txt_path:
+            path = txt_path if txt_path.startswith("/") else f"/{txt_path}"
+    else:
+        path = ""
+
+    scheme = "rtsp" if service_type.startswith("_rtsp") or port == 554 else "http"
+    return f"{scheme}://{host}:{port}{path}" if port else f"{scheme}://{host}{path}"
+
+
+def _extract_ip_prefix(ip_address: str) -> str | None:
+    parts = ip_address.strip().split(".")
+    if len(parts) != 4:
+        return None
+    try:
+        octets = [int(part) for part in parts]
+    except ValueError:
+        return None
+    if any(octet < 0 or octet > 255 for octet in octets):
+        return None
+    return ".".join(str(octet) for octet in octets[:3])
 
 
 def _merge_camera_results(candidates: list[dict[str, str]]) -> list[dict[str, str]]:
@@ -184,17 +231,16 @@ async def _discover_mdns_cameras(timeout: float = 3.0) -> list[dict[str, str]]:
                     return
 
                 port = int(getattr(info, "port", 0) or 0)
-                scheme = "rtsp" if service_type.startswith("_rtsp") or port == 554 else "http"
+                properties = _decode_zeroconf_properties(getattr(info, "properties", {}))
                 for host in addresses:
                     found.append(
                         {
                             "host": host,
-                            "address": f"{scheme}://{host}:{port}"
-                            if port
-                            else f"{scheme}://{host}",
+                            "address": _build_mdns_address(host, port, service_type, properties),
                             "source": "mdns",
                             "port": str(port) if port else "",
                             "name": str(getattr(info, "server", "") or name).rstrip("."),
+                            "service_type": service_type,
                         }
                     )
 
@@ -302,9 +348,27 @@ def get_local_network_prefix() -> str | None:
         if match:
             return match.group(1)
 
+        match = re.search(r"\bdefault via\s+(\d+\.\d+\.\d+\.\d+)\b", output)
+        if match:
+            prefix = _extract_ip_prefix(match.group(1))
+            if prefix:
+                return prefix
+
         match = re.search(r"\b(\d+\.\d+\.\d+)\.\d+/\d+\b", output)
         if match:
             return match.group(1)
+
+    try:
+        probe = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        try:
+            probe.connect(("8.8.8.8", 80))
+            prefix = _extract_ip_prefix(str(probe.getsockname()[0]))
+            if prefix:
+                return prefix
+        finally:
+            probe.close()
+    except Exception:
+        pass
 
     return None
 
