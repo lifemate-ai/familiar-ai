@@ -99,3 +99,53 @@ def test_joy_sharing_prefers_celebrate_mode_without_unnecessary_problem_solving(
     assert decision.primary_act == "delight_share"
     assert decision.response_mode == "celebrate"
     assert decision.avoid_problem_solving is True
+
+
+def test_greeting_turn_prefers_brief_warm_reply_without_tom() -> None:
+    appraisal = AppraisalEngine()
+    policy_engine = SocialPolicyEngine()
+    affect = appraisal.appraise(
+        AppraisalContext(
+            user_text="おはよう",
+            companion_mood="engaged",
+            interoception=_pressure(),
+        )
+    )
+
+    decision = policy_engine.decide(
+        user_text="おはよう",
+        affect=affect,
+        trust=0.6,
+        intimacy=0.6,
+        interoception=_pressure(),
+    )
+
+    assert decision.primary_act == "greeting"
+    assert decision.response_mode == "brief_warmth"
+    assert decision.should_use_tom is False
+    assert decision.avoid_problem_solving is True
+
+
+def test_user_correction_prefers_plain_clarification_without_extra_inference() -> None:
+    appraisal = AppraisalEngine()
+    policy_engine = SocialPolicyEngine()
+    affect = appraisal.appraise(
+        AppraisalContext(
+            user_text="いや、面白い計画があるとは言ってない",
+            companion_mood="engaged",
+            interoception=_pressure(),
+        )
+    )
+
+    decision = policy_engine.decide(
+        user_text="いや、面白い計画があるとは言ってない",
+        affect=affect,
+        trust=0.6,
+        intimacy=0.6,
+        interoception=_pressure(),
+    )
+
+    assert decision.primary_act == "clarification"
+    assert decision.response_mode == "clarify"
+    assert decision.should_use_tom is False
+    assert decision.avoid_problem_solving is True

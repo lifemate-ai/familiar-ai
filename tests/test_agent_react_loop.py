@@ -209,6 +209,39 @@ async def test_run_end_turn_returns_text():
 
 
 @pytest.mark.asyncio
+async def test_brief_greeting_turn_uses_only_say_and_skips_heavy_prep():
+    agent = _make_agent(with_tts=True, with_camera=True)
+    agent.backend.stream_turn = AsyncMock(
+        return_value=(_turn("end_turn", text="おはよう。"), "おはよう。")
+    )
+
+    morning_mock = AsyncMock(return_value="morning context")
+    companion_mood_mock = AsyncMock(return_value="engaged")
+    workspace_mock = AsyncMock(return_value="[workspace]")
+    patches = dict(_HEAVY_PATCHES)
+    patches["familiar_agent.agent.EmbodiedAgent._morning_reconstruction"] = morning_mock
+    patches["familiar_agent.agent.EmbodiedAgent._infer_companion_mood"] = companion_mood_mock
+    patches["familiar_agent.agent.EmbodiedAgent._gather_workspace_context"] = workspace_mock
+
+    ps = [patch(t, n) for t, n in patches.items()]
+    for p in ps:
+        p.start()
+    try:
+        result = await agent.run("おはよう")
+    finally:
+        for p in ps:
+            p.stop()
+
+    assert result == "おはよう。"
+    stream_kwargs = agent.backend.stream_turn.await_args.kwargs
+    assert stream_kwargs["tools"] == [{"name": "say"}]
+    assert stream_kwargs["max_tokens"] == 120
+    morning_mock.assert_not_awaited()
+    companion_mood_mock.assert_not_awaited()
+    workspace_mock.assert_not_awaited()
+
+
+@pytest.mark.asyncio
 async def test_run_increments_turn_count():
     """run() increments _turn_count on each invocation."""
     agent = _make_agent()
@@ -532,7 +565,7 @@ async def test_run_first_turn_calls_morning_reconstruction():
     for p in ps:
         p.start()
     try:
-        await agent.run("hello")
+        await agent.run("今日はどう？")
     finally:
         for p in ps:
             p.stop()

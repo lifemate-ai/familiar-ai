@@ -19,6 +19,35 @@ _META_PATTERNS = [r"君", r"あなた", r"この会話", r"meta", r"how do you",
 _PLAYFUL_PATTERNS = [r"w", r"笑", r"ふふ", r"play", r"tease", r"冗談"]
 _BOUNDARY_PATTERNS = [r"やめて", r"やめろ", r"それは嫌", r"no more", r"stop that"]
 _SILENCE_PATTERNS = [r"…", r"\.\.\.", r"うん", r"ok$", r"おけ$", r"寝る"]
+_GREETING_PATTERNS = [
+    r"^おはよ",
+    r"^こんにちは",
+    r"^こんばんは",
+    r"^おーい$",
+    r"^もしもし$",
+]
+_ACK_PATTERNS = [
+    r"^ありがとう",
+    r"^ありがと",
+    r"^助か",
+    r"^よかった",
+    r"^了解$",
+    r"^ok$",
+    r"^okay$",
+    r"^お願い$",
+    r"^信じてる$",
+]
+_CORRECTION_PATTERNS = [
+    r"言ってない",
+    r"勘違",
+    r"誤解",
+    r"食い違",
+    r"そういう意味じゃ",
+    r"そうじゃない",
+    r"違う",
+    r"ちゃう",
+    r"^いや[、, ]",
+]
 
 
 def _matches(text: str, patterns: list[str]) -> bool:
@@ -77,6 +106,45 @@ class SocialPolicyEngine:
                 should_recall_relational_memory=True,
                 softness=0.82,
                 directness=0.88,
+                initiative=0.2,
+                avoid_problem_solving=True,
+                mention_memory=False,
+            )
+
+        if _matches(text, _CORRECTION_PATTERNS):
+            return SocialPolicyDecision(
+                primary_act="clarification",
+                response_mode="clarify",
+                should_use_tom=False,
+                should_recall_relational_memory=False,
+                softness=0.86,
+                directness=0.82,
+                initiative=0.18,
+                avoid_problem_solving=True,
+                mention_memory=False,
+            )
+
+        if _matches(text, _GREETING_PATTERNS):
+            return SocialPolicyDecision(
+                primary_act="greeting",
+                response_mode="brief_warmth",
+                should_use_tom=False,
+                should_recall_relational_memory=False,
+                softness=0.86,
+                directness=0.36,
+                initiative=0.18,
+                avoid_problem_solving=True,
+                mention_memory=False,
+            )
+
+        if _matches(text, _ACK_PATTERNS):
+            return SocialPolicyDecision(
+                primary_act="acknowledgement",
+                response_mode="brief_attuned",
+                should_use_tom=False,
+                should_recall_relational_memory=False,
+                softness=0.8,
+                directness=0.44,
                 initiative=0.2,
                 avoid_problem_solving=True,
                 mention_memory=False,

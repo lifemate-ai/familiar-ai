@@ -52,6 +52,7 @@ This project adheres to [Semantic Versioning](https://semver.org/).
 - The app no longer exits before opening setup when `API_KEY` is missing; GUI users are routed into first-run setup and non-GUI users get a clear fallback path
 - Realtime STT no longer re-ingests the agent's own speech during or immediately after TTS playback, and repeated echo loops now trigger an automatic reconnect
 - Several async tests that relied on `asyncio.get_event_loop().run_until_complete(...)` now run correctly under `uvloop` and in the full CI suite
+- Short greeting / acknowledgement / correction turns now stay in a lightweight reply path: they avoid exploratory tool chains, skip heavy prompt prep, and cap the response loop to a fast `say()`-first turn
 
 ## [0.1.0] - 2026-02-22
 
