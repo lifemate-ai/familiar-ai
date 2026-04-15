@@ -64,9 +64,7 @@ def _decode_zeroconf_properties(raw: Any) -> dict[str, str]:
     return properties
 
 
-def _build_mdns_address(
-    host: str, port: int, service_type: str, properties: dict[str, str]
-) -> str:
+def _build_mdns_address(host: str, port: int, service_type: str, properties: dict[str, str]) -> str:
     explicit = properties.get("url") or properties.get("uri")
     if explicit:
         if "://" in explicit:
