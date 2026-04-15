@@ -1359,6 +1359,17 @@ class ObservationMemory:
     async def recall_async(self, query: str, n: int = 3, kind: str | None = None) -> list[dict]:
         return await asyncio.to_thread(self.recall, query, n, kind)
 
+    async def recall_divergent_async(
+        self, query: str, n: int = 5, max_depth: int = 2, max_branches: int = 2
+    ) -> list[dict]:
+        return await asyncio.to_thread(
+            self.recall_divergent,
+            query,
+            n,
+            max_depth=max_depth,
+            max_branches=max_branches,
+        )
+
     async def recent_feelings_async(self, n: int = 5) -> list[dict]:
         return await asyncio.to_thread(self.recent_feelings, n)
 
@@ -1519,6 +1530,58 @@ class ObservationMemory:
     ) -> list[dict]:
         return await asyncio.to_thread(self.recall_revisions, entity_type, entity_key, n)
 
+    async def create_episode_async(
+        self,
+        title: str,
+        *,
+        summary: str = "",
+        participants: list[str] | None = None,
+        opened_from_memory_id: str | None = None,
+    ) -> str | None:
+        return await asyncio.to_thread(
+            self.create_episode,
+            title,
+            summary=summary,
+            participants=participants,
+            opened_from_memory_id=opened_from_memory_id,
+        )
+
+    async def append_to_episode_async(self, episode_id: str, memory_id: str) -> bool:
+        return await asyncio.to_thread(self.append_to_episode, episode_id, memory_id)
+
+    async def refresh_working_memory_async(self, query: str = "", n: int = 5) -> list[dict]:
+        return await asyncio.to_thread(self.refresh_working_memory, query, n)
+
+    async def get_working_memory_async(self, n: int = 5) -> list[dict]:
+        return await asyncio.to_thread(self.get_working_memory, n)
+
+    async def consolidate_memories_async(self, threshold: float = 0.97) -> int:
+        return await asyncio.to_thread(self.consolidate_memories, threshold)
+
+    async def open_unfinished_business_async(
+        self,
+        summary: str,
+        *,
+        source: str = "agent",
+        related_memory_id: str | None = None,
+        metadata: dict[str, Any] | None = None,
+    ) -> str | None:
+        return await asyncio.to_thread(
+            self.open_unfinished_business,
+            summary,
+            source=source,
+            related_memory_id=related_memory_id,
+            metadata=metadata,
+        )
+
+    async def list_unfinished_business_async(
+        self, status: str = "open", limit: int = 5
+    ) -> list[dict]:
+        return await asyncio.to_thread(self.list_unfinished_business, status, limit)
+
+    async def resolve_unfinished_business_async(self, business_id: str) -> bool:
+        return await asyncio.to_thread(self.resolve_unfinished_business, business_id)
+
     # ── Day summary support ────────────────────────────────────────
 
     def recall_day_summaries(self, n: int = 5) -> list[dict]:
@@ -1659,6 +1722,315 @@ class ObservationMemory:
         for s in summaries:
             lines.append(f"- {s['date']}: {s['summary'][:200]}")
         return "\n".join(lines)
+
+    # ------------------------------------------------------------------
+    # Episodes / working memory / unfinished business
+    # ------------------------------------------------------------------
+
+    def create_episode(
+        self,
+        title: str,
+        *,
+        summary: str = "",
+        participants: list[str] | None = None,
+        opened_from_memory_id: str | None = None,
+    ) -> str | None:
+        episode_id = str(uuid.uuid4())
+        now = self._now_iso()
+        participants_text = ",".join(participants or [])
+        try:
+            with self._db_lock:
+                db = self._ensure_connected()
+                db.execute(
+                    "INSERT INTO episodes "
+                    "(id, title, summary, participants, status, opened_from_memory_id, created_at, updated_at) "
+                    "VALUES (?, ?, ?, ?, 'open', ?, ?, ?)",
+                    (
+                        episode_id,
+                        title[:200],
+                        summary[:800],
+                        participants_text[:400],
+                        opened_from_memory_id,
+                        now,
+                        now,
+                    ),
+                )
+                db.commit()
+            return episode_id
+        except Exception as e:
+            logger.warning("create_episode failed: %s", e)
+            return None
+
+    def append_to_episode(self, episode_id: str, memory_id: str) -> bool:
+        try:
+            with self._db_lock:
+                db = self._ensure_connected()
+                row = db.execute(
+                    "SELECT COALESCE(MAX(position), -1) + 1 AS next_pos "
+                    "FROM episode_memories WHERE episode_id = ?",
+                    (episode_id,),
+                ).fetchone()
+                position = int(row["next_pos"]) if row and row["next_pos"] is not None else 0
+                db.execute(
+                    "INSERT OR IGNORE INTO episode_memories "
+                    "(id, episode_id, memory_id, position, added_at) VALUES (?, ?, ?, ?, ?)",
+                    (str(uuid.uuid4()), episode_id, memory_id, position, self._now_iso()),
+                )
+                db.execute(
+                    "UPDATE episodes SET updated_at = ? WHERE id = ?",
+                    (self._now_iso(), episode_id),
+                )
+                db.commit()
+            return True
+        except Exception as e:
+            logger.warning("append_to_episode failed: %s", e)
+            return False
+
+    def _episode_for_memory(self, memory_id: str) -> dict | None:
+        with self._db_lock:
+            db = self._ensure_connected()
+            row = db.execute(
+                "SELECT e.id, e.title, e.summary, e.participants "
+                "FROM episode_memories em JOIN episodes e ON e.id = em.episode_id "
+                "WHERE em.memory_id = ? ORDER BY em.added_at DESC LIMIT 1",
+                (memory_id,),
+            ).fetchone()
+        return dict(row) if row else None
+
+    def refresh_working_memory(self, query: str = "", n: int = 5) -> list[dict]:
+        recalled = self.recall_divergent(query or "recent important memories", n=n)
+        if not recalled:
+            return []
+        now = self._now_iso()
+        inserted: list[dict] = []
+        with self._db_lock:
+            db = self._ensure_connected()
+            for item in recalled[:n]:
+                memory_id = item.get("memory_id")
+                if not memory_id:
+                    continue
+                activation = float(item.get("confidence", item.get("activation", 0.5)))
+                episode_id = item.get("episode_id")
+                db.execute(
+                    "INSERT INTO memory_activation "
+                    "(id, memory_id, activation, source, context, episode_id, activated_at) "
+                    "VALUES (?, ?, ?, ?, ?, ?, ?)",
+                    (
+                        str(uuid.uuid4()),
+                        memory_id,
+                        activation,
+                        item.get("retrieval_method", "recall"),
+                        query[:200],
+                        episode_id,
+                        now,
+                    ),
+                )
+                inserted.append(item)
+            db.commit()
+        return inserted
+
+    def get_working_memory(self, n: int = 5) -> list[dict]:
+        try:
+            with self._db_lock:
+                db = self._ensure_connected()
+                rows = db.execute(
+                    "SELECT ma.memory_id, ma.activation, ma.source, ma.context, ma.episode_id, "
+                    "o.content, o.kind, o.timestamp "
+                    "FROM memory_activation ma JOIN observations o ON o.id = ma.memory_id "
+                    "ORDER BY ma.activated_at DESC LIMIT ?",
+                    (n,),
+                ).fetchall()
+            return [
+                {
+                    "memory_id": r["memory_id"],
+                    "summary": r["content"],
+                    "source_kind": r["kind"],
+                    "salience": float(r["activation"]),
+                    "episode_id": r["episode_id"],
+                    "activated_from": r["source"],
+                    "timestamp": r["timestamp"],
+                }
+                for r in rows
+            ]
+        except Exception as e:
+            logger.warning("get_working_memory failed: %s", e)
+            return []
+
+    def consolidate_memories(self, threshold: float = 0.97) -> int:
+        processed = 0
+        for older_id, newer_id, similarity in self.find_near_duplicates(threshold=threshold):
+            self.mark_superseded(older_id, newer_id)
+            self.link_memories(
+                older_id, newer_id, link_type="similar", note=f"sim={similarity:.3f}"
+            )
+            processed += 1
+        return processed
+
+    def open_unfinished_business(
+        self,
+        summary: str,
+        *,
+        source: str = "agent",
+        related_memory_id: str | None = None,
+        metadata: dict[str, Any] | None = None,
+    ) -> str | None:
+        business_id = str(uuid.uuid4())
+        try:
+            with self._db_lock:
+                db = self._ensure_connected()
+                db.execute(
+                    "INSERT INTO unfinished_business "
+                    "(id, summary, status, source, related_memory_id, metadata_json, created_at, resolved_at) "
+                    "VALUES (?, ?, 'open', ?, ?, ?, ?, NULL)",
+                    (
+                        business_id,
+                        summary[:400],
+                        source[:80],
+                        related_memory_id,
+                        json.dumps(metadata or {}, ensure_ascii=False, sort_keys=True),
+                        self._now_iso(),
+                    ),
+                )
+                db.commit()
+            return business_id
+        except Exception as e:
+            logger.warning("open_unfinished_business failed: %s", e)
+            return None
+
+    def list_unfinished_business(self, status: str = "open", limit: int = 5) -> list[dict]:
+        try:
+            with self._db_lock:
+                db = self._ensure_connected()
+                rows = db.execute(
+                    "SELECT id, summary, status, source, related_memory_id, metadata_json, created_at "
+                    "FROM unfinished_business WHERE status = ? ORDER BY created_at DESC LIMIT ?",
+                    (status, limit),
+                ).fetchall()
+            return [
+                {
+                    "id": r["id"],
+                    "summary": r["summary"],
+                    "status": r["status"],
+                    "source": r["source"],
+                    "related_memory_id": r["related_memory_id"],
+                    "metadata": json.loads(r["metadata_json"] or "{}"),
+                    "created_at": r["created_at"],
+                }
+                for r in rows
+            ]
+        except Exception as e:
+            logger.warning("list_unfinished_business failed: %s", e)
+            return []
+
+    def resolve_unfinished_business(self, business_id: str) -> bool:
+        try:
+            with self._db_lock:
+                db = self._ensure_connected()
+                updated = db.execute(
+                    "UPDATE unfinished_business SET status = 'resolved', resolved_at = ? WHERE id = ?",
+                    (self._now_iso(), business_id),
+                )
+                db.commit()
+            return updated.rowcount == 1
+        except Exception as e:
+            logger.warning("resolve_unfinished_business failed: %s", e)
+            return False
+
+    def recall_divergent(
+        self,
+        query: str,
+        n: int = 5,
+        *,
+        max_depth: int = 2,
+        max_branches: int = 2,
+    ) -> list[dict]:
+        """Multi-stage recall: semantic recall -> link expansion -> episode compression."""
+        seeds = self.recall(query, n=max(n, 3))
+        if not seeds:
+            return []
+
+        results: list[dict] = []
+        seen_memory_ids: set[str] = set()
+        episode_hits: dict[str, list[dict]] = {}
+
+        frontier = list(seeds)
+        for seed in seeds:
+            memory_id = str(seed.get("memory_id"))
+            seen_memory_ids.add(memory_id)
+            seed_item = dict(seed)
+            episode = self._episode_for_memory(memory_id)
+            if episode is not None:
+                seed_item["episode_id"] = episode["id"]
+                episode_hits.setdefault(episode["id"], []).append(seed_item)
+            results.append(seed_item)
+
+        for _depth in range(max_depth):
+            next_frontier: list[dict] = []
+            for item in frontier[: max(1, n)]:
+                current_memory_id = str(item.get("memory_id") or "")
+                if not current_memory_id:
+                    continue
+                linked = self.get_linked_memories(current_memory_id)[:max_branches]
+                for linked_item in linked:
+                    linked_id = str(linked_item.get("id"))
+                    if linked_id in seen_memory_ids:
+                        continue
+                    seen_memory_ids.add(linked_id)
+                    candidate = {
+                        "memory_id": linked_id,
+                        "summary": linked_item.get("content", ""),
+                        "date": linked_item.get("date", ""),
+                        "time": linked_item.get("time", ""),
+                        "direction": linked_item.get("link_direction", "?"),
+                        "kind": linked_item.get("kind", "observation"),
+                        "source_kind": linked_item.get("kind", "observation"),
+                        "emotion": linked_item.get("emotion", "neutral"),
+                        "confidence": max(0.2, float(item.get("confidence", 0.5)) * 0.82),
+                        "retrieval_method": "association",
+                    }
+                    episode = self._episode_for_memory(linked_id)
+                    if episode is not None:
+                        candidate["episode_id"] = episode["id"]
+                        episode_hits.setdefault(episode["id"], []).append(candidate)
+                    next_frontier.append(candidate)
+                    results.append(candidate)
+            frontier = next_frontier
+            if not frontier:
+                break
+
+        compressed: list[dict] = []
+        for episode_id, items in episode_hits.items():
+            episode = self._episode_for_memory(items[0]["memory_id"])
+            if episode is None:
+                continue
+            compressed.append(
+                {
+                    "memory_id": items[0]["memory_id"],
+                    "episode_id": episode_id,
+                    "summary": episode.get("summary") or episode.get("title"),
+                    "confidence": max(float(item.get("confidence", 0.4)) for item in items),
+                    "retrieval_method": "episode",
+                    "kind": "episode",
+                    "source_kind": "episode",
+                }
+            )
+
+        ranked = sorted(
+            results + compressed,
+            key=lambda item: float(item.get("confidence", 0.0)),
+            reverse=True,
+        )
+        unique: list[dict] = []
+        seen_keys: set[tuple[str | None, str | None]] = set()
+        for item in ranked:
+            key = (item.get("episode_id"), item.get("memory_id"))
+            if key in seen_keys:
+                continue
+            seen_keys.add(key)
+            unique.append(item)
+            if len(unique) >= n:
+                break
+        return unique
 
     # ------------------------------------------------------------------
     # Associative links
@@ -1836,6 +2208,31 @@ class MemoryTool:
                     "required": ["query"],
                 },
             },
+            {
+                "name": "recall_divergent",
+                "description": (
+                    "Recall memory by semantic match, then expand through associative links "
+                    "and episode compression."
+                ),
+                "input_schema": {
+                    "type": "object",
+                    "properties": {
+                        "query": {"type": "string"},
+                        "n": {"type": "integer"},
+                    },
+                    "required": ["query"],
+                },
+            },
+            {
+                "name": "get_working_memory",
+                "description": "Return the current working-memory buffer.",
+                "input_schema": {
+                    "type": "object",
+                    "properties": {
+                        "n": {"type": "integer"},
+                    },
+                },
+            },
         ]
 
     async def call(self, tool_name: str, tool_input: dict) -> tuple[str, str | None]:
@@ -1901,6 +2298,33 @@ class MemoryTool:
                             f"{lm.get('content', '')[:80]}"
                         )
 
+            return "\n".join(lines), None
+
+        if tool_name == "recall_divergent":
+            query = tool_input["query"]
+            n = int(tool_input.get("n", 5))
+            memories = await self._store.recall_divergent_async(query, n=n)
+            if not memories:
+                return "No divergent memories found.", None
+            lines = []
+            for memory in memories:
+                episode = f" episode:{memory['episode_id'][:8]}" if memory.get("episode_id") else ""
+                lines.append(
+                    f"- {memory.get('retrieval_method', 'semantic')} {episode} "
+                    f"conf:{float(memory.get('confidence', 0.0)):.2f} "
+                    f"{memory.get('summary', '')[:140]}"
+                )
+            return "\n".join(lines), None
+
+        if tool_name == "get_working_memory":
+            n = int(tool_input.get("n", 5))
+            items = await self._store.get_working_memory_async(n=n)
+            if not items:
+                return "Working memory is empty.", None
+            lines = [
+                f"- salience:{float(item.get('salience', 0.0)):.2f} {item.get('summary', '')[:140]}"
+                for item in items
+            ]
             return "\n".join(lines), None
 
         return f"Unknown memory tool: {tool_name}", None

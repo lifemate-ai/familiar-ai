@@ -39,7 +39,17 @@ def test_auto_applies_migrations_on_first_connect(tmp_path) -> None:
         }
 
     assert expected_ids.issubset(applied)
-    assert {"observations", "obs_embeddings", "memory_events", "memory_jobs"}.issubset(tables)
+    assert {
+        "observations",
+        "obs_embeddings",
+        "memory_events",
+        "memory_jobs",
+        "episodes",
+        "episode_memories",
+        "memory_activation",
+        "unfinished_business",
+        "relationship_state",
+    }.issubset(tables)
 
 
 def test_migrates_legacy_observations_schema(tmp_path) -> None:
