@@ -9,6 +9,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 
 from familiar_agent.backend import ToolCall, TurnResult
+from familiar_agent.desires import DesireSystem
 from familiar_agent.exploration import ExplorationTracker
 
 
@@ -246,6 +247,48 @@ async def test_run_appends_user_message_to_history():
     finally:
         for p in ps:
             p.stop()
+
+
+@pytest.mark.asyncio
+async def test_repeated_tool_failure_raises_self_protect_without_irritable_tone(tmp_path):
+    agent = _make_agent()
+    agent.backend.stream_turn = AsyncMock(
+        return_value=(_turn("end_turn", text="落ち着いて進めよう。"), "落ち着いて進めよう。")
+    )
+    agent._tool_failure_streak = 3
+    desires = DesireSystem(state_path=tmp_path / "desires.json", companion_name="Kota")
+
+    ps = _patch_heavy()
+    for p in ps:
+        p.start()
+    try:
+        result = await agent.run("助けて", desires=desires)
+    finally:
+        for p in ps:
+            p.stop()
+
+    assert desires.level("self_protect") > 0.0
+    assert "ugh" not in result.lower()
+    assert "annoy" not in result.lower()
+
+
+@pytest.mark.asyncio
+async def test_existing_no_hardware_mode_still_works_with_mental_pipeline():
+    agent = _make_agent(with_tts=False, with_camera=False, with_mcp=False)
+    agent.backend.stream_turn = AsyncMock(
+        return_value=(_turn("end_turn", text="hardwareなしでも動く"), "hardwareなしでも動く")
+    )
+
+    ps = _patch_heavy()
+    for p in ps:
+        p.start()
+    try:
+        result = await agent.run("こんにちは")
+    finally:
+        for p in ps:
+            p.stop()
+
+    assert result == "hardwareなしでも動く"
 
 
 @pytest.mark.asyncio

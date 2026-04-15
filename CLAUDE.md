@@ -1,71 +1,154 @@
-# familiar-ai — Developer Guide for Claude Code
+# familiar-ai — Developer Guide
 
 ## Project overview
 
-familiar-ai is an AI companion agent that perceives the real world through cameras, moves on a robot vacuum, speaks via TTS, and remembers what it sees. It runs a ReAct loop powered by the Anthropic API.
+familiar-ai is an embodied companion agent. It combines:
 
-## Repository structure
+- a ReAct tool loop
+- local SQLite memory
+- prediction / workspace / self-state layers
+- explicit relationship, appraisal, social policy, and drive regulation
+- optional camera, mobility, TTS, STT, GUI, and MCP integrations
 
-```
+The codebase is backend-agnostic. Anthropic is supported, but it is no longer the only runtime path.
+
+## Source tree
+
+```text
 src/familiar_agent/
-├── agent.py       # ReAct loop (main agent logic)
-├── config.py      # Environment-based configuration
-├── desires.py     # Desire system (autonomous behavior)
-├── main.py        # CLI REPL entry point
-└── tools/
-    ├── camera.py  # ONVIF PTZ camera + RTSP capture
-    ├── memory.py  # SQLite + multilingual-e5-small embeddings
-    ├── mobility.py # Tuya robot vacuum control
-    └── tts.py     # ElevenLabs TTS
+├── agent.py              # Main embodied turn loop
+├── appraisal.py          # Low-dimensional affect updates
+├── attention_schema.py   # Recent focus / attention state
+├── backend.py            # LLM backend protocol + implementations
+├── bootstrap.py          # Startup/setup/configured-state handling
+├── concern_engine.py     # Active unfinished concerns
+├── config.py             # Runtime config objects
+├── default_mode.py       # Idle/default-mode memory processing
+├── desires.py            # Autonomous drives + drive selection
+├── diagnostics.py        # GUI diagnostics and connection tests
+├── gui.py                # GTK GUI
+├── heartbeat.py          # Continuation/runtime status logic
+├── interoception.py      # Interoception providers + semantic pressure
+├── main.py               # CLI entry point / mode selection
+├── mental_state.py       # Mental-state bus and JSONL snapshots
+├── meta_monitor.py       # Metacognitive logging + response gating
+├── prediction.py         # Prediction error / agency error
+├── relationship.py       # Longitudinal relationship state
+├── routines.py           # Quiet-hours / routine config helpers
+├── self_narrative.py     # Session-spanning autobiographical narrative
+├── self_state.py         # Persistent latent bodily state
+├── setup.py              # Setup flow, env migration, validation
+├── social_policy.py      # Speech-act classification + response mode
+├── sqlite_migrations.py  # Migration runner
+├── tools/
+│   ├── camera.py
+│   ├── coding.py
+│   ├── memory.py
+│   ├── mic.py
+│   ├── mobility.py
+│   ├── realtime_stt.py
+│   ├── stt.py
+│   ├── tom.py
+│   └── tts.py
+├── tui.py                # Text UI
+├── voice_guard.py        # TTS/STT loop prevention
+└── workspace.py          # Coalition competition / broadcast
 ```
 
-## Key architectural decisions
+## Runtime architecture
 
-- **Camera and legs are separate physical devices.** The camera is fixed (e.g., on a shelf or outdoor unit). Moving the robot vacuum does NOT change what the camera sees. The system prompt must always make this clear to the agent.
-- **Memory uses SQLite + numpy embeddings** (not ChromaDB) for fast startup and lightweight deployment.
-- **Embeddings use CPU-only torch** by default. Do not switch to GPU builds without good reason — most users won't have a GPU.
-- **ME.md is gitignored.** It contains the user's personal persona. Never commit it.
+The current turn flow in `agent.py` is:
 
-## Git workflow
+1. ingest user input and tool/scene context
+2. collect interoception
+3. read prediction state
+4. activate memory, working memory, and open episodes
+5. update provisional relationship evidence
+6. appraise affect
+7. choose social policy
+8. regulate drives
+9. run workspace competition
+10. execute the ReAct loop
+11. meta-gate the response
+12. persist post-turn traces and mental-state snapshots
 
-**Always cut a feature branch before starting work.** Never commit directly to `main`.
+The old prompt-only social logic is no longer the full story. Deterministic state layers now sit between raw input and response planning.
 
-```bash
-git checkout -b feat/your-feature-name
-# ... make changes and commits ...
-# then open a PR to main
-```
+## Persistence
 
-## Commit messages
+Primary persistent stores:
 
-**Always in English.** Follow Conventional Commits:
+- `~/.familiar_ai/observations.db`
+  - observations
+  - embeddings
+  - semantic facts
+  - behavior policies
+  - revisions
+  - episodes
+  - episode membership
+  - memory activation
+  - unfinished business
+  - relationship state
+- `~/.familiar_ai/mental_state.jsonl`
+  - append-only mental-state snapshots
+- `~/.familiar_ai/heartbeat_state.json`
+  - continuation / carryover status
+- `~/.familiar_ai/desires.json`
+  - drive levels
+- `~/.familiar_ai/self_state.json`
+  - latent bodily carryover
 
-```
-feat: add USB microphone support
-fix: handle ONVIF reconnect on timeout
-docs: update camera setup instructions
-chore: bump anthropic to 0.42.0
-```
+Legacy compatibility:
 
-## Code style
+- `~/.familiar_ai/relationship.json`
+  - imported once if present, then SQLite becomes authoritative
+
+Schema changes must go through timestamped files under `migration/`.
+
+## Development rules
 
 - Python 3.10+
-- Formatted with `ruff` (line length: 100)
-- Async-first (`asyncio`)
-- Run before committing:
+- Async-first style
+- SQLite stays the primary storage
+- Prefer deterministic logic and typed dataclasses over giant prompt blobs
+- Do not leak raw interoception/body metrics into normal user-facing text
+- Keep compatibility for existing memory DBs; add migrations for every schema change
+
+## Validation before merge
+
+Run before opening a PR:
 
 ```bash
 uv run ruff check .
-uv run ruff format .
+uv run --group dev mypy src/familiar_agent
+uv run pytest -q
 ```
 
-## Adding a new tool
+## Git workflow
 
-1. Implement in `src/familiar_agent/tools/<name>.py`
-2. Add `get_tool_definitions()` and `call()` methods
-3. Register in `agent.py` → `_init_tools()`, `_all_tool_defs`, `_execute_tool()`
-4. Add the tool name to the system prompt description
+- Work from `develop`
+- Cut a feature branch before changes
+- Open focused PRs into `develop`
+- Use Conventional Commits in English
 
-## Environment variables
+Examples:
 
-All configuration is via environment variables (see `.env.example`). Never hardcode API keys or IP addresses.
+```text
+feat(memory): add episode compression to recall
+fix(agent): gate raw interoception leakage
+docs: refresh technical architecture guide
+```
+
+## Editing guidance
+
+- When adding a tool, wire all three places:
+  - tool implementation
+  - agent registration / routing
+  - tests
+- When changing state or persistence:
+  - add a migration
+  - add migration coverage
+  - update docs
+- When changing social behavior:
+  - prefer appraisal / social policy / meta gate logic first
+  - only extend prompt instructions when state logic is insufficient

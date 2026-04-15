@@ -27,6 +27,7 @@ This project adheres to [Semantic Versioning](https://semver.org/).
 - Online temporal-self context during ordinary turns, with resurfaced memories, unresolved-thread prompts, and within-session self-narrative capture
 - Lightweight adaptive confidence updates for semantic facts and behavior policies, including revision history for experience-driven value shifts
 - Lightweight layered self continuity with inertial proto-self updates, recent intention-result traces, and persistent active concerns
+- Freshness-aware MCP interoception ingestion, persisted heartbeat carryover state, SQLite-backed relationship storage with legacy JSON import, and sample autonomy config files for drives / schedule / operator wrappers
 
 ### Changed
 - Lint and test workflows now run for both `develop` and `main`, matching the new default-branch strategy
