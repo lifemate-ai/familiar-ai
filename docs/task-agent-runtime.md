@@ -75,17 +75,55 @@ Task mode should eventually provide:
 - Do not move cognitive modules into the generic runtime.
 - Keep Python as the main implementation until measurements justify a sidecar.
 
-## Current PR Boundary
+## Migration Status
 
-This PR keeps the extraction conservative but makes the first runtime layer real:
+The extraction is landing as a series of small, behaviour-preserving PRs. The current
+state of `develop` plus the in-flight branch `feat/runtime-hooks-and-neighbor` is:
 
-- Add architecture docs and ADRs.
-- Add tests that pin current ReAct and coding-tool behavior.
-- Add `familiar_runtime` protocols, ToolRegistry, event/task stores, context blocks, job manager,
-  and a provider-neutral ReAct loop.
-- Add `familiar_capabilities` adapters for coding and MCP.
-- Route existing `EmbodiedAgent` tool calls through ToolRegistry while preserving public behavior.
-- Add `familiar task ...` as the first non-embodied task-mode entry point.
+| Area | Status | Where it lives |
+| --- | --- | --- |
+| Generic runtime protocols (ModelBackend, ToolProvider, RuntimeHook, TurnContext) | ✅ | `src/familiar_runtime/runtime.py`, `tools/base.py`, `models/base.py` |
+| ReAct loop with event emission, timeouts, hook callbacks | ✅ | `src/familiar_runtime/react_loop.py` |
+| Tool registry with profile/tag filtering | ✅ | `src/familiar_runtime/tools/registry.py` |
+| Provider adapters split out of monolithic backend.py | ✅ | `src/familiar_runtime/models/{anthropic,openai_compat,kimi,glm,gemini,cli}.py` |
+| Durable task store and checkpoints | ✅ | `src/familiar_runtime/tasks/` |
+| Event bus + JSONL/SQLite persistence | ✅ | `src/familiar_runtime/events/` |
+| Background job manager | ✅ | `src/familiar_runtime/jobs.py` |
+| Generic memory store protocol | ✅ (protocol only) | `src/familiar_runtime/memory/base.py` |
+| RuntimeHook protocol with `after_model_result` / `after_tool_result` | ✅ | `src/familiar_runtime/runtime.py` (see ADR 0003) |
+| Capability adapters (coding, mcp, camera, mobility, voice, tom, memory) | ✅ | `src/familiar_capabilities/` |
+| `familiar_neighbor` package skeleton (`NeighborProfile`, mind re-exports) | ✅ | `src/familiar_neighbor/` |
+| Task-mode CLI (`familiar task ...`) | ✅ | `src/familiar_agent/main.py` |
+| Task evaluation harness (deterministic, no network) | ✅ | `benchmarks/task_eval.py`, `benchmarks/task_scenarios.py` |
+| Physical move of cognition modules into `familiar_neighbor.mind` | ⏳ Deferred (compat re-exports in place) | `src/familiar_agent/{appraisal,relationship,workspace,…}.py` |
+| `EmbodiedAgent.run()` rewrite to thin `AgentRuntime + NeighborProfile` wrapper | ⏳ Deferred | `src/familiar_agent/agent.py` |
+| Hook-based wiring of neighbour cognition into the runtime | ⏳ Deferred | n/a (planned under `feat/neighbor-hooks` follow-up) |
+| Concrete `MemoryStore` adapter around `ObservationMemory` | ⏳ Deferred | n/a |
+| Prompt stratification into `familiar_runtime/prompts/` and `familiar_neighbor/prompts/` | ⏳ Deferred | n/a |
 
-Large neighbor cognition module moves remain out of scope for this PR; compatibility and behavior
-preservation are the guardrails.
+The deferred items intentionally land in a later PR because they require coordinated
+changes to `EmbodiedAgent.run()` (2940 lines today). The current substrate already lets
+task-mode callers register hooks, run scripted scenarios, and persist task state without
+touching neighbour cognition.
+
+## Validation
+
+Every PR in this series passes the standard guardrails:
+
+```bash
+uv run ruff check .
+uv run ruff format --check .
+uv run --group dev mypy src/familiar_agent src/familiar_runtime
+uv run pytest -q
+```
+
+In addition, the task evaluation harness can be invoked directly:
+
+```bash
+uv run python benchmarks/task_eval.py
+uv run python benchmarks/task_eval.py --scenario simple_file_read
+uv run python benchmarks/task_eval.py --json reports/task_eval.json
+```
+
+The harness uses `ScriptedBackend` so it never makes network calls, making it safe to run
+in CI alongside the neighbour evaluation in `benchmarks/neighbor_eval.py`.

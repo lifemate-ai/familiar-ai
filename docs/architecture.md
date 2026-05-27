@@ -132,6 +132,39 @@ Plan generation before loop + heuristic replanning on blocked observations.
 3. **Optional coherence check** — Disabled by default (FAMILIAR_COHERENCE_CHECK=1 to enable)
 4. **Lazy MCP initialization** — Background async startup, tools become available as servers connect
 
+## Generic Runtime Layer
+
+In parallel with the neighbour stack, the repository now hosts a generic agent runtime
+that the same neighbour code is migrating onto. Documented in detail in
+`docs/task-agent-runtime.md`; in shape:
+
+```
+familiar_runtime/          # provider-neutral substrate
+├── models/                # ModelBackend protocol + provider adapters
+├── tools/                 # ToolProvider/ToolRegistry + LegacyToolProvider
+├── tasks/                 # Task model, SQLiteTaskStore, checkpoints
+├── events/                # AgentEvent, EventBus, EventStore
+├── memory/                # MemoryStore protocol (adapter pending)
+├── react_loop.py          # Generic ReAct loop with hook callbacks
+├── runtime.py             # AgentRuntime + RuntimeHook + RuntimeHookBase
+├── context.py             # ContextBlock + budgeted selection
+└── jobs.py                # BackgroundJobManager
+
+familiar_capabilities/     # ToolProvider adapters around legacy tools
+├── coding.py, mcp.py
+├── camera.py, mobility.py, voice.py, tom.py, memory.py
+
+familiar_neighbor/         # companion profile boundary
+├── app.py (NeighborProfile)
+├── prompts.py
+└── mind/                  # compatibility re-exports of cognition modules
+```
+
+Hooks register with `AgentRuntime` and participate in five lifecycle points:
+`before_turn`, `build_context`, `after_model_result` (may rewrite the model output),
+`after_tool_result` (fires for success / timeout / exception), and `after_turn`. See
+`docs/adr/0003-runtime-hook-protocol.md` for the rationale.
+
 ## Future: Chronos-Neighbor Model
 
 The long-term vision is to replace the transcript-centric LLM core with event/state-centric temporal relational models. See `docs/future-model.md` for the staged transition plan.
