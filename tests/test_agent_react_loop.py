@@ -418,6 +418,41 @@ async def test_run_tool_results_added_to_messages():
 
 
 @pytest.mark.asyncio
+async def test_run_tool_timeout_is_returned_as_tool_result():
+    """A slow tool call is converted into a textual timeout result."""
+    agent = _make_agent()
+    tc = ToolCall(id="tc1", name="remember", input={"content": "slow"})
+    turn1 = TurnResult(stop_reason="tool_use", text="", tool_calls=[tc])
+    turn2 = TurnResult(stop_reason="end_turn", text="Done.", tool_calls=[])
+    agent.backend.stream_turn = AsyncMock(side_effect=[(turn1, None), (turn2, "Done.")])
+
+    async def _slow_execute(self, name, tool_input):  # noqa: ARG001
+        await asyncio.sleep(0.2)
+        return "late result", None
+
+    patches = dict(_HEAVY_PATCHES)
+    patches["familiar_agent.agent.EmbodiedAgent._execute_tool"] = _slow_execute
+    patches["familiar_agent.agent.EmbodiedAgent._tool_timeout_seconds"] = MagicMock(
+        return_value=0.01
+    )
+
+    ps = [patch(t, n) for t, n in patches.items()]
+    for p in ps:
+        p.start()
+    try:
+        result = await agent.run("remember slowly")
+    finally:
+        for p in ps:
+            p.stop()
+
+    assert result == "Done."
+    collected = agent.backend.make_tool_results.call_args.args[1]
+    assert collected[0][0].startswith("Tool timeout: remember exceeded")
+    assert agent._last_tool_error == collected[0][0]
+    assert agent._tool_failure_streak == 1
+
+
+@pytest.mark.asyncio
 async def test_run_passes_latest_pre_see_action_into_scene_update():
     """The last embodied action before see() conditions the scene update."""
     from familiar_agent.agent import EmbodiedAgent
