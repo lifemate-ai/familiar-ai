@@ -12,9 +12,11 @@ from .base import (
     ObservationRecord,
     RecallResult,
 )
+from .sqlite_store import SQLiteMemoryStore
 
 __all__ = [
     "MemoryStore",
     "ObservationRecord",
     "RecallResult",
+    "SQLiteMemoryStore",
 ]
