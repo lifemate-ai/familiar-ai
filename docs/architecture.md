@@ -11,16 +11,27 @@ Neighbor-like behavior emerges not from response quality alone, but from:
 
 ## Layer Mapping
 
-### Layer A: Event Ingestion → `event_bus.py`
+### Layer A: Event Ingestion → `familiar_runtime.events` + legacy `event_bus.py`
 
-All signals flowing through the system are normalized to a canonical `Event` dataclass:
+Runtime/task execution now uses `familiar_runtime.events.AgentEvent`:
+
+```
+AgentEvent(id, run_id, task_id, turn_id, source, type, payload, timestamp,
+           salience, confidence, parent_id)
+```
+
+This supports JSONL logging, SQLite persistence, subscriptions, and replay for task/runtime
+activity.
+
+Neighbor intelligence still has the legacy canonical `Event` shape available in
+`src/familiar_agent/event_bus.py`:
 
 ```
 Event(source, entity, payload, timestamp, salience, confidence, affect)
 ```
 
 Sources: text, vision, audio, bio, device, system, memory, action.
-JSONL append-only logging with replay support.
+JSONL append-only logging with replay support remains available.
 
 ### Layer B: State Tracker → `self_state.py` + `scene.py` + `prediction.py`
 

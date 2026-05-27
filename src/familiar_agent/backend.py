@@ -10,8 +10,10 @@ import re
 import shlex
 import uuid
 from collections.abc import Callable
-from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any, cast
+
+from familiar_runtime.models import ModelTurnResult as TurnResult
+from familiar_runtime.models import ToolCall
 
 if TYPE_CHECKING:
     from .config import AgentConfig
@@ -103,22 +105,6 @@ def _parse_tool_calls_from_text(text: str) -> list[ToolCall]:
         except (json.JSONDecodeError, KeyError):
             logger.warning("Failed to parse tool_call: %s", match.group(1))
     return tool_calls
-
-
-@dataclass
-class ToolCall:
-    id: str
-    name: str
-    input: dict
-
-
-@dataclass
-class TurnResult:
-    stop_reason: str  # "end_turn" | "tool_use"
-    text: str
-    tool_calls: list[ToolCall] = field(default_factory=list)
-    input_tokens: int = 0
-    output_tokens: int = 0
 
 
 class AnthropicBackend:
