@@ -29,7 +29,9 @@ interfaces. `familiar_neighbor` will register companion prompts, hooks, and embo
 top of that runtime. `familiar_agent` will keep existing imports and entry points working during the
 migration.
 
-The first PR will add documentation and characterization tests only.
+The first PR will add documentation, characterization tests, the initial generic runtime package,
+ToolRegistry-backed routing, durable event/task stores, and a minimal task-mode CLI. Larger neighbor
+cognition moves will remain behind compatibility boundaries.
 
 ## Consequences
 

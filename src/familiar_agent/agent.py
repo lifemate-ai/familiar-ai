@@ -55,6 +55,8 @@ from .tools.stt import STTTool
 from .tools.tts import TTSTool
 from ._i18n import _t
 from .mcp_client import MCPClientManager, _resolve_config_path
+from familiar_runtime.tools.legacy import LegacyToolProvider
+from familiar_runtime.tools.registry import ToolRegistry
 
 logger = logging.getLogger(__name__)
 
@@ -101,9 +103,15 @@ _TOOL_TIMEOUTS: dict[str, float] = {
     "recall": 20.0,
     "tom": 20.0,
     "read_file": 30.0,
+    "write_file": 30.0,
     "edit_file": 30.0,
+    "multi_edit_file": 30.0,
     "glob": 20.0,
     "grep": 20.0,
+    "git_status": 20.0,
+    "git_diff": 30.0,
+    "git_apply_patch": 30.0,
+    "run_tests": 120.0,
     "bash": 45.0,
 }
 _BRIEF_REPLY_MAX_ITERATIONS = 2
@@ -315,12 +323,24 @@ SYSTEM_PROMPT = """
     (tools
       (tool :id read_file :sig "read_file(path, offset?, limit?)"
         :note "Always call before edit_file. Returns file with line numbers.")
+      (tool :id write_file :sig "write_file(path, content)"
+        :note "Write a complete file. Prefer edit_file for small changes.")
       (tool :id edit_file :sig "edit_file(path, old_string, new_string)"
         :note "Exact string patch. old_string must be unique in file.")
+      (tool :id multi_edit_file :sig "multi_edit_file(path, edits[])"
+        :note "Atomic multiple exact string replacements in one file.")
       (tool :id glob      :sig "glob(pattern, path?)"
         :note "Find files by glob pattern e.g. **/*.py")
       (tool :id grep      :sig "grep(pattern, path?, glob?, output_mode?)"
         :note "Search file contents by regex.")
+      (tool :id git_status :sig "git_status()"
+        :note "Show concise working tree state.")
+      (tool :id git_diff :sig "git_diff(path?)"
+        :note "Show working tree diff.")
+      (tool :id git_apply_patch :sig "git_apply_patch(patch)"
+        :note "Apply a unified diff patch.")
+      (tool :id run_tests :sig "run_tests(command?, timeout?)"
+        :note "Run tests. Only available when CODING_BASH=true.")
       (tool :id bash      :sig "bash(command, timeout?)"
         :note "Shell command. Only available when CODING_BASH=true."))
 
@@ -1017,54 +1037,104 @@ class EmbodiedAgent:
 
     @property
     def _all_tool_defs(self) -> list[dict]:
-        defs = []
-        if self._camera:
-            defs.extend(self._camera.get_tool_definitions())
-        if self._mobility:
-            defs.extend(self._mobility.get_tool_definitions())
-        if self._tts:
-            defs.extend(self._tts.get_tool_definitions())
-        defs.extend(self._memory_tool.get_tool_definitions())
-        defs.extend(self._tom_tool.get_tool_definitions())
-        defs.extend(self._coding.get_tool_definitions())
-        if self._mcp:
-            defs.extend(self._mcp.get_tool_definitions())
-        return defs
+        return self._build_tool_registry().tool_defs()
 
-    async def _execute_tool(self, name: str, tool_input: dict) -> tuple[str, str | None]:
-        """Route tool call to the right handler. Returns (text, image_b64_or_None)."""
-        camera_tools = {"see", "look"}
-        mobility_tools = {"walk"}
-        tts_tools = {"say"}
-        memory_tools = {"remember", "recall"}
-        coding_tools = {"read_file", "edit_file", "glob", "grep", "bash"}
+    def _build_tool_registry(self) -> ToolRegistry:
+        """Build the per-turn tool registry from configured providers."""
+        registry = ToolRegistry()
 
-        if name in camera_tools and self._camera:
-            result = await self._camera.call(name, tool_input)
+        def _record_embodied_action(name: str, tool_input: dict[str, Any]) -> None:
             if name == "look":
                 self._exploration.record_move(
                     tool_input.get("direction", "center"),
                     tool_input.get("degrees", 30),
                 )
-            return result
-        elif name in mobility_tools and self._mobility:
-            return await self._mobility.call(name, tool_input)
-        elif name in tts_tools and self._tts:
-            return await self._tts.call(name, tool_input)
-        elif name in memory_tools:
-            return await self._memory_tool.call(name, tool_input)
-        elif name == "tom":
-            return await self._tom_tool.call(name, tool_input)
-        elif name in coding_tools:
-            return await self._coding.call(name, tool_input)
-        elif self._mcp:
-            # Wait for background MCP init if still running
+
+        if self._camera:
+            registry.register(
+                LegacyToolProvider(
+                    self._camera,
+                    names={"see", "look"},
+                    category="embodiment",
+                    tags={"neighbor"},
+                    before_call=_record_embodied_action,
+                )
+            )
+        if self._mobility:
+            registry.register(
+                LegacyToolProvider(
+                    self._mobility,
+                    names={"walk"},
+                    category="embodiment",
+                    tags={"neighbor"},
+                )
+            )
+        if self._tts:
+            registry.register(
+                LegacyToolProvider(
+                    self._tts,
+                    names={"say"},
+                    category="voice",
+                    tags={"neighbor"},
+                )
+            )
+        registry.register(
+            LegacyToolProvider(
+                self._memory_tool,
+                names={"remember", "recall"},
+                category="memory",
+                tags={"neighbor", "task"},
+            )
+        )
+        registry.register(
+            LegacyToolProvider(
+                self._tom_tool,
+                names={"tom"},
+                category="social",
+                tags={"neighbor"},
+            )
+        )
+        registry.register(
+            LegacyToolProvider(
+                self._coding,
+                names={
+                    "read_file",
+                    "write_file",
+                    "edit_file",
+                    "multi_edit_file",
+                    "glob",
+                    "grep",
+                    "git_status",
+                    "git_diff",
+                    "git_apply_patch",
+                    "run_tests",
+                    "bash",
+                },
+                category="coding",
+                tags={"task", "coding"},
+            )
+        )
+        if self._mcp:
+            provider = LegacyToolProvider(
+                self._mcp,
+                category="mcp",
+                tags={"neighbor", "task"},
+            )
+            registry.register(provider)
+            registry.register_fallback(provider)
+        return registry
+
+    async def _execute_tool(self, name: str, tool_input: dict) -> tuple[str, str | None]:
+        """Route tool call to the right handler. Returns (text, image_b64_or_None)."""
+        registry = self._build_tool_registry()
+        if self._mcp and not registry.has_tool(name):
             mcp_task = getattr(self, "_mcp_start_task", None)
             if mcp_task and not mcp_task.done():
                 await mcp_task
-            return await self._mcp.call(name, tool_input)
-        else:
-            return f"Tool '{name}' not available (check configuration).", None
+                registry = self._build_tool_registry()
+
+        result = await registry.call(name, tool_input)
+        return result.text, result.image_b64
 
     @staticmethod
     def _tool_timeout_seconds(name: str) -> float:

@@ -75,13 +75,17 @@ Task mode should eventually provide:
 - Do not move cognitive modules into the generic runtime.
 - Keep Python as the main implementation until measurements justify a sidecar.
 
-## First PR Boundary
+## Current PR Boundary
 
-The first PR is intentionally characterization-only:
+This PR keeps the extraction conservative but makes the first runtime layer real:
 
 - Add architecture docs and ADRs.
 - Add tests that pin current ReAct and coding-tool behavior.
-- Do not move source modules.
-- Do not add new runtime packages yet.
+- Add `familiar_runtime` protocols, ToolRegistry, event/task stores, context blocks, job manager,
+  and a provider-neutral ReAct loop.
+- Add `familiar_capabilities` adapters for coding and MCP.
+- Route existing `EmbodiedAgent` tool calls through ToolRegistry while preserving public behavior.
+- Add `familiar task ...` as the first non-embodied task-mode entry point.
 
-This gives later extraction PRs a stable behavioral fence.
+Large neighbor cognition module moves remain out of scope for this PR; compatibility and behavior
+preservation are the guardrails.

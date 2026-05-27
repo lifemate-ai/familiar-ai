@@ -21,7 +21,9 @@ def test_bash_definition_is_hidden_unless_enabled(tmp_path: Path) -> None:
     }
 
     assert "bash" not in disabled_names
+    assert "run_tests" not in disabled_names
     assert "bash" in enabled_names
+    assert "run_tests" in enabled_names
 
 
 @pytest.mark.asyncio
@@ -55,6 +57,39 @@ async def test_edit_file_rejects_non_unique_old_string(tmp_path: Path) -> None:
 
 
 @pytest.mark.asyncio
+async def test_write_file_creates_parent_directories(tmp_path: Path) -> None:
+    text, image = await _tool(tmp_path).call(
+        "write_file",
+        {"path": "nested/sample.txt", "content": "hello\n"},
+    )
+
+    assert image is None
+    assert "Wrote nested/sample.txt" in text
+    assert (tmp_path / "nested" / "sample.txt").read_text(encoding="utf-8") == "hello\n"
+
+
+@pytest.mark.asyncio
+async def test_multi_edit_file_applies_replacements_atomically(tmp_path: Path) -> None:
+    target = tmp_path / "sample.txt"
+    target.write_text("alpha\nbeta\n", encoding="utf-8")
+
+    text, image = await _tool(tmp_path).call(
+        "multi_edit_file",
+        {
+            "path": "sample.txt",
+            "edits": [
+                {"old_string": "alpha", "new_string": "one"},
+                {"old_string": "missing", "new_string": "two"},
+            ],
+        },
+    )
+
+    assert image is None
+    assert "old_string not found" in text
+    assert target.read_text(encoding="utf-8") == "alpha\nbeta\n"
+
+
+@pytest.mark.asyncio
 async def test_grep_content_mode_caps_results_at_500_lines(tmp_path: Path) -> None:
     target = tmp_path / "many.txt"
     target.write_text("\n".join("hit" for _ in range(501)) + "\n", encoding="utf-8")
@@ -69,3 +104,21 @@ async def test_grep_content_mode_caps_results_at_500_lines(tmp_path: Path) -> No
     assert len(lines) == 500
     assert lines[0].endswith(":1: hit")
     assert lines[-1].endswith(":500: hit")
+
+
+@pytest.mark.asyncio
+async def test_git_status_uses_workdir(tmp_path: Path) -> None:
+    await _tool(tmp_path)._run_process(["git", "init"], timeout=20)
+
+    text, image = await _tool(tmp_path).call("git_status", {})
+
+    assert image is None
+    assert "##" in text
+
+
+@pytest.mark.asyncio
+async def test_run_tests_requires_bash_enabled(tmp_path: Path) -> None:
+    text, image = await _tool(tmp_path).call("run_tests", {"command": "echo ok"})
+
+    assert image is None
+    assert "CODING_BASH=true" in text

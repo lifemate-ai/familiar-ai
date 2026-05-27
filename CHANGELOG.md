@@ -28,6 +28,7 @@ This project adheres to [Semantic Versioning](https://semver.org/).
 - Lightweight adaptive confidence updates for semantic facts and behavior policies, including revision history for experience-driven value shifts
 - Lightweight layered self continuity with inertial proto-self updates, recent intention-result traces, and persistent active concerns
 - Freshness-aware MCP interoception ingestion, persisted heartbeat carryover state, SQLite-backed relationship storage with legacy JSON import, and sample autonomy config files for drives / schedule / operator wrappers
+- Generic runtime substrate foundations: model/tool protocols, ToolRegistry, runtime event/task stores, a provider-neutral ReAct loop, neighbor profile boundary, and a non-embodied `familiar task ...` entry point
 
 ### Changed
 - Lint and test workflows now run for both `develop` and `main`, matching the new default-branch strategy
@@ -46,6 +47,7 @@ This project adheres to [Semantic Versioning](https://semver.org/).
 - Camera settings now support optional `CAMERA_PTZ_*` overrides, with fallback to the existing `CAMERA_*` values and RTSP URL credentials when stream and PTZ endpoints differ
 - Agent replies no longer wait on post-response memory/self-model updates, and TAPE planning is skipped when no separate utility backend is configured
 - System prompts now surface at most one active concern and one recent misaligned intention trace, while post-response updates carry those states forward without adding hot-path LLM calls
+- Embodied tool routing now goes through the generic ToolRegistry while preserving existing camera, voice, memory, coding, and MCP behavior
 
 ### Fixed
 - `scripts/new_migration.sh` now accepts Windows-style `--dir` paths in Git Bash so cross-platform CI migration tests pass on `windows-latest`
