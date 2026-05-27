@@ -1,20 +1,21 @@
-"""Compatibility re-exports for neighbor cognition modules.
+"""Neighbor cognition modules.
 
-The physical move of cognition modules is intentionally deferred; this package marks the intended
-dependency direction while `familiar_agent.*` imports remain stable.
+The classes here used to live under ``familiar_agent.<module>``; they were
+re-located in PR-followup #2.  Compatibility shims at
+``src/familiar_agent/<module>.py`` keep the old import paths working.
 """
 
-from familiar_agent.attention_schema import AttentionSchema
-from familiar_agent.concern_engine import ConcernEngine
-from familiar_agent.default_mode import DefaultModeProcessor
-from familiar_agent.desires import DesireSystem
-from familiar_agent.meta_monitor import MetaMonitor
-from familiar_agent.prediction import PredictionEngine
-from familiar_agent.relationship import RelationshipTracker
-from familiar_agent.scene import SceneTracker
-from familiar_agent.self_narrative import SelfNarrative
-from familiar_agent.self_state import SelfState
-from familiar_agent.workspace import GlobalWorkspace
+from .attention_schema import AttentionSchema
+from .concern_engine import ConcernEngine
+from .default_mode import DefaultModeProcessor
+from .desires import DesireSystem
+from .meta_monitor import MetaMonitor
+from .prediction import PredictionEngine
+from .relationship import RelationshipTracker
+from .scene import SceneTracker
+from .self_narrative import SelfNarrative
+from .self_state import SelfState
+from .workspace import GlobalWorkspace
 
 __all__ = [
     "AttentionSchema",
