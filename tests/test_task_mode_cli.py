@@ -52,7 +52,10 @@ async def test_run_task_command_creates_durable_task_record(tmp_path, monkeypatc
     from familiar_agent import backend as backend_mod
     from familiar_runtime.tasks import SQLiteTaskStore, TaskStatus
 
+    # Path.home() consults HOME on POSIX and USERPROFILE on Windows, so set
+    # both to keep this test green on every CI runner.
     monkeypatch.setenv("HOME", str(tmp_path))
+    monkeypatch.setenv("USERPROFILE", str(tmp_path))
     monkeypatch.setenv("PLATFORM", "cli")
     monkeypatch.setattr(backend_mod, "create_backend", lambda config: _TaskBackend())
 
