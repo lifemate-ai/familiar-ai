@@ -5,10 +5,10 @@ from __future__ import annotations
 import time
 
 
-from familiar_agent.agent import SYSTEM_PROMPT, MAX_ITERATIONS, _interoception
+from familiar_agent.agent import MAX_ITERATIONS, _interoception
+from familiar_neighbor.prompts import assemble_neighbor_system_prompt
 
-
-FORMATTED = SYSTEM_PROMPT.format(max_steps=MAX_ITERATIONS)
+FORMATTED = assemble_neighbor_system_prompt(max_steps=MAX_ITERATIONS)
 
 
 # ── SYSTEM_PROMPT: S-expression forms present ─────────────────────────────────
