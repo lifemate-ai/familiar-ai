@@ -9,12 +9,22 @@ All operations are synchronous and lightweight (no LLM calls).
 
 from __future__ import annotations
 
+from dataclasses import dataclass, field
 from collections import Counter, deque
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
     from .self_narrative import SelfNarrative
+    from .social_policy import SocialPolicyDecision
     from .workspace import Coalition
+
+
+@dataclass(slots=True)
+class MetaGateDecision:
+    allowed: bool
+    needs_repair: bool
+    reasons: list[str] = field(default_factory=list)
+    repaired_response: str | None = None
 
 
 class MetaMonitor:
@@ -147,3 +157,112 @@ class MetaMonitor:
         if not self._steps:
             return None
         return Counter(s["source"] for s in self._steps).most_common(1)[0][0]
+
+    # ── Response quality gate ───────────────────────────────────────────────
+
+    @staticmethod
+    def _contains_validation(text: str) -> bool:
+        lower = text.lower()
+        return any(
+            phrase in lower
+            for phrase in (
+                "それはつら",
+                "しんど",
+                "大変",
+                "hurt",
+                "that sounds",
+                "i'm sorry",
+                "それは痛かった",
+                "つらかったよね",
+            )
+        )
+
+    @staticmethod
+    def _contains_advice(text: str) -> bool:
+        lower = text.lower()
+        return any(
+            phrase in lower
+            for phrase in (
+                "should",
+                "したほうが",
+                "するといい",
+                "try ",
+                "まず",
+                "next",
+                "you can",
+                "おすすめ",
+            )
+        )
+
+    @staticmethod
+    def _contains_raw_interoception(text: str) -> bool:
+        lower = text.lower()
+        return any(
+            token in lower
+            for token in ("cpu", "memory=", "heart rate", "bpm", "arousal=", "fatigue=", "69%")
+        )
+
+    @staticmethod
+    def _looks_boundary_overreach(text: str) -> bool:
+        lower = text.lower()
+        return any(
+            phrase in lower
+            for phrase in (
+                "you must tell me",
+                "教えて当然",
+                "今すぐ全部話して",
+                "i know exactly how you feel",
+            )
+        )
+
+    def gate_response(
+        self,
+        *,
+        user_text: str,
+        candidate_response: str,
+        social_policy: SocialPolicyDecision | None = None,
+        last_error: str | None = None,
+    ) -> MetaGateDecision:
+        reasons: list[str] = []
+        repaired_response = candidate_response
+
+        distress = any(
+            token in user_text.lower() for token in ("hurt", "つら", "しんど", "疲れ", "傷つ")
+        )
+        repair_context = any(token in user_text.lower() for token in ("hurt", "傷つ", "前の返事"))
+
+        if distress and social_policy is not None and social_policy.avoid_problem_solving:
+            if self._contains_advice(candidate_response) and not self._contains_validation(
+                candidate_response
+            ):
+                reasons.append("validation-before-advice violation")
+                repaired_response = (
+                    "それはほんまにしんどかったよね。無理に解決へ急がんでええ。 "
+                    + candidate_response
+                )
+
+        if repair_context and social_policy is not None and social_policy.response_mode != "repair":
+            reasons.append("emotional mismatch after distress message")
+
+        if self._looks_boundary_overreach(candidate_response):
+            reasons.append("boundary overreach")
+
+        if self._contains_raw_interoception(candidate_response):
+            reasons.append("raw interoception leakage")
+            repaired_response = (
+                candidate_response.replace("CPU", "体の感じ")
+                .replace("heart rate", "鼓動の感じ")
+                .replace("bpm", "")
+            )
+
+        if last_error and "contradict" in last_error.lower():
+            reasons.append("contradiction risk")
+
+        needs_repair = bool(reasons)
+        allowed = not needs_repair or repaired_response != candidate_response
+        return MetaGateDecision(
+            allowed=allowed,
+            needs_repair=needs_repair,
+            reasons=reasons,
+            repaired_response=repaired_response,
+        )

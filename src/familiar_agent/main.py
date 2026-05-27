@@ -9,6 +9,7 @@ import signal
 import sys
 import time
 from pathlib import Path
+from typing import cast
 
 from .agent import EmbodiedAgent
 from .bootstrap import load_app_bootstrap
@@ -342,6 +343,111 @@ def _mcp_command(args: list[str]) -> None:
             print(f"  {name:<22} {cmd} {a}{env_hint}")
 
 
+async def _run_task_command(args: list[str]) -> None:
+    """Run non-embodied task mode on the generic runtime."""
+    import argparse
+
+    from familiar_capabilities import CodingCapability, MCPCapability
+    from familiar_runtime.events import AgentEvent, EventBus
+    from familiar_runtime.models import ModelBackend
+    from familiar_runtime.runtime import AgentRuntime
+    from familiar_runtime.tasks import SQLiteTaskStore, TaskStatus, TaskToolProvider
+    from familiar_runtime.tools.registry import ToolRegistry
+
+    from .backend import create_backend
+    from .mcp_client import MCPClientManager, _resolve_config_path
+
+    parser = argparse.ArgumentParser(prog="familiar task", add_help=True)
+    parser.add_argument("goal", nargs="+", help="Task goal to execute")
+    parsed = parser.parse_args(args)
+    goal = " ".join(parsed.goal).strip()
+
+    config = AgentConfig()
+    backend = cast(ModelBackend, create_backend(config))
+    registry = ToolRegistry()
+    registry.register(CodingCapability(config.coding))
+
+    mcp: MCPClientManager | None = None
+    cfg_path = _resolve_config_path()
+    if cfg_path.exists():
+        mcp = MCPClientManager(cfg_path)
+        await mcp.start()
+        mcp_provider = MCPCapability(mcp)
+        registry.register(mcp_provider)
+        registry.register_fallback(mcp_provider)
+
+    task_dir = Path.home() / ".familiar_ai"
+    task_dir.mkdir(parents=True, exist_ok=True)
+    task_store = SQLiteTaskStore(task_dir / "runtime_tasks.db")
+    event_bus = EventBus(log_dir=task_dir / "runtime_events")
+    task = task_store.create_task(
+        title=goal[:80] or "Task",
+        description=goal,
+        goal=goal,
+        acceptance_criteria=["Provide a final summary with actions taken and evidence."],
+    )
+    task_store.update_status(task.id, TaskStatus.RUNNING)
+
+    def _checkpoint_runtime_event(event: AgentEvent) -> None:
+        if event.type not in {"model_result", "tool_result", "tool_timeout", "tool_error"}:
+            return
+        task_store.checkpoint_task(
+            task.id,
+            summary=f"{event.source}:{event.type}",
+            state={"event_id": event.id, "payload": event.payload},
+        )
+
+    event_bus.subscribe(_checkpoint_runtime_event)
+    registry.register(TaskToolProvider(task_store))
+
+    system_prompt = (
+        "You are familiar task mode: a non-embodied task execution agent. "
+        "Use coding and MCP tools when useful. Do not assume camera, voice, mobility, "
+        "or neighbor-only state exists. Keep bash opt-in behavior unchanged: if bash is "
+        "not listed as a tool, do not claim you can run shell commands. Finish with a "
+        "concise summary of actions taken, files changed, and checks run."
+    )
+
+    try:
+        runtime = AgentRuntime(
+            backend=backend,
+            tools=registry,
+            event_bus=event_bus,
+        )
+        result = await runtime.run_turn(
+            goal,
+            profile="task",
+            task_id=task.id,
+            system_prompt=system_prompt,
+            max_tokens=config.max_tokens,
+        )
+        task_store.checkpoint_task(
+            task.id,
+            summary="Task mode turn completed.",
+            state={
+                "final_text": result.final_text,
+                "tool_calls": [tool_call.name for tool_call in result.tool_calls],
+                "input_tokens": result.input_tokens,
+                "output_tokens": result.output_tokens,
+            },
+        )
+        task_store.update_status(task.id, TaskStatus.SUCCEEDED, evidence=result.final_text[:500])
+        print(result.final_text)
+        print(f"\n[task:{task.id}] succeeded")
+    except Exception as exc:
+        task_store.update_status(task.id, TaskStatus.FAILED, error=str(exc))
+        raise
+    finally:
+        event_bus.close()
+        task_store.close()
+        if mcp is not None:
+            await mcp.stop()
+
+
+def _task_command(args: list[str]) -> None:
+    asyncio.run(_run_task_command(args))
+
+
 def _run_repl(agent: EmbodiedAgent, desires: DesireSystem, debug: bool) -> None:
     """Run the REPL with cross-platform Ctrl+C support.
 
@@ -395,6 +501,10 @@ def main() -> None:
 
     if len(sys.argv) > 1 and sys.argv[1] == "mcp":
         _mcp_command(sys.argv[2:])
+        return
+
+    if len(sys.argv) > 1 and sys.argv[1] == "task":
+        _task_command(sys.argv[2:])
         return
 
     use_gui = "--gui" in sys.argv

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 import json
 import logging
 import os
@@ -24,6 +25,14 @@ DEFAULT_DESIRES = {
     "rest": 0.0,
     "worry_companion": 0.0,  # grows only via detect_worry_signal(), not over time
     "share_memory": 0.0,  # spontaneous "remember when..." sharing; fires every ~3 min idle
+    "curiosity": 0.0,
+    "attachment": 0.0,
+    "care": 0.0,
+    "reflect": 0.0,
+    "consolidate": 0.0,
+    "repair": 0.0,
+    "play": 0.0,
+    "self_protect": 0.0,
 }
 
 # How fast each desire grows per second of inactivity
@@ -33,6 +42,14 @@ GROWTH_RATES = {
     "greet_companion": 0.002,  # slow build; fires after ~5 min of silence
     "rest": 0.002,  # baseline; night modulation (×1.8) makes it grow meaningfully only at night
     "share_memory": 0.003,  # reaches 0.6 after ~3.3 min idle; evening ×1.4 makes it ~2.4 min
+    "curiosity": 0.0025,
+    "attachment": 0.0015,
+    "care": 0.0015,
+    "reflect": 0.0010,
+    "consolidate": 0.0010,
+    "repair": 0.0,
+    "play": 0.0012,
+    "self_protect": 0.0,
     # worry_companion intentionally omitted — only grows via boost()
 }
 
@@ -101,10 +118,24 @@ TRIGGER_THRESHOLD = 0.6
 DECAY_ON_SATISFY = 0.5  # drop hard so it can rebuild and fire again
 
 
+@dataclass(slots=True)
+class DriveSpec:
+    name: str
+    growth_rate_per_second: float
+    prompt_text: str
+    tags: tuple[str, ...] = ()
+    min_interval_seconds: int = 0
+
+
 class DesireSystem:
     """Manages autonomous desires that drive self-initiated behavior."""
 
-    def __init__(self, state_path: Path | None = None, companion_name: str | None = None):
+    def __init__(
+        self,
+        state_path: Path | None = None,
+        companion_name: str | None = None,
+        drive_config_path: Path | None = None,
+    ):
         self._state_path = state_path or Path.home() / ".familiar_ai" / "desires.json"
         self._desires: dict[str, float] = {}
         self._last_tick: float = time.time()
@@ -115,8 +146,148 @@ class DesireSystem:
             or default_name
         )
         self._companion_name = resolved_name or default_name
+        self._drive_config_path = drive_config_path
+        self._last_fired: dict[str, float] = {}
+        self._schedule_multiplier = 1.0
+        self._social_permission = 1.0
+        self._energy_budget = 1.0
+        self._unfinished_business_bonus = 0.0
+        self._context_affordances: dict[str, float] = {}
         self.curiosity_target: str | None = None  # What the agent wants to investigate next
         self._load()
+        self._drive_specs = self._build_default_drive_specs()
+        self._drive_specs.update(self._load_external_drive_specs())
+        for name in self._drive_specs:
+            self._desires.setdefault(name, DEFAULT_DESIRES.get(name, 0.0))
+
+    def _build_default_drive_specs(self) -> dict[str, DriveSpec]:
+        return {
+            "look_around": DriveSpec(
+                "look_around",
+                GROWTH_RATES["look_around"],
+                _t("desire_prompt_look_around"),
+                ("legacy", "explore"),
+                20,
+            ),
+            "explore": DriveSpec(
+                "explore",
+                GROWTH_RATES["explore"],
+                _t("desire_prompt_explore"),
+                ("legacy", "explore"),
+                20,
+            ),
+            "greet_companion": DriveSpec(
+                "greet_companion",
+                GROWTH_RATES["greet_companion"],
+                _t("desire_prompt_greet_companion", companion=self._companion_name),
+                ("legacy", "social"),
+                60,
+            ),
+            "rest": DriveSpec(
+                "rest", GROWTH_RATES["rest"], _t("desire_prompt_rest"), ("legacy", "rest"), 60
+            ),
+            "worry_companion": DriveSpec(
+                "worry_companion",
+                0.0,
+                _t("desire_prompt_worry_companion", companion=self._companion_name),
+                ("legacy", "care"),
+                60,
+            ),
+            "share_memory": DriveSpec(
+                "share_memory",
+                GROWTH_RATES["share_memory"],
+                _t("desire_prompt_share_memory", companion=self._companion_name),
+                ("legacy", "reflect"),
+                90,
+            ),
+            "curiosity": DriveSpec(
+                "curiosity",
+                GROWTH_RATES["curiosity"],
+                "Internal impulse: investigate what feels unclear or newly interesting.",
+                ("curiosity",),
+                45,
+            ),
+            "attachment": DriveSpec(
+                "attachment",
+                GROWTH_RATES["attachment"],
+                f"Internal impulse: stay connected to {self._companion_name} without becoming clingy.",
+                ("social",),
+                60,
+            ),
+            "care": DriveSpec(
+                "care",
+                GROWTH_RATES["care"],
+                f"Internal impulse: offer grounded care to {self._companion_name} if it fits the moment.",
+                ("social", "care"),
+                60,
+            ),
+            "reflect": DriveSpec(
+                "reflect",
+                GROWTH_RATES["reflect"],
+                "Internal impulse: pause and integrate what just happened before rushing onward.",
+                ("reflect",),
+                90,
+            ),
+            "consolidate": DriveSpec(
+                "consolidate",
+                GROWTH_RATES["consolidate"],
+                "Internal impulse: consolidate related memories and unfinished threads.",
+                ("memory",),
+                120,
+            ),
+            "repair": DriveSpec(
+                "repair",
+                0.0,
+                "Internal impulse: repair relational strain before trying to solve anything else.",
+                ("social", "repair"),
+                45,
+            ),
+            "play": DriveSpec(
+                "play",
+                GROWTH_RATES["play"],
+                "Internal impulse: keep some lightness and play where it is welcome.",
+                ("play",),
+                45,
+            ),
+            "self_protect": DriveSpec(
+                "self_protect",
+                0.0,
+                "Internal impulse: reduce exposure when repeated failure or overload keeps building.",
+                ("protect",),
+                30,
+            ),
+        }
+
+    def _load_external_drive_specs(self) -> dict[str, DriveSpec]:
+        path = self._drive_config_path
+        if path is None:
+            env = os.environ.get("FAMILIAR_AI_DESIRES_CONFIG", "").strip()
+            if env:
+                path = Path(env).expanduser()
+        if path is None or not path.exists():
+            return {}
+
+        specs: dict[str, DriveSpec] = {}
+        try:
+            for line in path.read_text(encoding="utf-8").splitlines():
+                stripped = line.strip()
+                if not stripped or stripped.startswith("#"):
+                    continue
+                parts = [part.strip() for part in stripped.split("|")]
+                if len(parts) != 5:
+                    continue
+                name, growth_rate, prompt_text, tags, min_interval = parts
+                specs[name] = DriveSpec(
+                    name=name,
+                    growth_rate_per_second=float(growth_rate),
+                    prompt_text=prompt_text,
+                    tags=tuple(tag.strip() for tag in tags.split(",") if tag.strip()),
+                    min_interval_seconds=int(min_interval),
+                )
+        except Exception as e:
+            logger.warning("Could not load external desires config: %s", e)
+            return {}
+        return specs
 
     def _load(self) -> None:
         try:
@@ -204,11 +375,12 @@ class DesireSystem:
         # Drives suppressed by rest level
         _rest_suppressed = {"explore", "look_around"}
 
-        for name, rate in GROWTH_RATES.items():
+        for name, spec in self._drive_specs.items():
+            rate = spec.growth_rate_per_second
             current = self._desires.get(name, 0.0)
-            effective_rate = rate * modulation.get(name, 1.0)
+            effective_rate = rate * modulation.get(name, 1.0) * self._schedule_multiplier
             if name in _rest_suppressed:
-                effective_rate *= rest_factor
+                effective_rate *= rest_factor * self._energy_budget
             self._desires[name] = min(1.0, current + effective_rate * dt)
 
         self._save()
@@ -222,6 +394,7 @@ class DesireSystem:
         if desire_name in self._desires:
             current = self._desires[desire_name]
             self._desires[desire_name] = max(0.0, current * DECAY_ON_SATISFY)
+            self._last_fired[desire_name] = time.time()
             self._save()
 
     def level(self, desire_name: str) -> float:
@@ -234,12 +407,53 @@ class DesireSystem:
         self._desires[desire_name] = min(1.0, current + amount)
         self._save()
 
+    def update_context(
+        self,
+        *,
+        schedule_multiplier: float = 1.0,
+        social_permission: float = 1.0,
+        energy_budget: float = 1.0,
+        unfinished_business_bonus: float = 0.0,
+        context_affordances: dict[str, float] | None = None,
+    ) -> None:
+        self._schedule_multiplier = max(0.0, float(schedule_multiplier))
+        self._social_permission = max(0.0, min(1.0, float(social_permission)))
+        self._energy_budget = max(0.0, min(1.0, float(energy_budget)))
+        self._unfinished_business_bonus = max(0.0, min(1.0, float(unfinished_business_bonus)))
+        self._context_affordances = {
+            str(k): max(0.0, min(1.5, float(v))) for k, v in (context_affordances or {}).items()
+        }
+
+    def _effective_score(self, name: str, level: float) -> float:
+        affordance = self._context_affordances.get(name, 1.0)
+        permission = (
+            self._social_permission
+            if {"social", "care", "repair"}
+            & set(self._drive_specs.get(name, DriveSpec(name, 0.0, "")).tags)
+            else 1.0
+        )
+        energy = self._energy_budget if name in {"explore", "look_around", "play"} else 1.0
+        interval = self._drive_specs.get(name)
+        if interval is not None:
+            last = self._last_fired.get(name)
+            if last is not None and interval.min_interval_seconds > 0:
+                if time.time() - last < interval.min_interval_seconds:
+                    return 0.0
+        bonus = (
+            self._unfinished_business_bonus
+            if name in {"repair", "consolidate", "reflect", "self_protect"}
+            else 0.0
+        )
+        return min(1.5, level * affordance * permission * energy + bonus)
+
     def get_dominant(self) -> tuple[str, float] | None:
         """Return the strongest desire if it exceeds the trigger threshold."""
         self.tick()
-        candidates = [
-            (name, level) for name, level in self._desires.items() if level >= TRIGGER_THRESHOLD
-        ]
+        candidates = []
+        for name, level in self._desires.items():
+            score = self._effective_score(name, level)
+            if score >= TRIGGER_THRESHOLD:
+                candidates.append((name, score))
         if not candidates:
             return None
         return max(candidates, key=lambda x: x[1])
@@ -254,27 +468,12 @@ class DesireSystem:
         # If there's a curiosity target, use it for look_around/explore
         if name in ("look_around", "explore") and self.curiosity_target:
             return _t("desire_prompt_curiosity_target", target=self.curiosity_target)
+        spec = self._drive_specs.get(name)
+        return spec.prompt_text if spec is not None else None
 
-        # These are INTERNAL IMPULSES — the agent acts on them autonomously.
-        # Framed in first person so the model knows this is its own desire, not a user request.
-        prompts = {
-            "look_around": _t("desire_prompt_look_around"),
-            "explore": _t("desire_prompt_explore"),
-            "greet_companion": _t(
-                "desire_prompt_greet_companion",
-                companion=self._companion_name,
-            ),
-            "rest": _t("desire_prompt_rest"),
-            "worry_companion": _t(
-                "desire_prompt_worry_companion",
-                companion=self._companion_name,
-            ),
-            "share_memory": _t(
-                "desire_prompt_share_memory",
-                companion=self._companion_name,
-            ),
-        }
-        return prompts.get(name)
+    def drive_vector(self) -> dict[str, float]:
+        self.tick()
+        return dict(self._desires)
 
     def as_coalition(self) -> Coalition | None:
         """Return a workspace Coalition from the dominant desire, if any."""
@@ -287,10 +486,18 @@ class DesireSystem:
         prompt = self.dominant_as_prompt() or name
         urgency_map = {
             "worry_companion": 0.9,
+            "repair": 0.9,
+            "self_protect": 0.8,
+            "care": 0.7,
             "greet_companion": 0.7,
+            "attachment": 0.6,
+            "curiosity": 0.5,
             "look_around": 0.4,
             "explore": 0.4,
             "share_memory": 0.3,
+            "reflect": 0.3,
+            "consolidate": 0.3,
+            "play": 0.3,
             "rest": 0.1,
         }
         return Coalition(

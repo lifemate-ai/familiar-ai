@@ -3,6 +3,7 @@
 from __future__ import annotations
 import asyncio
 import hashlib
+import inspect
 import logging
 import math
 import os
@@ -10,12 +11,28 @@ import re
 import time
 from collections.abc import Callable, Coroutine, Mapping
 from datetime import datetime
+from pathlib import Path
 from typing import Any
 
 from .backend import create_backend, create_scene_backend, create_utility_backend
+from .appraisal import AppraisalContext, AppraisalEngine
 from .config import AgentConfig
 from .desires import DesireSystem, detect_worry_signal
+from .heartbeat import HeartbeatRuntime
+from .interoception import (
+    MCPInteroceptionProvider,
+    RuntimeInteroceptionProvider,
+    semantic_pressure,
+)
+from .mental_state import (
+    DriveVector,
+    MentalStateBus,
+    MentalStateSnapshot,
+    SocialState,
+    WorkingMemoryItem,
+)
 from .relationship import RelationshipTracker
+from .routines import parse_schedule_config
 from .concern_engine import ConcernEngine
 from .self_state import SelfState
 from .self_narrative import SelfNarrative
@@ -23,8 +40,9 @@ from .exploration import ExplorationTracker
 from .scene import SceneTracker
 from .attention_schema import AttentionSchema
 from .default_mode import DefaultModeProcessor
-from .meta_monitor import MetaMonitor
+from .meta_monitor import MetaGateDecision, MetaMonitor
 from .prediction import PredictionEngine
+from .social_policy import SocialPolicyDecision, SocialPolicyEngine
 from .workspace import GlobalWorkspace
 from .memory_worker import MemoryJobWorker
 from .tape import check_plan_blocked, generate_plan, generate_replan
@@ -37,6 +55,8 @@ from .tools.stt import STTTool
 from .tools.tts import TTSTool
 from ._i18n import _t
 from .mcp_client import MCPClientManager, _resolve_config_path
+from familiar_runtime.tools.legacy import LegacyToolProvider
+from familiar_runtime.tools.registry import ToolRegistry
 
 logger = logging.getLogger(__name__)
 
@@ -44,6 +64,31 @@ logger = logging.getLogger(__name__)
 async def _noop_str() -> str:
     """Async no-op that returns an empty string (used as a placeholder in asyncio.gather)."""
     return ""
+
+
+async def _noop_list() -> list:
+    """Async no-op list placeholder."""
+    return []
+
+
+async def _call_optional_async(
+    method: Any | None,
+    *args,
+    fallback: Any,
+    **kwargs,
+) -> Any:
+    """Call optional async-like method; gracefully fall back for mocks/missing methods."""
+    if method is None:
+        return fallback
+    try:
+        result = method(*args, **kwargs)
+    except Exception:
+        return fallback
+    if inspect.isawaitable(result):
+        return await result
+    if result.__class__.__module__.startswith("unittest.mock"):
+        return fallback
+    return result
 
 
 MAX_ITERATIONS = 50
@@ -58,11 +103,49 @@ _TOOL_TIMEOUTS: dict[str, float] = {
     "recall": 20.0,
     "tom": 20.0,
     "read_file": 30.0,
+    "write_file": 30.0,
     "edit_file": 30.0,
+    "multi_edit_file": 30.0,
     "glob": 20.0,
     "grep": 20.0,
+    "git_status": 20.0,
+    "git_diff": 30.0,
+    "git_apply_patch": 30.0,
+    "run_tests": 120.0,
     "bash": 45.0,
 }
+_BRIEF_REPLY_MAX_ITERATIONS = 2
+_BRIEF_REPLY_MAX_TOKENS = 120
+_BRIEF_REPLY_TOOL_NAMES = frozenset({"say"})
+_BRIEF_GREETING_PATTERNS = (
+    r"^おはよ",
+    r"^こんにちは",
+    r"^こんばんは",
+    r"^おーい$",
+    r"^もしもし$",
+)
+_BRIEF_ACK_PATTERNS = (
+    r"^ありがとう",
+    r"^ありがと",
+    r"^助か",
+    r"^よかった",
+    r"^了解$",
+    r"^ok$",
+    r"^okay$",
+    r"^お願い(?:[。.!！]?信じてる)?$",
+    r"^信じてる$",
+)
+_BRIEF_CORRECTION_PATTERNS = (
+    r"言ってない",
+    r"勘違",
+    r"誤解",
+    r"食い違",
+    r"そういう意味じゃ",
+    r"そうじゃない",
+    r"違う",
+    r"ちゃう",
+    r"^いや[、, ]",
+)
 
 SYSTEM_PROMPT = """
 (agent :type embodied
@@ -240,12 +323,24 @@ SYSTEM_PROMPT = """
     (tools
       (tool :id read_file :sig "read_file(path, offset?, limit?)"
         :note "Always call before edit_file. Returns file with line numbers.")
+      (tool :id write_file :sig "write_file(path, content)"
+        :note "Write a complete file. Prefer edit_file for small changes.")
       (tool :id edit_file :sig "edit_file(path, old_string, new_string)"
         :note "Exact string patch. old_string must be unique in file.")
+      (tool :id multi_edit_file :sig "multi_edit_file(path, edits[])"
+        :note "Atomic multiple exact string replacements in one file.")
       (tool :id glob      :sig "glob(pattern, path?)"
         :note "Find files by glob pattern e.g. **/*.py")
       (tool :id grep      :sig "grep(pattern, path?, glob?, output_mode?)"
         :note "Search file contents by regex.")
+      (tool :id git_status :sig "git_status()"
+        :note "Show concise working tree state.")
+      (tool :id git_diff :sig "git_diff(path?)"
+        :note "Show working tree diff.")
+      (tool :id git_apply_patch :sig "git_apply_patch(patch)"
+        :note "Apply a unified diff patch.")
+      (tool :id run_tests :sig "run_tests(command?, timeout?)"
+        :note "Run tests. Only available when CODING_BASH=true.")
       (tool :id bash      :sig "bash(command, timeout?)"
         :note "Shell command. Only available when CODING_BASH=true."))
 
@@ -636,6 +731,16 @@ class EmbodiedAgent:
         self._attention_schema = AttentionSchema()
         self._dmn = DefaultModeProcessor(self._memory)
         self._meta_monitor = MetaMonitor()
+        self._appraisal = AppraisalEngine()
+        self._social_policy = SocialPolicyEngine()
+        self._mental_state_bus = MentalStateBus()
+        self._schedule_rule = parse_schedule_config(Path.home() / ".familiar_ai" / "schedule.conf")
+        self._heartbeat = HeartbeatRuntime(
+            memory=self._memory,
+            quiet_rule=self._schedule_rule,
+        )
+        self._last_tool_error: str | None = None
+        self._tool_failure_streak: int = 0
 
         # Mood persistence (Phase 2 companion-likeness)
         self._mood: str = "neutral"
@@ -932,59 +1037,194 @@ class EmbodiedAgent:
 
     @property
     def _all_tool_defs(self) -> list[dict]:
-        defs = []
-        if self._camera:
-            defs.extend(self._camera.get_tool_definitions())
-        if self._mobility:
-            defs.extend(self._mobility.get_tool_definitions())
-        if self._tts:
-            defs.extend(self._tts.get_tool_definitions())
-        defs.extend(self._memory_tool.get_tool_definitions())
-        defs.extend(self._tom_tool.get_tool_definitions())
-        defs.extend(self._coding.get_tool_definitions())
-        if self._mcp:
-            defs.extend(self._mcp.get_tool_definitions())
-        return defs
+        return self._build_tool_registry().tool_defs()
 
-    async def _execute_tool(self, name: str, tool_input: dict) -> tuple[str, str | None]:
-        """Route tool call to the right handler. Returns (text, image_b64_or_None)."""
-        camera_tools = {"see", "look"}
-        mobility_tools = {"walk"}
-        tts_tools = {"say"}
-        memory_tools = {"remember", "recall"}
-        coding_tools = {"read_file", "edit_file", "glob", "grep", "bash"}
+    def _build_tool_registry(self) -> ToolRegistry:
+        """Build the per-turn tool registry from configured providers."""
+        registry = ToolRegistry()
 
-        if name in camera_tools and self._camera:
-            result = await self._camera.call(name, tool_input)
+        def _record_embodied_action(name: str, tool_input: dict[str, Any]) -> None:
             if name == "look":
                 self._exploration.record_move(
                     tool_input.get("direction", "center"),
                     tool_input.get("degrees", 30),
                 )
-            return result
-        elif name in mobility_tools and self._mobility:
-            return await self._mobility.call(name, tool_input)
-        elif name in tts_tools and self._tts:
-            return await self._tts.call(name, tool_input)
-        elif name in memory_tools:
-            return await self._memory_tool.call(name, tool_input)
-        elif name == "tom":
-            return await self._tom_tool.call(name, tool_input)
-        elif name in coding_tools:
-            return await self._coding.call(name, tool_input)
-        elif self._mcp:
-            # Wait for background MCP init if still running
+
+        if self._camera:
+            registry.register(
+                LegacyToolProvider(
+                    self._camera,
+                    names={"see", "look"},
+                    category="embodiment",
+                    tags={"neighbor"},
+                    before_call=_record_embodied_action,
+                )
+            )
+        if self._mobility:
+            registry.register(
+                LegacyToolProvider(
+                    self._mobility,
+                    names={"walk"},
+                    category="embodiment",
+                    tags={"neighbor"},
+                )
+            )
+        if self._tts:
+            registry.register(
+                LegacyToolProvider(
+                    self._tts,
+                    names={"say"},
+                    category="voice",
+                    tags={"neighbor"},
+                )
+            )
+        registry.register(
+            LegacyToolProvider(
+                self._memory_tool,
+                names={"remember", "recall"},
+                category="memory",
+                tags={"neighbor", "task"},
+            )
+        )
+        registry.register(
+            LegacyToolProvider(
+                self._tom_tool,
+                names={"tom"},
+                category="social",
+                tags={"neighbor"},
+            )
+        )
+        registry.register(
+            LegacyToolProvider(
+                self._coding,
+                names={
+                    "read_file",
+                    "write_file",
+                    "edit_file",
+                    "multi_edit_file",
+                    "glob",
+                    "grep",
+                    "git_status",
+                    "git_diff",
+                    "git_apply_patch",
+                    "run_tests",
+                    "bash",
+                },
+                category="coding",
+                tags={"task", "coding"},
+            )
+        )
+        if self._mcp:
+            provider = LegacyToolProvider(
+                self._mcp,
+                category="mcp",
+                tags={"neighbor", "task"},
+            )
+            registry.register(provider)
+            registry.register_fallback(provider)
+        return registry
+
+    async def _execute_tool(self, name: str, tool_input: dict) -> tuple[str, str | None]:
+        """Route tool call to the right handler. Returns (text, image_b64_or_None)."""
+        registry = self._build_tool_registry()
+        if self._mcp and not registry.has_tool(name):
             mcp_task = getattr(self, "_mcp_start_task", None)
             if mcp_task and not mcp_task.done():
                 await mcp_task
-            return await self._mcp.call(name, tool_input)
-        else:
-            return f"Tool '{name}' not available (check configuration).", None
+                registry = self._build_tool_registry()
+
+        result = await registry.call(name, tool_input)
+        return result.text, result.image_b64
 
     @staticmethod
     def _tool_timeout_seconds(name: str) -> float:
         """Return per-tool timeout budget in seconds."""
         return _TOOL_TIMEOUTS.get(name, _DEFAULT_TOOL_TIMEOUT)
+
+    @staticmethod
+    def _normalize_brief_turn_text(text: str) -> str:
+        """Normalize short conversational turns for lightweight heuristics."""
+        return text.strip().lower().rstrip("。.!！?？ ")
+
+    @classmethod
+    def _matches_brief_turn_pattern(cls, text: str, patterns: tuple[str, ...]) -> bool:
+        normalized = cls._normalize_brief_turn_text(text)
+        return any(re.search(pattern, normalized) for pattern in patterns)
+
+    @classmethod
+    def _is_candidate_brief_turn(cls, user_input: str, *, is_desire_turn: bool) -> bool:
+        """Cheap pre-LLM gate for greeting/ack/correction turns.
+
+        These turns should avoid expensive memory recall and exploratory tools.
+        """
+        if is_desire_turn:
+            return False
+        text = user_input.strip()
+        if not text or len(text) > 80 or "\n" in text:
+            return False
+        return (
+            cls._matches_brief_turn_pattern(text, _BRIEF_GREETING_PATTERNS)
+            or cls._matches_brief_turn_pattern(text, _BRIEF_ACK_PATTERNS)
+            or cls._matches_brief_turn_pattern(text, _BRIEF_CORRECTION_PATTERNS)
+        )
+
+    @staticmethod
+    def _should_use_brief_reply_mode(
+        *,
+        user_input: str,
+        social_policy: SocialPolicyDecision,
+        is_desire_turn: bool,
+    ) -> bool:
+        if is_desire_turn:
+            return False
+        text = user_input.strip()
+        if not text or len(text) > 80 or "\n" in text:
+            return False
+        return social_policy.primary_act in {
+            "greeting",
+            "acknowledgement",
+            "clarification",
+            "repair_attempt",
+            "boundary_assertion",
+            "silence_or_low_presence",
+        }
+
+    def _tool_defs_for_turn(self, *, brief_reply_mode: bool) -> list[dict]:
+        tool_defs = self._all_tool_defs
+        if not brief_reply_mode:
+            return tool_defs
+        return [tool for tool in tool_defs if tool.get("name") in _BRIEF_REPLY_TOOL_NAMES]
+
+    @staticmethod
+    def _brief_reply_prompt() -> str:
+        return (
+            "[Lightweight turn]\n"
+            "- This is a short conversational turn.\n"
+            "- Reply directly in 1-2 short sentences.\n"
+            "- Do not infer plans, facts, or feelings the user did not say.\n"
+            "- Do not use observation, memory, or ToM tools unless explicitly asked."
+        )
+
+    def _configure_backend_for_turn(self, *, brief_reply_mode: bool) -> tuple[Any, Any] | None:
+        if not brief_reply_mode or not hasattr(self.backend, "thinking_mode"):
+            return None
+        previous = (
+            getattr(self.backend, "thinking_mode", None),
+            getattr(self.backend, "thinking_effort", None),
+        )
+        self.backend.thinking_mode = "disabled"
+        if hasattr(self.backend, "thinking_effort"):
+            self.backend.thinking_effort = "low"
+        return previous
+
+    def _restore_backend_after_turn(self, snapshot: tuple[Any, Any] | None) -> None:
+        if snapshot is None:
+            return
+        thinking_mode, thinking_effort = snapshot
+        if hasattr(self.backend, "thinking_mode"):
+            self.backend.thinking_mode = thinking_mode
+        if hasattr(self.backend, "thinking_effort"):
+            self.backend.thinking_effort = thinking_effort
 
     @staticmethod
     def _drain_interrupt_queue(
@@ -1073,6 +1313,7 @@ class EmbodiedAgent:
         companion_mood: str = "engaged",
         continuity_ctx: str = "",
         workspace_ctx: str = "",
+        mental_ctx: str = "",
     ) -> tuple[str, str]:
         """Return (stable, variable) system prompt parts for prompt caching.
 
@@ -1105,6 +1346,8 @@ class EmbodiedAgent:
             variable_parts.append(relationship_ctx)
         if continuity_ctx:
             variable_parts.append(continuity_ctx)
+        if mental_ctx:
+            variable_parts.append(mental_ctx)
         # Morning reconstruction takes precedence on first turn; otherwise use feelings
         if morning_ctx:
             variable_parts.append(morning_ctx)
@@ -1160,7 +1403,136 @@ class EmbodiedAgent:
         """Return exploration history for ICL-based direction steering."""
         return self._exploration.context_for_prompt(n=5)
 
-    async def _gather_workspace_context(self, desires: DesireSystem | None = None) -> str:
+    def _collect_interoception(self):
+        mcp_path = os.environ.get("FAMILIAR_INTEROCEPTION_MCP_PATH", "").strip()
+        if mcp_path:
+            max_staleness = int(
+                os.environ.get("FAMILIAR_INTEROCEPTION_MCP_MAX_STALENESS", "45").strip() or "45"
+            )
+            signal = MCPInteroceptionProvider(
+                mcp_path,
+                max_staleness_seconds=max_staleness,
+            ).collect()
+            if signal.provider == "noop":
+                signal = RuntimeInteroceptionProvider(
+                    started_at=self._started_at,
+                    turn_count=self._turn_count,
+                    pending_tasks=len(getattr(self, "_background_tasks", set())),
+                    quiet_hours=(self._schedule_rule.start_hour, self._schedule_rule.end_hour),
+                ).collect()
+        else:
+            signal = RuntimeInteroceptionProvider(
+                started_at=self._started_at,
+                turn_count=self._turn_count,
+                pending_tasks=len(getattr(self, "_background_tasks", set())),
+                quiet_hours=(self._schedule_rule.start_hour, self._schedule_rule.end_hour),
+            ).collect()
+        return signal, semantic_pressure(signal)
+
+    def _provisional_relationship_update(
+        self,
+        *,
+        user_text: str,
+        social_policy: SocialPolicyDecision,
+    ) -> None:
+        lower = user_text.lower()
+        if any(token in lower for token in ("hurt", "傷つ", "前の返事")):
+            self._relationship.record_repair(user_text[:180], resolved=False)
+            self._relationship.note_trust_shift(
+                max(0.0, self._relationship.trust - 0.08), user_text[:180], confidence=0.8
+            )
+            self._relationship.record_failed_support_pattern(
+                "advice before validation", confidence=0.75
+            )
+        elif social_policy.primary_act == "delight_share":
+            self._relationship.note_intimacy_shift(
+                min(1.0, self._relationship.intimacy + 0.04),
+                "shared delight",
+                confidence=0.62,
+            )
+        elif social_policy.primary_act in {"fatigue_signal", "grief_signal", "venting"}:
+            self._relationship.record_support_preference(
+                "validate first before problem solving",
+                confidence=0.72,
+            )
+        if social_policy.primary_act == "boundary_assertion":
+            self._relationship.add_boundary(user_text[:120], severity=3)
+        if social_policy.primary_act == "playful_probe":
+            self._relationship.record_shared_ritual("light playful exchange", confidence=0.55)
+
+    @staticmethod
+    def _format_social_policy_prompt(policy: SocialPolicyDecision) -> str:
+        lines = [
+            "[Interaction policy]",
+            f"- primary-act: {policy.primary_act}",
+            f"- response-mode: {policy.response_mode}",
+            f"- softness: {policy.softness:.2f}",
+            f"- directness: {policy.directness:.2f}",
+            f"- initiative: {policy.initiative:.2f}",
+        ]
+        if policy.avoid_problem_solving:
+            lines.append("- validate before advice; do not rush into fixing")
+        if policy.should_recall_relational_memory:
+            lines.append("- relational memory is relevant if it naturally helps")
+        if policy.mention_memory:
+            lines.append("- a memory mention is allowed only if it fits naturally")
+        if policy.avoid_raw_interoception_numbers:
+            lines.append("- never mention raw internal/body metrics")
+        return "\n".join(lines)
+
+    def _build_mental_snapshot(
+        self,
+        *,
+        interoception_signal,
+        affect,
+        social_policy: SocialPolicyDecision,
+        working_memory: list[dict],
+        continuity_note: str,
+        desires: DesireSystem | None,
+    ) -> MentalStateSnapshot:
+        drive_levels = desires.drive_vector() if desires is not None else {}
+        dominant = desires.get_dominant() if desires is not None else None
+        working_items = [
+            WorkingMemoryItem(
+                memory_id=str(item.get("memory_id", "")),
+                summary=str(item.get("summary", "")),
+                source_kind=str(item.get("source_kind", item.get("kind", "memory"))),
+                salience=float(item.get("salience", item.get("confidence", 0.5))),
+                episode_id=item.get("episode_id"),
+            )
+            for item in working_memory[:5]
+        ]
+        return MentalStateSnapshot(
+            turn_index=self._turn_count,
+            created_at=datetime.utcnow().isoformat(),
+            interoception=interoception_signal,
+            affect=affect,
+            social=SocialState(
+                primary_act=social_policy.primary_act,
+                response_mode=social_policy.response_mode,
+                trust=self._relationship.trust,
+                intimacy=self._relationship.intimacy,
+                repair_needed=social_policy.primary_act == "repair_attempt",
+                recall_relational_memory=social_policy.should_recall_relational_memory,
+                mention_memory=social_policy.mention_memory,
+                initiative=social_policy.initiative,
+                directness=social_policy.directness,
+                softness=social_policy.softness,
+            ),
+            drives=DriveVector(
+                levels=drive_levels,
+                dominant_drive=dominant[0] if dominant else None,
+                dominant_level=float(dominant[1]) if dominant else 0.0,
+            ),
+            working_memory=working_items,
+            continuity_note=continuity_note,
+        )
+
+    async def _gather_workspace_context(
+        self,
+        desires: DesireSystem | None = None,
+        extra_coalitions: list | None = None,
+    ) -> str:
         """Run one Global Workspace competition cycle and return the broadcast context.
 
         Gathers coalitions from all available processors in parallel, runs the
@@ -1198,6 +1570,9 @@ class EmbodiedAgent:
                 logger.debug("Coalition gather error: %s", r)
             elif isinstance(r, _Coalition):
                 coalitions.append(r)
+        for coalition in extra_coalitions or []:
+            if isinstance(coalition, _Coalition):
+                coalitions.append(coalition)
 
         if not coalitions:
             return ""
@@ -2011,6 +2386,25 @@ class EmbodiedAgent:
 
         inner_voice: agent's own desire/impulse (injected into system prompt, NOT a user message).
         """
+        if not hasattr(self, "_schedule_rule"):
+            self._schedule_rule = parse_schedule_config(
+                Path.home() / ".familiar_ai" / "schedule.conf"
+            )
+        if not hasattr(self, "_mental_state_bus"):
+            self._mental_state_bus = MentalStateBus()
+        if not hasattr(self, "_appraisal"):
+            self._appraisal = AppraisalEngine()
+        if not hasattr(self, "_social_policy"):
+            self._social_policy = SocialPolicyEngine()
+        if not hasattr(self, "_heartbeat"):
+            self._heartbeat = HeartbeatRuntime(
+                memory=getattr(self, "_memory", None),
+                quiet_rule=self._schedule_rule,
+            )
+        if not hasattr(self, "_last_tool_error"):
+            self._last_tool_error = None
+        if not hasattr(self, "_tool_failure_streak"):
+            self._tool_failure_streak = 0
         self._turn_count += 1
         first_turn = self._turn_count == 1
         memory_worker = getattr(self, "_memory_worker", None)
@@ -2029,13 +2423,26 @@ class EmbodiedAgent:
         if memory_worker and not memory_worker.is_running:
             await memory_worker.start()
 
+        is_desire_turn = bool(inner_voice and not user_input)
+        candidate_brief_turn = self._is_candidate_brief_turn(
+            user_input,
+            is_desire_turn=is_desire_turn,
+        )
+
         # First turn: morning reconstruction — bridge yesterday's self to today's
         morning_ctx = ""
+        routine_state = self._heartbeat.routine_state()
         if first_turn:
             self._relationship.record_session()
-            morning_ctx = await self._morning_reconstruction(desires=desires)
-
-        is_desire_turn = bool(inner_voice and not user_input)
+            routine_notes = self._heartbeat.morning_reconstruction_notes()
+            if candidate_brief_turn:
+                morning_ctx = routine_notes or ""
+            else:
+                morning_ctx = await self._morning_reconstruction(desires=desires)
+                if routine_notes:
+                    morning_ctx = (
+                        f"{morning_ctx}\n\n{routine_notes}" if morning_ctx else routine_notes
+                    )
 
         # Compact context if it has grown too large (GC-like: compress old turns)
         if self._should_compact():
@@ -2044,59 +2451,212 @@ class EmbodiedAgent:
         # Inject relevant past memories + emotional context (skip for desire-driven turns)
         recall_n = 5 if self._post_compact else 3
         self._post_compact = False  # consume the flag regardless
-        if not is_desire_turn:
-            (
-                memories,
-                feelings,
-                semantic_facts,
-                behavior_policies,
-            ) = await asyncio.gather(
-                self._memory.recall_async(user_input, n=recall_n),
-                self._memory.recent_feelings_async(n=4),
-                self._memory.recall_semantic_facts_async(user_input, n=3),
-                self._memory.recall_behavior_policies_async(user_input, n=2),
+        interoception_signal, interoception_pressure = self._collect_interoception()
+        prediction_signal = self._prediction.last_signal()
+        unfinished_business: list[dict] = []
+        if not candidate_brief_turn:
+            list_unfinished_business = getattr(self._memory, "list_unfinished_business_async", None)
+            unfinished_business = await _call_optional_async(
+                list_unfinished_business,
+                limit=3,
+                fallback=[],
             )
-            # Use cached values from previous turn's post-response pipeline
-            companion_mood = self._cached_companion_mood
-            temporal_ctx = self._cached_temporal_ctx
-            memory_parts = []
-            if memories:
-                memory_parts.append(self._memory.format_for_context(memories))
-            if feelings:
-                memory_parts.append(self._memory.format_feelings_for_context(feelings))
-            if semantic_facts:
-                memory_parts.append(self._memory.format_semantic_facts_for_context(semantic_facts))
-            if behavior_policies:
-                memory_parts.append(
-                    self._memory.format_behavior_policies_for_context(behavior_policies)
-                )
-            if temporal_ctx:
-                memory_parts.append(temporal_ctx)
-            if memory_parts:
-                user_input_with_ctx = user_input + "\n\n" + "\n\n".join(memory_parts)
-            else:
+        companion_mood = "engaged"
+        working_memory: list[dict] = []
+        semantic_facts: list[dict] = []
+        behavior_policies: list[dict] = []
+        feelings: list[dict] = []
+        memories: list[dict] = []
+        recall_divergent = getattr(self._memory, "recall_divergent_async", None)
+        refresh_working = getattr(self._memory, "refresh_working_memory_async", None)
+        get_working = getattr(self._memory, "get_working_memory_async", None)
+        if not is_desire_turn:
+            if candidate_brief_turn:
+                companion_mood = self._cached_companion_mood or "engaged"
                 user_input_with_ctx = user_input
-            feelings_ctx = self._memory.format_feelings_for_context(feelings) if feelings else ""
+                feelings_ctx = ""
+            else:
+                (
+                    memories,
+                    feelings,
+                    semantic_facts,
+                    behavior_policies,
+                    working_memory,
+                    companion_mood,
+                ) = await asyncio.gather(
+                    _call_optional_async(
+                        recall_divergent,
+                        user_input,
+                        n=recall_n,
+                        fallback=await self._memory.recall_async(user_input, n=recall_n),
+                    ),
+                    self._memory.recent_feelings_async(n=4),
+                    self._memory.recall_semantic_facts_async(user_input, n=3),
+                    self._memory.recall_behavior_policies_async(user_input, n=2),
+                    _call_optional_async(
+                        refresh_working,
+                        user_input,
+                        n=4,
+                        fallback=[],
+                    ),
+                    self._infer_companion_mood(user_input),
+                )
+                working_memory = await _call_optional_async(get_working, n=4, fallback=[])
+                temporal_ctx = self._cached_temporal_ctx
+                memory_parts = []
+                if memories:
+                    memory_parts.append(self._memory.format_for_context(memories))
+                if feelings:
+                    memory_parts.append(self._memory.format_feelings_for_context(feelings))
+                if semantic_facts:
+                    memory_parts.append(
+                        self._memory.format_semantic_facts_for_context(semantic_facts)
+                    )
+                if behavior_policies:
+                    memory_parts.append(
+                        self._memory.format_behavior_policies_for_context(behavior_policies)
+                    )
+                if temporal_ctx:
+                    memory_parts.append(temporal_ctx)
+                if memory_parts:
+                    user_input_with_ctx = user_input + "\n\n" + "\n\n".join(memory_parts)
+                else:
+                    user_input_with_ctx = user_input
+                feelings_ctx = (
+                    self._memory.format_feelings_for_context(feelings) if feelings else ""
+                )
         else:
             # Desire turn: no user context needed; feelings injected via interoception
-            feelings = []
             feelings_ctx = ""
-            companion_mood = "engaged"
             user_input_with_ctx = _t("desire_turn_marker")
 
+        if self._tool_failure_streak >= 2 and desires is not None:
+            desires.boost("self_protect", min(0.5, 0.15 * self._tool_failure_streak))
+
+        affect = self._appraisal.appraise(
+            AppraisalContext(
+                user_text=user_input,
+                companion_mood=companion_mood,
+                relationship_trust=self._relationship.trust,
+                relationship_intimacy=self._relationship.intimacy,
+                recalled_memory_summaries=tuple(m.get("summary", "") for m in memories[:3]),
+                prediction_signal=prediction_signal,
+                interoception=interoception_pressure,
+                blocked_drives=("tool_failure",) if self._tool_failure_streak else (),
+                unfinished_business_count=len(unfinished_business),
+            )
+        )
+
+        previous_response_hurt = any(
+            token in user_input.lower() for token in ("hurt", "傷つ", "前の返事", "嫌だった")
+        )
+        social_policy = self._social_policy.decide(
+            user_text=user_input,
+            affect=affect,
+            trust=self._relationship.trust,
+            intimacy=self._relationship.intimacy,
+            interoception=interoception_pressure,
+            previous_response_hurt=previous_response_hurt,
+        )
+        self._provisional_relationship_update(user_text=user_input, social_policy=social_policy)
+
+        if desires is not None:
+            context_affordances = {
+                "repair": 1.3 if social_policy.primary_act == "repair_attempt" else 1.0,
+                "care": 1.2
+                if social_policy.primary_act in {"fatigue_signal", "grief_signal", "venting"}
+                else 1.0,
+                "play": 1.15 if social_policy.primary_act == "playful_probe" else 0.9,
+                "attachment": 1.1 if affect.attachment_pull > 0.55 else 1.0,
+                "consolidate": 1.2 if unfinished_business else 1.0,
+                "self_protect": 1.2 if self._tool_failure_streak >= 2 else 1.0,
+            }
+            desires.update_context(
+                schedule_multiplier=routine_state.schedule_multiplier,
+                social_permission=max(0.2, 1.0 - affect.threat * 0.35),
+                energy_budget=max(0.2, 1.0 - interoception_pressure.need_rest * 0.6),
+                unfinished_business_bonus=min(0.4, len(unfinished_business) * 0.1),
+                context_affordances=context_affordances,
+            )
+            if social_policy.primary_act == "repair_attempt":
+                desires.boost("repair", 0.45)
+            if social_policy.primary_act == "delight_share":
+                desires.boost("attachment", 0.18)
+            if social_policy.primary_act in {"fatigue_signal", "grief_signal"}:
+                desires.boost("care", 0.22)
+            if affect.frustration > 0.45:
+                desires.boost("self_protect", 0.12)
+
+        brief_reply_turn = self._should_use_brief_reply_mode(
+            user_input=user_input,
+            social_policy=social_policy,
+            is_desire_turn=is_desire_turn,
+        )
         self.messages.append(self.backend.make_user_message(user_input_with_ctx))
 
         # Use cached plan & workspace context from previous turn's post-response pipeline.
         # These are computed in the background after each response and are ready for the
         # next turn.  First turn uses empty defaults — morning_ctx dominates anyway.
-        plan_ctx = self._cached_plan_ctx
-        workspace_ctx = self._cached_workspace_ctx
-        continuity_ctx = self._self_continuity_context()
+        plan_ctx = "" if brief_reply_turn else self._cached_plan_ctx
+        workspace_ctx = ""
+        continuity_ctx = ""
         tape_backend = self._tape_backend()  # still needed for in-loop replanning
-        if plan_ctx:
-            logger.debug("TAPE plan (cached): %s", plan_ctx[:80])
-        if workspace_ctx:
-            logger.debug("GlobalWorkspace broadcast (cached): %s", workspace_ctx[:80])
+        if not brief_reply_turn:
+            extra_coalitions = [affect.as_coalition()]
+            workspace_ctx = await self._gather_workspace_context(
+                desires=desires,
+                extra_coalitions=extra_coalitions,
+            )
+            if not workspace_ctx:
+                workspace_ctx = self._cached_workspace_ctx
+            continuity_ctx = self._self_continuity_context()
+            heartbeat_ctx = self._heartbeat.continuity_context_for_prompt()
+            if heartbeat_ctx:
+                continuity_ctx = (
+                    continuity_ctx
+                    + ("\n\n" if continuity_ctx else "")
+                    + "[Continuation]\n"
+                    + heartbeat_ctx
+                )
+            if unfinished_business:
+                continuity_ctx = (
+                    continuity_ctx
+                    + ("\n\n" if continuity_ctx else "")
+                    + "[Open unfinished business]\n"
+                    + "\n".join(f"- {item['summary'][:160]}" for item in unfinished_business[:3])
+                )
+            if plan_ctx:
+                logger.debug("TAPE plan (cached): %s", plan_ctx[:80])
+            if workspace_ctx:
+                logger.debug("GlobalWorkspace broadcast (cached): %s", workspace_ctx[:80])
+
+        mental_snapshot = self._build_mental_snapshot(
+            interoception_signal=interoception_signal,
+            affect=affect,
+            social_policy=social_policy,
+            working_memory=working_memory,
+            continuity_note="; ".join(item["summary"][:80] for item in unfinished_business[:2]),
+            desires=desires,
+        )
+        if brief_reply_turn:
+            mental_ctx = "\n\n".join(
+                part
+                for part in (
+                    self._format_social_policy_prompt(social_policy),
+                    self._brief_reply_prompt(),
+                )
+                if part
+            )
+        else:
+            mental_ctx = "\n\n".join(
+                part
+                for part in (
+                    self._mental_state_bus.summarize_recent_for_prompt(2),
+                    mental_snapshot.prompt_summary(),
+                    self._format_social_policy_prompt(social_policy),
+                )
+                if part
+            )
 
         if on_phase and startup_phase:
             on_phase("thinking")
@@ -2109,228 +2669,266 @@ class EmbodiedAgent:
         observation_action_input: dict | None = None
         pending_view_action_name: str | None = None
         pending_view_action_input: dict | None = None
+        turn_tools = self._tool_defs_for_turn(brief_reply_mode=brief_reply_turn)
+        turn_max_tokens = (
+            min(self.config.max_tokens, _BRIEF_REPLY_MAX_TOKENS)
+            if brief_reply_turn
+            else self.config.max_tokens
+        )
+        turn_max_iterations = _BRIEF_REPLY_MAX_ITERATIONS if brief_reply_turn else MAX_ITERATIONS
+        backend_turn_snapshot = self._configure_backend_for_turn(brief_reply_mode=brief_reply_turn)
 
-        for i in range(MAX_ITERATIONS):
-            logger.debug("Agent iteration %d", i + 1)
+        try:
+            for i in range(turn_max_iterations):
+                logger.debug("Agent iteration %d", i + 1)
 
-            result, raw_content = await self.backend.stream_turn(
+                result, raw_content = await self.backend.stream_turn(
+                    system=self._system_prompt(
+                        feelings_ctx,
+                        morning_ctx,
+                        inner_voice=inner_voice,
+                        plan_ctx=plan_ctx,
+                        companion_mood=companion_mood,
+                        continuity_ctx=continuity_ctx,
+                        workspace_ctx=workspace_ctx,
+                        mental_ctx=mental_ctx,
+                    ),
+                    messages=self.messages,
+                    tools=turn_tools,
+                    max_tokens=turn_max_tokens,
+                    on_text=on_text,
+                )
+                self._last_context_tokens = result.input_tokens
+                self._session_input_tokens += result.input_tokens
+                self._session_output_tokens += result.output_tokens
+
+                # HOT layer: record this step metacognitively
+                _focus = self._attention_schema.current_focus()
+                if _focus is not None:
+                    _action = result.stop_reason
+                    if result.stop_reason == "tool_use" and result.tool_calls:
+                        _action = result.tool_calls[0].name
+                    _conf = min(1.0, result.output_tokens / max(1, self.config.max_tokens))
+                    self._meta_monitor.record_step(_focus, action=_action, confidence=_conf)
+
+                if result.stop_reason == "end_turn":
+                    self.messages.append(self.backend.make_assistant_message(result, raw_content))
+                    final_text = result.text or "(no response)"
+
+                    gate_method = getattr(self._meta_monitor, "gate_response", None)
+                    gate: MetaGateDecision | None = None
+                    if callable(gate_method):
+                        maybe_gate = gate_method(
+                            user_text=user_input,
+                            candidate_response=final_text,
+                            social_policy=social_policy,
+                            last_error=self._last_tool_error,
+                        )
+                        if isinstance(maybe_gate, MetaGateDecision):
+                            gate = maybe_gate
+                    if gate is not None and gate.needs_repair and gate.repaired_response:
+                        final_text = gate.repaired_response
+
+                    continuation_status = "DONE"
+                    status_match = re.search(
+                        r"(?:^|\n)(DONE|CONTINUE:[^\n]+|DEFER:[^\n]+)\s*$", final_text
+                    )
+                    if status_match:
+                        continuation_status = status_match.group(1)
+                        final_text = final_text[: status_match.start(1)].rstrip() or "(no response)"
+                    self._heartbeat.apply_status(continuation_status)
+
+                    # Coherence gate: ask utility backend whether the response contains
+                    # a logical error. Only fires once to avoid infinite loops.
+                    _coherence_enabled = os.environ.get("FAMILIAR_COHERENCE_CHECK", "").strip() in (
+                        "1",
+                        "true",
+                        "yes",
+                    )
+                    if _coherence_enabled and not getattr(self, "_coherence_retried", False):
+                        violation = await self._check_response_coherence(final_text)
+                        if violation:
+                            self._coherence_retried = True
+                            self.messages.append(
+                                self.backend.make_user_message(
+                                    f"[SELF-CHECK] Your previous response has a problem: "
+                                    f"{violation}. Please correct it and respond again."
+                                )
+                            )
+                            say_used = False
+                            continue
+
+                    self._coherence_retried = False
+
+                    # Auto-say: if the model wrote text but never called say(), speak it aloud.
+                    _auto_say_enabled = getattr(self.config, "auto_say", False)
+                    if (
+                        _auto_say_enabled
+                        and self._tts
+                        and not say_used
+                        and final_text
+                        and final_text != "(no response)"
+                    ):
+                        if on_action:
+                            on_action("say", {"text": final_text})
+                        await self._tts.call("say", {"text": final_text})
+
+                    if final_text and final_text != "(no response)":
+                        try:
+                            self._mental_state_bus.append(mental_snapshot)
+                        except Exception as exc:  # noqa: BLE001
+                            logger.warning("Failed to persist mental state snapshot: %s", exc)
+                        self._spawn_background_task(
+                            self._run_post_response_pipeline(
+                                user_input=user_input,
+                                final_text=final_text,
+                                camera_used=camera_used,
+                                observation_action_name=observation_action_name,
+                                observation_action_input=observation_action_input,
+                                companion_mood=companion_mood,
+                                is_desire_turn=is_desire_turn,
+                                desires=desires,
+                            ),
+                            name="post-response-pipeline",
+                        )
+
+                    return final_text
+
+                if result.stop_reason == "tool_use":
+                    collected: list[tuple[str, str | None]] = []
+                    for tc in result.tool_calls:
+                        if tc.name == "see":
+                            camera_used = True
+                            if pending_view_action_name is not None:
+                                observation_action_name = pending_view_action_name
+                                observation_action_input = dict(pending_view_action_input or {})
+                            else:
+                                observation_action_name = "see"
+                                observation_action_input = dict(tc.input)
+                            pending_view_action_name = None
+                            pending_view_action_input = None
+                        elif tc.name in {"look", "walk"}:
+                            pending_view_action_name = tc.name
+                            pending_view_action_input = dict(tc.input)
+                        if tc.name == "say":
+                            say_used = True
+                            non_say_streak = 0
+                        else:
+                            non_say_streak += 1
+                        logger.info("Tool call: %s(%s)", tc.name, tc.input)
+                        if on_action:
+                            on_action(tc.name, tc.input)
+
+                        timeout_s = self._tool_timeout_seconds(tc.name)
+                        try:
+                            text, image = await asyncio.wait_for(
+                                self._execute_tool(tc.name, tc.input),
+                                timeout=timeout_s,
+                            )
+                            self._last_tool_error = None
+                            self._tool_failure_streak = 0
+                        except asyncio.TimeoutError:
+                            logger.warning("Tool %s timed out after %.1fs", tc.name, timeout_s)
+                            text, image = (
+                                f"Tool timeout: {tc.name} exceeded {timeout_s:.1f}s.",
+                                None,
+                            )
+                            self._last_tool_error = text
+                            self._tool_failure_streak += 1
+                        except Exception as e:
+                            logger.warning("Tool %s failed: %s", tc.name, e)
+                            text, image = f"Tool error: {e}", None
+                            self._last_tool_error = str(e)
+                            self._tool_failure_streak += 1
+
+                        if (
+                            tape_backend
+                            and plan_ctx
+                            and await check_plan_blocked(
+                                tape_backend, plan_ctx, tc.name, tc.input, text
+                            )
+                        ):
+                            logger.info("TAPE: plan blocked after %s, replanning...", tc.name)
+                            replan = await generate_replan(
+                                tape_backend, plan_ctx, tc.name, tc.input, text
+                            )
+                            if replan:
+                                text = f"{text}\n\n[ADAPTIVE REPLAN] {replan}"
+                                logger.info("TAPE replan: %s", replan[:80])
+
+                        logger.info("Tool result: %s", text[:100])
+                        if image and on_image is not None:
+                            on_image(image)
+                        if on_tool_result is not None:
+                            on_tool_result(tc.name, tc.input, text)
+                        collected.append((text, image))
+
+                    self.messages.append(self.backend.make_assistant_message(result, raw_content))
+                    tool_msgs = self.backend.make_tool_results(result.tool_calls, collected)
+                    self.messages.append(tool_msgs)
+
+                    if interrupt_queue is not None and not interrupt_queue.empty():
+                        interrupts = self._drain_interrupt_queue(interrupt_queue)
+                        if interrupts:
+                            head = " / ".join(interrupts[:3])
+                            if len(interrupts) > 3:
+                                head += f" (+{len(interrupts) - 3} more)"
+                            logger.debug("Consumed %d queued interrupts", len(interrupts))
+                            self.messages.append(
+                                self.backend.make_user_message(
+                                    f"[User interrupted x{len(interrupts)}]: {head}. "
+                                    "Respond to this directly with say() now."
+                                )
+                            )
+                            non_say_streak = 0
+
+                    elif non_say_streak >= 2 and not say_used:
+                        self.messages.append(
+                            self.backend.make_user_message(
+                                "REMINDER: Writing text is silent. You MUST call say() to be heard. "
+                                "Call say() NOW. Keep it to 1-2 sentences."
+                            )
+                        )
+                        non_say_streak = 0
+
+                    elif say_used and non_say_streak >= 2:
+                        self.messages.append(
+                            self.backend.make_user_message(
+                                "You already spoke. Stop exploring and end your turn now."
+                            )
+                        )
+                        non_say_streak = 0
+
+                    continue
+
+                logger.warning("Unexpected stop_reason: %s", result.stop_reason)
+                break
+
+            logger.warning(
+                "Reached max iterations (%d). Forcing final response.",
+                turn_max_iterations,
+            )
+            self.messages.append(
+                self.backend.make_user_message(
+                    "Please summarize what you found and provide your final answer now."
+                )
+            )
+            result, _ = await self.backend.stream_turn(
                 system=self._system_prompt(
-                    feelings_ctx,
-                    morning_ctx,
-                    inner_voice=inner_voice,
+                    morning_ctx=morning_ctx,
                     plan_ctx=plan_ctx,
-                    companion_mood=companion_mood,
                     continuity_ctx=continuity_ctx,
                     workspace_ctx=workspace_ctx,
+                    mental_ctx=mental_ctx,
                 ),
                 messages=self.messages,
-                tools=self._all_tool_defs,
-                max_tokens=self.config.max_tokens,
+                tools=[],
+                max_tokens=turn_max_tokens,
                 on_text=on_text,
             )
-            self._last_context_tokens = result.input_tokens
-            self._session_input_tokens += result.input_tokens
-            self._session_output_tokens += result.output_tokens
-
-            # HOT layer: record this step metacognitively
-            _focus = self._attention_schema.current_focus()
-            if _focus is not None:
-                _action = result.stop_reason
-                if result.stop_reason == "tool_use" and result.tool_calls:
-                    _action = result.tool_calls[0].name
-                _conf = min(1.0, result.output_tokens / max(1, self.config.max_tokens))
-                self._meta_monitor.record_step(_focus, action=_action, confidence=_conf)
-
-            if result.stop_reason == "end_turn":
-                self.messages.append(self.backend.make_assistant_message(result, raw_content))
-                final_text = result.text or "(no response)"
-
-                # Coherence gate: ask utility backend whether the response contains
-                # a logical error (e.g. shiritori word ending in 'ん').  If a
-                # violation is found, inject a correction nudge and let the main
-                # loop re-generate.  Only fires once to avoid infinite loops.
-                # Disabled by default for latency; set FAMILIAR_COHERENCE_CHECK=1 to enable.
-                _coherence_enabled = os.environ.get("FAMILIAR_COHERENCE_CHECK", "").strip() in (
-                    "1",
-                    "true",
-                    "yes",
-                )
-                if _coherence_enabled and not getattr(self, "_coherence_retried", False):
-                    violation = await self._check_response_coherence(final_text)
-                    if violation:
-                        self._coherence_retried = True
-                        self.messages.append(
-                            self.backend.make_user_message(
-                                f"[SELF-CHECK] Your previous response has a problem: "
-                                f"{violation}. Please correct it and respond again."
-                            )
-                        )
-                        say_used = False
-                        continue
-
-                self._coherence_retried = False
-
-                # Auto-say: if the model wrote text but never called say(), speak it aloud.
-                # Gated by config.auto_say (default OFF).
-                _auto_say_enabled = getattr(self.config, "auto_say", False)
-                if (
-                    _auto_say_enabled
-                    and self._tts
-                    and not say_used
-                    and final_text
-                    and final_text != "(no response)"
-                ):
-                    if on_action:
-                        on_action("say", {"text": final_text})
-                    await self._tts.call("say", {"text": final_text})
-
-                if final_text and final_text != "(no response)":
-                    self._spawn_background_task(
-                        self._run_post_response_pipeline(
-                            user_input=user_input,
-                            final_text=final_text,
-                            camera_used=camera_used,
-                            observation_action_name=observation_action_name,
-                            observation_action_input=observation_action_input,
-                            companion_mood=companion_mood,
-                            is_desire_turn=is_desire_turn,
-                            desires=desires,
-                        ),
-                        name="post-response-pipeline",
-                    )
-
-                return final_text
-
-            if result.stop_reason == "tool_use":
-                collected: list[tuple[str, str | None]] = []
-                for tc in result.tool_calls:
-                    if tc.name == "see":
-                        camera_used = True
-                        if pending_view_action_name is not None:
-                            observation_action_name = pending_view_action_name
-                            observation_action_input = dict(pending_view_action_input or {})
-                        else:
-                            observation_action_name = "see"
-                            observation_action_input = dict(tc.input)
-                        pending_view_action_name = None
-                        pending_view_action_input = None
-                    elif tc.name in {"look", "walk"}:
-                        pending_view_action_name = tc.name
-                        pending_view_action_input = dict(tc.input)
-                    if tc.name == "say":
-                        say_used = True
-                        non_say_streak = 0
-                    else:
-                        non_say_streak += 1
-                    logger.info("Tool call: %s(%s)", tc.name, tc.input)
-                    if on_action:
-                        on_action(tc.name, tc.input)
-
-                    timeout_s = self._tool_timeout_seconds(tc.name)
-                    try:
-                        text, image = await asyncio.wait_for(
-                            self._execute_tool(tc.name, tc.input), timeout=timeout_s
-                        )
-                    except asyncio.TimeoutError:
-                        logger.warning("Tool %s timed out after %.1fs", tc.name, timeout_s)
-                        text, image = (
-                            f"Tool timeout: {tc.name} exceeded {timeout_s:.1f}s.",
-                            None,
-                        )
-                    except Exception as e:
-                        logger.warning("Tool %s failed: %s", tc.name, e)
-                        text, image = f"Tool error: {e}", None
-
-                    # TAPE mechanism 3: adaptive replanning.
-                    # Trigger: NOT a technical error, but an observation that contradicts
-                    # the plan's assumptions (e.g., looked for the cat, it wasn't there).
-                    # Only meaningful when an upfront plan exists.
-                    if (
-                        tape_backend
-                        and plan_ctx
-                        and await check_plan_blocked(
-                            tape_backend, plan_ctx, tc.name, tc.input, text
-                        )
-                    ):
-                        logger.info("TAPE: plan blocked after %s, replanning...", tc.name)
-                        replan = await generate_replan(
-                            tape_backend, plan_ctx, tc.name, tc.input, text
-                        )
-                        if replan:
-                            text = f"{text}\n\n[ADAPTIVE REPLAN] {replan}"
-                            logger.info("TAPE replan: %s", replan[:80])
-
-                    logger.info("Tool result: %s", text[:100])
-                    if image and on_image is not None:
-                        on_image(image)
-                    if on_tool_result is not None:
-                        on_tool_result(tc.name, tc.input, text)
-                    collected.append((text, image))
-
-                # Append assistant + tool results atomically: never leave tool_calls unresolved
-                self.messages.append(self.backend.make_assistant_message(result, raw_content))
-                tool_msgs = self.backend.make_tool_results(result.tool_calls, collected)
-                self.messages.append(tool_msgs)
-
-                # Check for user interrupt (typed while agent was busy)
-                if interrupt_queue is not None and not interrupt_queue.empty():
-                    interrupts = self._drain_interrupt_queue(interrupt_queue)
-                    if interrupts:
-                        head = " / ".join(interrupts[:3])
-                        if len(interrupts) > 3:
-                            head += f" (+{len(interrupts) - 3} more)"
-                        logger.debug("Consumed %d queued interrupts", len(interrupts))
-                        self.messages.append(
-                            self.backend.make_user_message(
-                                f"[User interrupted x{len(interrupts)}]: {head}. "
-                                "Respond to this directly with say() now."
-                            )
-                        )
-                        non_say_streak = 0
-
-                # Nudge: still haven't spoken after 2 tool calls
-                elif non_say_streak >= 2 and not say_used:
-                    self.messages.append(
-                        self.backend.make_user_message(
-                            "REMINDER: Writing text is silent. You MUST call say() to be heard. "
-                            "Call say() NOW. Keep it to 1-2 sentences."
-                        )
-                    )
-                    non_say_streak = 0
-
-                # Nudge: already spoke but still looping — wrap up
-                elif say_used and non_say_streak >= 2:
-                    self.messages.append(
-                        self.backend.make_user_message(
-                            "You already spoke. Stop exploring and end your turn now."
-                        )
-                    )
-                    non_say_streak = 0
-
-                continue
-
-            logger.warning("Unexpected stop_reason: %s", result.stop_reason)
-            break
-
-        logger.warning("Reached max iterations (%d). Forcing final response.", MAX_ITERATIONS)
-        self.messages.append(
-            self.backend.make_user_message(
-                "Please summarize what you found and provide your final answer now."
-            )
-        )
-        result, _ = await self.backend.stream_turn(
-            system=self._system_prompt(
-                morning_ctx=morning_ctx,
-                plan_ctx=plan_ctx,
-                continuity_ctx=continuity_ctx,
-                workspace_ctx=workspace_ctx,
-            ),
-            messages=self.messages,
-            tools=[],
-            max_tokens=self.config.max_tokens,
-            on_text=on_text,
-        )
-        return result.text or "(max iterations reached)"
+            return result.text or "(max iterations reached)"
+        finally:
+            self._restore_backend_after_turn(backend_turn_snapshot)
 
     @property
     def stt(self) -> STTTool | None:

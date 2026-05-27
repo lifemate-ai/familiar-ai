@@ -9,6 +9,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 
 from familiar_agent.backend import ToolCall, TurnResult
+from familiar_agent.desires import DesireSystem
 from familiar_agent.exploration import ExplorationTracker
 
 
@@ -208,6 +209,39 @@ async def test_run_end_turn_returns_text():
 
 
 @pytest.mark.asyncio
+async def test_brief_greeting_turn_uses_only_say_and_skips_heavy_prep():
+    agent = _make_agent(with_tts=True, with_camera=True)
+    agent.backend.stream_turn = AsyncMock(
+        return_value=(_turn("end_turn", text="おはよう。"), "おはよう。")
+    )
+
+    morning_mock = AsyncMock(return_value="morning context")
+    companion_mood_mock = AsyncMock(return_value="engaged")
+    workspace_mock = AsyncMock(return_value="[workspace]")
+    patches = dict(_HEAVY_PATCHES)
+    patches["familiar_agent.agent.EmbodiedAgent._morning_reconstruction"] = morning_mock
+    patches["familiar_agent.agent.EmbodiedAgent._infer_companion_mood"] = companion_mood_mock
+    patches["familiar_agent.agent.EmbodiedAgent._gather_workspace_context"] = workspace_mock
+
+    ps = [patch(t, n) for t, n in patches.items()]
+    for p in ps:
+        p.start()
+    try:
+        result = await agent.run("おはよう")
+    finally:
+        for p in ps:
+            p.stop()
+
+    assert result == "おはよう。"
+    stream_kwargs = agent.backend.stream_turn.await_args.kwargs
+    assert stream_kwargs["tools"] == [{"name": "say"}]
+    assert stream_kwargs["max_tokens"] == 120
+    morning_mock.assert_not_awaited()
+    companion_mood_mock.assert_not_awaited()
+    workspace_mock.assert_not_awaited()
+
+
+@pytest.mark.asyncio
 async def test_run_increments_turn_count():
     """run() increments _turn_count on each invocation."""
     agent = _make_agent()
@@ -246,6 +280,48 @@ async def test_run_appends_user_message_to_history():
     finally:
         for p in ps:
             p.stop()
+
+
+@pytest.mark.asyncio
+async def test_repeated_tool_failure_raises_self_protect_without_irritable_tone(tmp_path):
+    agent = _make_agent()
+    agent.backend.stream_turn = AsyncMock(
+        return_value=(_turn("end_turn", text="落ち着いて進めよう。"), "落ち着いて進めよう。")
+    )
+    agent._tool_failure_streak = 3
+    desires = DesireSystem(state_path=tmp_path / "desires.json", companion_name="Kota")
+
+    ps = _patch_heavy()
+    for p in ps:
+        p.start()
+    try:
+        result = await agent.run("助けて", desires=desires)
+    finally:
+        for p in ps:
+            p.stop()
+
+    assert desires.level("self_protect") > 0.0
+    assert "ugh" not in result.lower()
+    assert "annoy" not in result.lower()
+
+
+@pytest.mark.asyncio
+async def test_existing_no_hardware_mode_still_works_with_mental_pipeline():
+    agent = _make_agent(with_tts=False, with_camera=False, with_mcp=False)
+    agent.backend.stream_turn = AsyncMock(
+        return_value=(_turn("end_turn", text="hardwareなしでも動く"), "hardwareなしでも動く")
+    )
+
+    ps = _patch_heavy()
+    for p in ps:
+        p.start()
+    try:
+        result = await agent.run("こんにちは")
+    finally:
+        for p in ps:
+            p.stop()
+
+    assert result == "hardwareなしでも動く"
 
 
 @pytest.mark.asyncio
@@ -339,6 +415,41 @@ async def test_run_tool_results_added_to_messages():
 
     # make_tool_results was called with the tool call and its result
     assert agent.backend.make_tool_results.called
+
+
+@pytest.mark.asyncio
+async def test_run_tool_timeout_is_returned_as_tool_result():
+    """A slow tool call is converted into a textual timeout result."""
+    agent = _make_agent()
+    tc = ToolCall(id="tc1", name="remember", input={"content": "slow"})
+    turn1 = TurnResult(stop_reason="tool_use", text="", tool_calls=[tc])
+    turn2 = TurnResult(stop_reason="end_turn", text="Done.", tool_calls=[])
+    agent.backend.stream_turn = AsyncMock(side_effect=[(turn1, None), (turn2, "Done.")])
+
+    async def _slow_execute(self, name, tool_input):  # noqa: ARG001
+        await asyncio.sleep(0.2)
+        return "late result", None
+
+    patches = dict(_HEAVY_PATCHES)
+    patches["familiar_agent.agent.EmbodiedAgent._execute_tool"] = _slow_execute
+    patches["familiar_agent.agent.EmbodiedAgent._tool_timeout_seconds"] = MagicMock(
+        return_value=0.01
+    )
+
+    ps = [patch(t, n) for t, n in patches.items()]
+    for p in ps:
+        p.start()
+    try:
+        result = await agent.run("remember slowly")
+    finally:
+        for p in ps:
+            p.stop()
+
+    assert result == "Done."
+    collected = agent.backend.make_tool_results.call_args.args[1]
+    assert collected[0][0].startswith("Tool timeout: remember exceeded")
+    assert agent._last_tool_error == collected[0][0]
+    assert agent._tool_failure_streak == 1
 
 
 @pytest.mark.asyncio
@@ -489,7 +600,7 @@ async def test_run_first_turn_calls_morning_reconstruction():
     for p in ps:
         p.start()
     try:
-        await agent.run("hello")
+        await agent.run("今日はどう？")
     finally:
         for p in ps:
             p.stop()

@@ -27,10 +27,13 @@ This project adheres to [Semantic Versioning](https://semver.org/).
 - Online temporal-self context during ordinary turns, with resurfaced memories, unresolved-thread prompts, and within-session self-narrative capture
 - Lightweight adaptive confidence updates for semantic facts and behavior policies, including revision history for experience-driven value shifts
 - Lightweight layered self continuity with inertial proto-self updates, recent intention-result traces, and persistent active concerns
+- Freshness-aware MCP interoception ingestion, persisted heartbeat carryover state, SQLite-backed relationship storage with legacy JSON import, and sample autonomy config files for drives / schedule / operator wrappers
+- Generic runtime substrate foundations: model/tool protocols, ToolRegistry, runtime event/task stores, a provider-neutral ReAct loop, neighbor profile boundary, and a non-embodied `familiar task ...` entry point
 
 ### Changed
 - Lint and test workflows now run for both `develop` and `main`, matching the new default-branch strategy
 - CI now runs the full pytest suite again instead of excluding GUI async stability coverage
+- Camera discovery now browses `_onvif._tcp.local.` via zeroconf, respects RTSP TXT paths when present, and falls back to socket-based local-prefix detection when `ip route` is unavailable
 - GUI settings dialog now keeps JP labels fully visible (including short labels like `名`), refreshed the app to a bright, soft, rounded light theme, split first-turn startup status from "thinking", and increased GUI font sizing for readability.
 - GUI startup now shows the window before heavyweight agent warmup finishes, and surfaces readiness phases such as setup check, agent init, embedding warmup, MCP connect, and realtime STT connect
 - GUI / TUI / REPL setup paths now share the same runtime-oriented env schema, exposing `BASE_URL`, `TOOLS_MODE`, `UTILITY_*`, `SCENE_*`, `REALTIME_STT`, and `FAMILIAR_AUTO_*` consistently
@@ -44,12 +47,14 @@ This project adheres to [Semantic Versioning](https://semver.org/).
 - Camera settings now support optional `CAMERA_PTZ_*` overrides, with fallback to the existing `CAMERA_*` values and RTSP URL credentials when stream and PTZ endpoints differ
 - Agent replies no longer wait on post-response memory/self-model updates, and TAPE planning is skipped when no separate utility backend is configured
 - System prompts now surface at most one active concern and one recent misaligned intention trace, while post-response updates carry those states forward without adding hot-path LLM calls
+- Embodied tool routing now goes through the generic ToolRegistry while preserving existing camera, voice, memory, coding, and MCP behavior
 
 ### Fixed
 - `scripts/new_migration.sh` now accepts Windows-style `--dir` paths in Git Bash so cross-platform CI migration tests pass on `windows-latest`
 - The app no longer exits before opening setup when `API_KEY` is missing; GUI users are routed into first-run setup and non-GUI users get a clear fallback path
 - Realtime STT no longer re-ingests the agent's own speech during or immediately after TTS playback, and repeated echo loops now trigger an automatic reconnect
 - Several async tests that relied on `asyncio.get_event_loop().run_until_complete(...)` now run correctly under `uvloop` and in the full CI suite
+- Short greeting / acknowledgement / correction turns now stay in a lightweight reply path: they avoid exploratory tool chains, skip heavy prompt prep, and cap the response loop to a fast `say()`-first turn
 
 ## [0.1.0] - 2026-02-22
 
