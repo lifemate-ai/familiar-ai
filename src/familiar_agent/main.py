@@ -351,7 +351,7 @@ async def _run_task_command(args: list[str]) -> None:
     from familiar_runtime.events import AgentEvent, EventBus
     from familiar_runtime.models import ModelBackend
     from familiar_runtime.runtime import AgentRuntime
-    from familiar_runtime.tasks import SQLiteTaskStore, TaskStatus
+    from familiar_runtime.tasks import SQLiteTaskStore, TaskStatus, TaskToolProvider
     from familiar_runtime.tools.registry import ToolRegistry
 
     from .backend import create_backend
@@ -398,6 +398,7 @@ async def _run_task_command(args: list[str]) -> None:
         )
 
     event_bus.subscribe(_checkpoint_runtime_event)
+    registry.register(TaskToolProvider(task_store))
 
     system_prompt = (
         "You are familiar task mode: a non-embodied task execution agent. "
