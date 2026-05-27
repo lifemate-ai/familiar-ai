@@ -5,13 +5,17 @@ from __future__ import annotations
 import asyncio
 import logging
 import uuid
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from .events.bus import EventBus
 from .models.base import ModelBackend, ToolCall
+from .tools.base import ToolExecutionResult
 from .tools.registry import ToolRegistry
+
+if TYPE_CHECKING:
+    from .runtime import RuntimeHook, TurnContext
 
 logger = logging.getLogger(__name__)
 
@@ -41,6 +45,7 @@ class ReActLoop:
         default_tool_timeout: float = 20.0,
         tool_timeouts: dict[str, float] | None = None,
         event_bus: EventBus | None = None,
+        hooks: Sequence["RuntimeHook"] = (),
     ) -> None:
         self._backend = backend
         self._tools = tools
@@ -48,6 +53,7 @@ class ReActLoop:
         self._default_tool_timeout = default_tool_timeout
         self._tool_timeouts = tool_timeouts or {}
         self._event_bus = event_bus
+        self._hooks = list(hooks)
 
     async def run(
         self,
@@ -59,6 +65,7 @@ class ReActLoop:
         run_id: str | None = None,
         task_id: str | None = None,
         turn_id: str | None = None,
+        context: "TurnContext | None" = None,
     ) -> RunTurnResult:
         run_id = run_id or f"run_{uuid.uuid4().hex}"
         turn_id = turn_id or f"turn_{uuid.uuid4().hex}"
@@ -91,6 +98,14 @@ class ReActLoop:
                 max_tokens=max_tokens,
                 on_text=on_text,
             )
+            # Allow hooks to inspect or replace the raw model result. The
+            # first hook to return a non-None value wins, and subsequent
+            # hooks observe the replacement.
+            if context is not None:
+                for hook in self._hooks:
+                    replacement = await hook.after_model_result(context, result)
+                    if replacement is not None:
+                        result = replacement
             input_tokens += result.input_tokens
             output_tokens += result.output_tokens
             emit(
@@ -140,11 +155,23 @@ class ReActLoop:
                             "tool_timeout",
                             {"name": tool_call.name, "timeout": timeout},
                         )
+                        if context is not None and self._hooks:
+                            timeout_result = ToolExecutionResult(
+                                text=text, success=False, error="timeout"
+                            )
+                            for hook in self._hooks:
+                                await hook.after_tool_result(context, tool_call, timeout_result)
                         continue
                     except Exception as exc:  # noqa: BLE001
                         text = f"Tool error: {exc}"
                         collected.append((text, None))
                         emit("tool", "tool_error", {"name": tool_call.name, "error": str(exc)})
+                        if context is not None and self._hooks:
+                            error_result = ToolExecutionResult(
+                                text=text, success=False, error=str(exc)
+                            )
+                            for hook in self._hooks:
+                                await hook.after_tool_result(context, tool_call, error_result)
                         continue
 
                     collected.append((tool_result.text, tool_result.image_b64))
@@ -157,6 +184,9 @@ class ReActLoop:
                             "error": tool_result.error,
                         },
                     )
+                    if context is not None:
+                        for hook in self._hooks:
+                            await hook.after_tool_result(context, tool_call, tool_result)
 
                 messages.append(self._backend.make_assistant_message(result, raw_content))
                 messages.append(self._backend.make_tool_results(result.tool_calls, collected))

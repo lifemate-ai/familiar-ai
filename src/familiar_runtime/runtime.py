@@ -9,19 +9,10 @@ from typing import Any, Protocol
 
 from .context import ContextBlock, select_context_blocks
 from .events.bus import EventBus
-from .models.base import ModelBackend
+from .models.base import ModelBackend, ModelTurnResult, ToolCall
 from .react_loop import ReActLoop, RunTurnResult
+from .tools.base import ToolExecutionResult
 from .tools.registry import ToolRegistry
-
-
-class RuntimeHook(Protocol):
-    """Hook interface used by profiles to participate in a turn."""
-
-    async def before_turn(self, ctx: "TurnContext") -> None: ...
-
-    async def build_context(self, ctx: "TurnContext") -> list[ContextBlock]: ...
-
-    async def after_turn(self, ctx: "TurnContext", final_text: str) -> None: ...
 
 
 @dataclass(slots=True)
@@ -33,6 +24,62 @@ class TurnContext:
     task_id: str | None = None
     created_at: float = field(default_factory=time.time)
     metadata: dict[str, Any] = field(default_factory=dict)
+
+
+class RuntimeHook(Protocol):
+    """Hook interface used by profiles to participate in a turn.
+
+    Hooks are invoked in registration order at the documented points.
+    All callbacks are optional in spirit: implementations may inherit from
+    :class:`RuntimeHookBase` for safe no-op defaults.
+    """
+
+    async def before_turn(self, ctx: TurnContext) -> None: ...
+
+    async def build_context(self, ctx: TurnContext) -> list[ContextBlock]: ...
+
+    async def after_model_result(
+        self,
+        ctx: TurnContext,
+        result: ModelTurnResult,
+    ) -> ModelTurnResult | None: ...
+
+    async def after_tool_result(
+        self,
+        ctx: TurnContext,
+        call: ToolCall,
+        result: ToolExecutionResult,
+    ) -> None: ...
+
+    async def after_turn(self, ctx: TurnContext, final_text: str) -> None: ...
+
+
+class RuntimeHookBase:
+    """No-op base class so concrete hooks only override what they need."""
+
+    async def before_turn(self, ctx: TurnContext) -> None:  # noqa: ARG002
+        return None
+
+    async def build_context(self, ctx: TurnContext) -> list[ContextBlock]:  # noqa: ARG002
+        return []
+
+    async def after_model_result(
+        self,
+        ctx: TurnContext,  # noqa: ARG002
+        result: ModelTurnResult,  # noqa: ARG002
+    ) -> ModelTurnResult | None:
+        return None
+
+    async def after_tool_result(
+        self,
+        ctx: TurnContext,  # noqa: ARG002
+        call: ToolCall,  # noqa: ARG002
+        result: ToolExecutionResult,  # noqa: ARG002
+    ) -> None:
+        return None
+
+    async def after_turn(self, ctx: TurnContext, final_text: str) -> None:  # noqa: ARG002
+        return None
 
 
 class AgentRuntime:
@@ -83,12 +130,18 @@ class AgentRuntime:
                 payload={"text": user_input},
                 task_id=task_id,
             )
-        loop = ReActLoop(backend=self._backend, tools=self._tools, event_bus=self._event_bus)
+        loop = ReActLoop(
+            backend=self._backend,
+            tools=self._tools,
+            event_bus=self._event_bus,
+            hooks=self._hooks,
+        )
         result = await loop.run(
             system=system,
             messages=turn_messages,
             max_tokens=max_tokens,
             task_id=task_id,
+            context=ctx,
         )
         for hook in self._hooks:
             await hook.after_turn(ctx, result.final_text)
