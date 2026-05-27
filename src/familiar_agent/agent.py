@@ -55,7 +55,15 @@ from .tools.stt import STTTool
 from .tools.tts import TTSTool
 from ._i18n import _t
 from .mcp_client import MCPClientManager, _resolve_config_path
-from familiar_runtime.tools.legacy import LegacyToolProvider
+from familiar_capabilities import (
+    CameraCapability,
+    CodingCapability,
+    MCPCapability,
+    MemoryCapability,
+    MobilityCapability,
+    ToMCapability,
+    VoiceCapability,
+)
 from familiar_runtime.tools.registry import ToolRegistry
 
 logger = logging.getLogger(__name__)
@@ -1051,75 +1059,16 @@ class EmbodiedAgent:
                 )
 
         if self._camera:
-            registry.register(
-                LegacyToolProvider(
-                    self._camera,
-                    names={"see", "look"},
-                    category="embodiment",
-                    tags={"neighbor"},
-                    before_call=_record_embodied_action,
-                )
-            )
+            registry.register(CameraCapability(self._camera, before_call=_record_embodied_action))
         if self._mobility:
-            registry.register(
-                LegacyToolProvider(
-                    self._mobility,
-                    names={"walk"},
-                    category="embodiment",
-                    tags={"neighbor"},
-                )
-            )
+            registry.register(MobilityCapability(self._mobility))
         if self._tts:
-            registry.register(
-                LegacyToolProvider(
-                    self._tts,
-                    names={"say"},
-                    category="voice",
-                    tags={"neighbor"},
-                )
-            )
-        registry.register(
-            LegacyToolProvider(
-                self._memory_tool,
-                names={"remember", "recall"},
-                category="memory",
-                tags={"neighbor", "task"},
-            )
-        )
-        registry.register(
-            LegacyToolProvider(
-                self._tom_tool,
-                names={"tom"},
-                category="social",
-                tags={"neighbor"},
-            )
-        )
-        registry.register(
-            LegacyToolProvider(
-                self._coding,
-                names={
-                    "read_file",
-                    "write_file",
-                    "edit_file",
-                    "multi_edit_file",
-                    "glob",
-                    "grep",
-                    "git_status",
-                    "git_diff",
-                    "git_apply_patch",
-                    "run_tests",
-                    "bash",
-                },
-                category="coding",
-                tags={"task", "coding"},
-            )
-        )
+            registry.register(VoiceCapability(self._tts))
+        registry.register(MemoryCapability(self._memory_tool, names={"remember", "recall"}))
+        registry.register(ToMCapability(self._tom_tool))
+        registry.register(CodingCapability(self._coding))
         if self._mcp:
-            provider = LegacyToolProvider(
-                self._mcp,
-                category="mcp",
-                tags={"neighbor", "task"},
-            )
+            provider = MCPCapability(self._mcp)
             registry.register(provider)
             registry.register_fallback(provider)
         return registry

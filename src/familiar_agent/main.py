@@ -356,6 +356,7 @@ async def _run_task_command(args: list[str]) -> None:
 
     from .backend import create_backend
     from .mcp_client import MCPClientManager, _resolve_config_path
+    from .tools.coding import CodingTool
 
     parser = argparse.ArgumentParser(prog="familiar task", add_help=True)
     parser.add_argument("goal", nargs="+", help="Task goal to execute")
@@ -365,7 +366,7 @@ async def _run_task_command(args: list[str]) -> None:
     config = AgentConfig()
     backend = cast(ModelBackend, create_backend(config))
     registry = ToolRegistry()
-    registry.register(CodingCapability(config.coding))
+    registry.register(CodingCapability(CodingTool(config.coding)))
 
     mcp: MCPClientManager | None = None
     cfg_path = _resolve_config_path()
