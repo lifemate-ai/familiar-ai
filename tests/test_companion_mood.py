@@ -157,6 +157,10 @@ class TestInferCompanionMood:
         agent.backend = mock_backend
         agent._utility_backend = mock_backend
 
+        from familiar_neighbor.embodied_hook import EmbodiedAgentHook
+
+        agent._hook = EmbodiedAgentHook(agent)
+
         return agent
 
     @pytest.mark.asyncio
@@ -338,6 +342,10 @@ class TestFrustratedBoostsDesire:
 
         agent._concerns = ConcernEngine()
         agent._self_state = SelfState()
+
+        from familiar_neighbor.embodied_hook import EmbodiedAgentHook
+
+        agent._hook = EmbodiedAgentHook(agent)
 
         desires = MagicMock(spec=DesireSystem)
         desires.curiosity_target = None

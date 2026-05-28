@@ -77,6 +77,10 @@ def _make_agent():
     agent._mood_intensity = 0.0
     agent._mood_set_at = _time.time()
 
+    from familiar_neighbor.embodied_hook import EmbodiedAgentHook
+
+    agent._hook = EmbodiedAgentHook(agent)
+
     return agent
 
 

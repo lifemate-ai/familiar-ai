@@ -155,6 +155,13 @@ def _make_agent(*, with_tts: bool = False, with_camera: bool = False, with_mcp: 
     agent._memory_worker.is_running = True
     agent._mood = "neutral"
     agent._mood_intensity = 0.0
+
+    # Per-turn cognition pipeline (PR3 runtime reorg).  __new__ skipped
+    # the EmbodiedAgent.__init__ that normally wires the hook, so attach
+    # one here so agent.run() can delegate prepare_turn / commit_after_end_turn.
+    from familiar_neighbor.embodied_hook import EmbodiedAgentHook
+
+    agent._hook = EmbodiedAgentHook(agent)
     agent._mood_set_at = _time.time()
 
     return agent
