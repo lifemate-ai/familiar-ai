@@ -26,17 +26,69 @@ class TurnContext:
     metadata: dict[str, Any] = field(default_factory=dict)
 
 
+@dataclass(slots=True)
+class RetryDecision:
+    """Hook-returnable directive for re-running a turn iteration.
+
+    Reserved shape for the upcoming embodied agent thin-wrap (see PR3 in
+    ``plans/familiar-ai-codex-usage-limit-3-familia-agile-castle.md``).
+    A hook's ``after_model_result`` can return one of these to tell the
+    ReAct loop to reject the model's reply, splice an inserted user
+    message back into history, and continue the loop instead of finishing
+    the turn.
+
+    The runtime does NOT yet honour ``RetryDecision`` returns from hooks;
+    this PR only pins the shape so callers can rely on it.
+    """
+
+    retry: bool = False
+    inject_user_message: str | None = None
+
+
+class InterruptSource(Protocol):
+    """Polling shim a profile can hand the runtime to surface async user input.
+
+    Reserved shape for the upcoming embodied agent thin-wrap (see PR3).
+    The neighbour profile drains an ``asyncio.Queue`` between ReAct
+    iterations so unprompted user remarks get folded into the in-flight
+    turn rather than dropped on the floor.
+
+    The runtime does NOT yet poll any ``InterruptSource``; this PR only
+    pins the shape so callers can rely on it.
+    """
+
+    async def drain(self) -> list[str]:
+        """Return all currently-queued user-side messages, removing them."""
+        ...
+
+    def empty(self) -> bool:
+        """Return True when ``drain()`` would return an empty list."""
+        ...
+
+
 class RuntimeHook(Protocol):
     """Hook interface used by profiles to participate in a turn.
 
     Hooks are invoked in registration order at the documented points.
     All callbacks are optional in spirit: implementations may inherit from
     :class:`RuntimeHookBase` for safe no-op defaults.
+
+    ``mid_turn_inject`` is a *reserved* hook slot (see PR3 plan): the
+    runtime declares it for type-stability and the base class returns ``[]``,
+    but the ReAct loop does not yet call it.  PR3 wires the call into
+    :class:`ReActLoop` so profiles can inject per-iteration ``ContextBlock``
+    extras (e.g. inner-voice notes, say() reminders).
     """
 
     async def before_turn(self, ctx: TurnContext) -> None: ...
 
     async def build_context(self, ctx: TurnContext) -> list[ContextBlock]: ...
+
+    async def mid_turn_inject(
+        self,
+        ctx: TurnContext,
+        iteration: int,
+    ) -> list[ContextBlock]: ...
 
     async def after_model_result(
         self,
@@ -61,6 +113,13 @@ class RuntimeHookBase:
         return None
 
     async def build_context(self, ctx: TurnContext) -> list[ContextBlock]:  # noqa: ARG002
+        return []
+
+    async def mid_turn_inject(
+        self,
+        ctx: TurnContext,  # noqa: ARG002
+        iteration: int,  # noqa: ARG002
+    ) -> list[ContextBlock]:
         return []
 
     async def after_model_result(
@@ -109,7 +168,13 @@ class AgentRuntime:
         system_prompt: str = "",
         messages: list[Any] | None = None,
         max_tokens: int = 4096,
+        interrupt_source: InterruptSource | None = None,  # noqa: ARG002
     ) -> RunTurnResult:
+        # ``interrupt_source`` is a reserved parameter (see PR3 plan): the
+        # runtime accepts it now so the embodied agent thin-wrap can pass
+        # an ``asyncio.Queue`` adapter without breaking its call site, but
+        # ReActLoop does not yet poll it.  The arg is intentionally not
+        # surfaced into TurnContext until the polling is wired up.
         ctx = TurnContext(user_input=user_input, profile=profile, task_id=task_id)
         for hook in self._hooks:
             await hook.before_turn(ctx)

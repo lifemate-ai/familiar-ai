@@ -6,7 +6,7 @@ from dataclasses import dataclass
 import re
 
 from .interoception import InteroceptivePressure
-from familiar_agent.mental_state import AffectiveState
+from .mental_state import AffectiveState
 
 _ADVICE_PATTERNS = [r"どう", r"教えて", r"advice", r"should i", r"どうしたら"]
 _ACTION_PATTERNS = [r"して", r"やって", r"run", r"fix", r"please do", r"頼む"]

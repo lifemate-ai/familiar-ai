@@ -7,7 +7,7 @@ import re
 from typing import Iterable
 
 from .interoception import InteroceptivePressure
-from familiar_agent.mental_state import AffectiveState
+from .mental_state import AffectiveState
 from .prediction import PredictionSignal
 
 _DISTRESS_PATTERNS = [

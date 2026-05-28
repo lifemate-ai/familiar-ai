@@ -9,7 +9,7 @@ from pathlib import Path
 import time
 from typing import Protocol
 
-from familiar_agent.mental_state import InteroceptiveSignal
+from .mental_state import InteroceptiveSignal
 
 
 def _clamp01(value: float) -> float:

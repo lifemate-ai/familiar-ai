@@ -9,7 +9,13 @@ import pytest
 
 from familiar_runtime.context import ContextBlock
 from familiar_runtime.models import ModelTurnResult, ToolCall
-from familiar_runtime.runtime import AgentRuntime, RuntimeHookBase, TurnContext
+from familiar_runtime.runtime import (
+    AgentRuntime,
+    InterruptSource,
+    RetryDecision,
+    RuntimeHookBase,
+    TurnContext,
+)
 from familiar_runtime.tools.base import ToolExecutionResult, ToolSpec
 from familiar_runtime.tools.registry import ToolRegistry
 
@@ -159,11 +165,92 @@ async def test_runtime_hook_base_is_a_safe_default() -> None:
     ctx = TurnContext(user_input="hi", profile="task")
     assert await hook.before_turn(ctx) is None
     assert await hook.build_context(ctx) == []
+    assert await hook.mid_turn_inject(ctx, 0) == []
     result = ModelTurnResult(stop_reason="end_turn", text="ok")
     assert await hook.after_model_result(ctx, result) is None
     tc = ToolCall(id="t", name="echo", input={})
     assert await hook.after_tool_result(ctx, tc, ToolExecutionResult(text="ok")) is None
     assert await hook.after_turn(ctx, "ok") is None
+
+
+def test_retry_decision_defaults_to_noop() -> None:
+    """RetryDecision is the reserved shape PR3 will start honouring."""
+    decision = RetryDecision()
+    assert decision.retry is False
+    assert decision.inject_user_message is None
+
+
+def test_retry_decision_carries_injected_message() -> None:
+    decision = RetryDecision(retry=True, inject_user_message="please be brief")
+    assert decision.retry is True
+    assert decision.inject_user_message == "please be brief"
+
+
+@pytest.mark.asyncio
+async def test_interrupt_source_protocol_acceptable_shape() -> None:
+    """A trivial Queue-backed source satisfies the reserved InterruptSource shape."""
+
+    class _ListSource:
+        def __init__(self, items: list[str]) -> None:
+            self._items = list(items)
+
+        async def drain(self) -> list[str]:
+            out = self._items
+            self._items = []
+            return out
+
+        def empty(self) -> bool:
+            return not self._items
+
+    source: InterruptSource = _ListSource(["one", "two"])
+    assert not source.empty()
+    drained = await source.drain()
+    assert drained == ["one", "two"]
+    assert source.empty()
+
+
+@pytest.mark.asyncio
+async def test_run_turn_accepts_interrupt_source_without_polling() -> None:
+    """PR2 only reserves the parameter; passing one must not change behaviour."""
+
+    class _StubSource:
+        async def drain(self) -> list[str]:
+            raise AssertionError("PR2 must not poll the interrupt source yet")
+
+        def empty(self) -> bool:
+            return True
+
+    runtime, _ = _build_runtime(
+        turns=[ModelTurnResult(stop_reason="end_turn", text="ack")],
+    )
+    result = await runtime.run_turn("hi", interrupt_source=_StubSource())
+    assert result.final_text == "ack"
+
+
+@pytest.mark.asyncio
+async def test_mid_turn_inject_is_reserved_but_not_yet_called() -> None:
+    """RuntimeHook declares mid_turn_inject, but ReActLoop will not call it until PR3."""
+
+    class _Tripwire(RuntimeHookBase):
+        def __init__(self) -> None:
+            self.calls = 0
+
+        async def mid_turn_inject(
+            self,
+            ctx: TurnContext,
+            iteration: int,
+        ) -> list[ContextBlock]:
+            self.calls += 1
+            return []
+
+    tripwire = _Tripwire()
+    runtime, _ = _build_runtime(
+        turns=[ModelTurnResult(stop_reason="end_turn", text="ok")],
+        hooks=[tripwire],
+    )
+    await runtime.run_turn("ping")
+    # The runtime accepts the hook method but has not yet wired the call.
+    assert tripwire.calls == 0
 
 
 @pytest.mark.asyncio
