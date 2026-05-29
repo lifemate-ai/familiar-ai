@@ -21,13 +21,19 @@ from familiar_neighbor.prompts import (
 
 
 # Hash of the assembled string when max_steps=50.  If you intend to edit the
-# prompt, regenerate via:
+# prompt (in embodied_core.md OR any runtime fragment under
+# familiar_runtime/prompts/), regenerate via:
 #   uv run python -c "from familiar_neighbor.prompts import assemble_neighbor_system_prompt; \
 #       import hashlib; \
 #       print(hashlib.sha256(assemble_neighbor_system_prompt(max_steps=50).encode()).hexdigest())"
-EXPECTED_ASSEMBLED_SHA256_MAX_STEPS_50 = hashlib.sha256(
-    load_embodied_core_template().format(max_steps=50).encode("utf-8")
-).hexdigest()
+#
+# The literal hex below was pinned after extracting generic fragments
+# (react_loop, voice_rules_generic, language_match, gricean_maxims, self_check,
+# step_budget, tool_rules) into familiar_runtime/prompts/.  It is byte-for-byte
+# identical to the pre-split assembled output.
+EXPECTED_ASSEMBLED_SHA256_MAX_STEPS_50 = (
+    "5cebeb27a3254aa75e01c7dd49165698044b778077719f0d5a876f66e4fd5776"
+)
 
 
 def test_neighbor_profile_constant_is_neighbor() -> None:
@@ -35,11 +41,16 @@ def test_neighbor_profile_constant_is_neighbor() -> None:
 
 
 def test_template_contains_canonical_markers() -> None:
-    """The embodied template still has the structural anchors agent.py expects."""
+    """The embodied template still has the structural anchors agent.py expects.
+
+    After the runtime/neighbor split, ``{max_steps}`` lives in the runtime
+    ``step_budget`` fragment, so the template itself no longer contains it;
+    we instead anchor on the ``{step_budget}`` placeholder.
+    """
     text = load_embodied_core_template()
     assert "(agent :type embodied" in text
     assert "(body" in text  # _get_body_description() rewrites this block at runtime
-    assert "{max_steps}" in text
+    assert "{step_budget}" in text  # spliced in by assemble_neighbor_system_prompt
     assert text.startswith("\n")  # leading newline preserved from the triple-quoted literal
     assert text.endswith("\n")
 
