@@ -7,11 +7,13 @@ snapshot building) and the post-end-turn commit (mental-state bus append,
 post-response pipeline kick) so the ReAct loop body in ``agent.py`` reads
 as a thin model/tool dispatcher around the prepared state.
 
-This is *not yet* a runtime ``RuntimeHook`` Protocol implementation; it
-holds a back-reference to the ``EmbodiedAgent`` instance instead.  The
-``RuntimeHook`` substrate (``mid_turn_inject`` / ``RetryDecision`` /
-``InterruptSource``) was reserved in PR2 and is intentionally left for a
-later migration that can re-wire ``AgentRuntime`` end-to-end.
+``EmbodiedAgentHook`` subclasses :class:`RuntimeHookBase`, so it satisfies
+the ``RuntimeHook`` interface (inheriting safe no-op lifecycle methods) while
+still holding a back-reference to the ``EmbodiedAgent`` instance for its
+``prepare_turn`` / ``commit_after_end_turn`` flow.  The substrate now honours
+``mid_turn_inject`` / ``RetryDecision`` / ``InterruptSource`` (wired in
+``ReActLoop``); routing ``EmbodiedAgent.run`` through ``AgentRuntime.run_turn``
+end-to-end remains a later migration.
 """
 
 from __future__ import annotations
@@ -36,6 +38,7 @@ from familiar_neighbor.mind.appraisal import AppraisalContext, AppraisalEngine
 from familiar_neighbor.mind.desires import DesireSystem
 from familiar_neighbor.mind.mental_state import MentalStateBus, MentalStateSnapshot
 from familiar_neighbor.mind.social_policy import SocialPolicyDecision, SocialPolicyEngine
+from familiar_runtime.runtime import RuntimeHookBase
 
 if TYPE_CHECKING:
     from familiar_agent.agent import EmbodiedAgent
@@ -103,7 +106,7 @@ class PreparedTurn:
     unfinished_business: list[dict] = field(default_factory=list)
 
 
-class EmbodiedAgentHook:
+class EmbodiedAgentHook(RuntimeHookBase):
     """Bridges the embodied profile's cognition with the ReAct loop in ``agent.py``.
 
     The hook holds a back-reference to its owning ``EmbodiedAgent`` so it
@@ -111,6 +114,12 @@ class EmbodiedAgentHook:
     appraisal, mental-state bus, …) without taking every dependency as
     a constructor parameter.  The agent itself stays the single owner of
     long-lived state; the hook only encapsulates the per-turn flow.
+
+    Subclassing :class:`RuntimeHookBase` makes it a structural ``RuntimeHook``
+    (inheriting no-op ``before_turn`` / ``build_context`` / ``mid_turn_inject`` /
+    ``after_model_result`` / ``after_tool_result`` / ``after_turn`` defaults);
+    the embodied flow currently drives the loop via ``prepare_turn`` /
+    ``commit_after_end_turn`` rather than those lifecycle hooks.
     """
 
     def __init__(self, agent: "EmbodiedAgent") -> None:

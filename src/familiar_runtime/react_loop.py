@@ -15,9 +15,26 @@ from .tools.base import ToolExecutionResult
 from .tools.registry import ToolRegistry
 
 if TYPE_CHECKING:
-    from .runtime import RuntimeHook, TurnContext
+    from .context import ContextBlock
+    from .runtime import InterruptSource, RuntimeHook, TurnContext
 
 logger = logging.getLogger(__name__)
+
+
+def _with_extra_system(
+    system: str | tuple[str, str],
+    extra: str,
+) -> str | tuple[str, str]:
+    """Append ``extra`` to a system prompt, preserving the (stable, variable) split.
+
+    ``mid_turn_inject`` blocks are spliced into the *variable* half of a cached
+    tuple prompt so the stable prefix keeps its cache_control eligibility.
+    """
+    if isinstance(system, tuple):
+        stable, variable = system
+        merged = f"{variable}\n\n{extra}" if variable else extra
+        return (stable, merged)
+    return f"{system}\n\n{extra}" if system else extra
 
 
 @dataclass(slots=True)
@@ -66,7 +83,10 @@ class ReActLoop:
         task_id: str | None = None,
         turn_id: str | None = None,
         context: "TurnContext | None" = None,
+        interrupt_source: "InterruptSource | None" = None,
     ) -> RunTurnResult:
+        from .runtime import RetryDecision  # local import avoids circular import
+
         run_id = run_id or f"run_{uuid.uuid4().hex}"
         turn_id = turn_id or f"turn_{uuid.uuid4().hex}"
         event_ids: list[str] = []
@@ -90,22 +110,51 @@ class ReActLoop:
         emit("system", "turn_start", {})
 
         for iteration in range(self._max_iterations):
+            # Surface any async user input queued since the last model call so
+            # an unprompted remark gets folded into the in-flight turn instead
+            # of being dropped.
+            if interrupt_source is not None and not interrupt_source.empty():
+                drained = await interrupt_source.drain()
+                if drained:
+                    joined = " / ".join(drained)
+                    messages.append(
+                        self._backend.make_user_message(f"[User interrupted]: {joined}")
+                    )
+                    emit("user", "interrupt", {"count": len(drained), "text": joined})
+
+            # Let hooks inject per-iteration context (inner-voice notes, gentle
+            # reminders). Blocks are spliced into this iteration's system prompt
+            # so message-role alternation stays valid after tool results.
+            iter_system = system
+            if context is not None and self._hooks:
+                extra_blocks: list[ContextBlock] = []
+                for hook in self._hooks:
+                    extra_blocks.extend(await hook.mid_turn_inject(context, iteration))
+                if extra_blocks:
+                    rendered = "\n\n".join(block.rendered_text() for block in extra_blocks)
+                    iter_system = _with_extra_system(system, rendered)
+
             emit("model", "model_request_start", {"iteration": iteration + 1})
             result, raw_content = await self._backend.stream_turn(
-                system=system,
+                system=iter_system,
                 messages=messages,
                 tools=self._tools.tool_defs(),
                 max_tokens=max_tokens,
                 on_text=on_text,
             )
             # Allow hooks to inspect or replace the raw model result. The
-            # first hook to return a non-None value wins, and subsequent
-            # hooks observe the replacement.
+            # first hook to return a non-None ``ModelTurnResult`` wins, and
+            # subsequent hooks observe the replacement. A hook may instead
+            # return a ``RetryDecision`` to reject the reply and re-run the
+            # loop with an injected correction message.
+            retry_directive: RetryDecision | None = None
             if context is not None:
                 for hook in self._hooks:
-                    replacement = await hook.after_model_result(context, result)
-                    if replacement is not None:
-                        result = replacement
+                    outcome = await hook.after_model_result(context, result)
+                    if isinstance(outcome, RetryDecision):
+                        retry_directive = outcome
+                    elif outcome is not None:
+                        result = outcome
             input_tokens += result.input_tokens
             output_tokens += result.output_tokens
             emit(
@@ -116,6 +165,21 @@ class ReActLoop:
                     "tool_calls": [tool_call.name for tool_call in result.tool_calls],
                 },
             )
+
+            if retry_directive is not None and retry_directive.retry:
+                # Keep the rejected reply in history for context, then splice the
+                # correction and continue the loop instead of finishing the turn.
+                messages.append(self._backend.make_assistant_message(result, raw_content))
+                if retry_directive.inject_user_message:
+                    messages.append(
+                        self._backend.make_user_message(retry_directive.inject_user_message)
+                    )
+                emit(
+                    "system",
+                    "retry",
+                    {"iteration": iteration + 1, "stop_reason": result.stop_reason},
+                )
+                continue
 
             if result.stop_reason == "end_turn":
                 messages.append(self._backend.make_assistant_message(result, raw_content))

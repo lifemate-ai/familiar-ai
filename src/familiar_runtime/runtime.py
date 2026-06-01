@@ -30,15 +30,12 @@ class TurnContext:
 class RetryDecision:
     """Hook-returnable directive for re-running a turn iteration.
 
-    Reserved shape for the upcoming embodied agent thin-wrap (see PR3 in
-    ``plans/familiar-ai-codex-usage-limit-3-familia-agile-castle.md``).
     A hook's ``after_model_result`` can return one of these to tell the
     ReAct loop to reject the model's reply, splice an inserted user
     message back into history, and continue the loop instead of finishing
-    the turn.
-
-    The runtime does NOT yet honour ``RetryDecision`` returns from hooks;
-    this PR only pins the shape so callers can rely on it.
+    the turn (e.g. a coherence gate that found a logical error). The loop
+    honours ``retry=True`` by keeping the rejected reply in history,
+    injecting ``inject_user_message`` when set, and looping again.
     """
 
     retry: bool = False
@@ -48,13 +45,9 @@ class RetryDecision:
 class InterruptSource(Protocol):
     """Polling shim a profile can hand the runtime to surface async user input.
 
-    Reserved shape for the upcoming embodied agent thin-wrap (see PR3).
-    The neighbour profile drains an ``asyncio.Queue`` between ReAct
-    iterations so unprompted user remarks get folded into the in-flight
-    turn rather than dropped on the floor.
-
-    The runtime does NOT yet poll any ``InterruptSource``; this PR only
-    pins the shape so callers can rely on it.
+    The ReAct loop drains the source between iterations so unprompted user
+    remarks (e.g. items pushed onto an ``asyncio.Queue``) get folded into
+    the in-flight turn rather than dropped on the floor.
     """
 
     async def drain(self) -> list[str]:
@@ -73,11 +66,10 @@ class RuntimeHook(Protocol):
     All callbacks are optional in spirit: implementations may inherit from
     :class:`RuntimeHookBase` for safe no-op defaults.
 
-    ``mid_turn_inject`` is a *reserved* hook slot (see PR3 plan): the
-    runtime declares it for type-stability and the base class returns ``[]``,
-    but the ReAct loop does not yet call it.  PR3 wires the call into
-    :class:`ReActLoop` so profiles can inject per-iteration ``ContextBlock``
-    extras (e.g. inner-voice notes, say() reminders).
+    ``mid_turn_inject`` is called by :class:`ReActLoop` once per iteration so
+    profiles can inject per-iteration ``ContextBlock`` extras (e.g. inner-voice
+    notes, say() reminders); the blocks are spliced into that iteration's
+    system prompt.
     """
 
     async def before_turn(self, ctx: TurnContext) -> None: ...
@@ -94,7 +86,7 @@ class RuntimeHook(Protocol):
         self,
         ctx: TurnContext,
         result: ModelTurnResult,
-    ) -> ModelTurnResult | None: ...
+    ) -> ModelTurnResult | RetryDecision | None: ...
 
     async def after_tool_result(
         self,
@@ -126,7 +118,7 @@ class RuntimeHookBase:
         self,
         ctx: TurnContext,  # noqa: ARG002
         result: ModelTurnResult,  # noqa: ARG002
-    ) -> ModelTurnResult | None:
+    ) -> ModelTurnResult | RetryDecision | None:
         return None
 
     async def after_tool_result(
@@ -168,13 +160,10 @@ class AgentRuntime:
         system_prompt: str = "",
         messages: list[Any] | None = None,
         max_tokens: int = 4096,
-        interrupt_source: InterruptSource | None = None,  # noqa: ARG002
+        interrupt_source: InterruptSource | None = None,
     ) -> RunTurnResult:
-        # ``interrupt_source`` is a reserved parameter (see PR3 plan): the
-        # runtime accepts it now so the embodied agent thin-wrap can pass
-        # an ``asyncio.Queue`` adapter without breaking its call site, but
-        # ReActLoop does not yet poll it.  The arg is intentionally not
-        # surfaced into TurnContext until the polling is wired up.
+        # ``interrupt_source`` is polled by the ReAct loop between iterations so
+        # async user input gets folded into the in-flight turn (see ReActLoop.run).
         ctx = TurnContext(user_input=user_input, profile=profile, task_id=task_id)
         for hook in self._hooks:
             await hook.before_turn(ctx)
@@ -207,6 +196,7 @@ class AgentRuntime:
             max_tokens=max_tokens,
             task_id=task_id,
             context=ctx,
+            interrupt_source=interrupt_source,
         )
         for hook in self._hooks:
             await hook.after_turn(ctx, result.final_text)

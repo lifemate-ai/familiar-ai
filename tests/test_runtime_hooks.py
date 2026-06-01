@@ -210,12 +210,12 @@ async def test_interrupt_source_protocol_acceptable_shape() -> None:
 
 
 @pytest.mark.asyncio
-async def test_run_turn_accepts_interrupt_source_without_polling() -> None:
-    """PR2 only reserves the parameter; passing one must not change behaviour."""
+async def test_empty_interrupt_source_is_not_drained() -> None:
+    """An empty source is checked via empty() and never drained."""
 
     class _StubSource:
         async def drain(self) -> list[str]:
-            raise AssertionError("PR2 must not poll the interrupt source yet")
+            raise AssertionError("empty() guards the drain; drain must not run")
 
         def empty(self) -> bool:
             return True
@@ -228,29 +228,138 @@ async def test_run_turn_accepts_interrupt_source_without_polling() -> None:
 
 
 @pytest.mark.asyncio
-async def test_mid_turn_inject_is_reserved_but_not_yet_called() -> None:
-    """RuntimeHook declares mid_turn_inject, but ReActLoop will not call it until PR3."""
+async def test_interrupt_source_drains_into_messages() -> None:
+    """A non-empty source is drained and folded into the turn as a user message."""
 
-    class _Tripwire(RuntimeHookBase):
+    class _OneShotSource:
+        def __init__(self, items: list[str]) -> None:
+            self._items = list(items)
+
+        async def drain(self) -> list[str]:
+            out = self._items
+            self._items = []
+            return out
+
+        def empty(self) -> bool:
+            return not self._items
+
+    backend = _ScriptedBackend([ModelTurnResult(stop_reason="end_turn", text="done")])
+    registry = ToolRegistry()
+    runtime = AgentRuntime(backend=backend, tools=registry, hooks=[])
+    messages: list[Any] = []
+    result = await runtime.run_turn(
+        "go",
+        messages=messages,
+        interrupt_source=_OneShotSource(["hey wait", "look here"]),
+    )
+    assert result.final_text == "done"
+    injected = [
+        m
+        for m in messages
+        if m.get("role") == "user" and "[User interrupted]" in str(m.get("content"))
+    ]
+    assert injected
+    assert "hey wait / look here" in str(injected[0]["content"])
+
+
+@pytest.mark.asyncio
+async def test_mid_turn_inject_called_each_iteration() -> None:
+    """ReActLoop calls mid_turn_inject once per model iteration."""
+
+    class _Counter(RuntimeHookBase):
         def __init__(self) -> None:
-            self.calls = 0
+            self.iterations: list[int] = []
 
         async def mid_turn_inject(
             self,
             ctx: TurnContext,
             iteration: int,
         ) -> list[ContextBlock]:
-            self.calls += 1
+            self.iterations.append(iteration)
             return []
 
-    tripwire = _Tripwire()
+    counter = _Counter()
     runtime, _ = _build_runtime(
-        turns=[ModelTurnResult(stop_reason="end_turn", text="ok")],
-        hooks=[tripwire],
+        turns=[
+            ModelTurnResult(
+                stop_reason="tool_use",
+                text="",
+                tool_calls=[ToolCall(id="tc1", name="echo", input={"text": "x"})],
+            ),
+            ModelTurnResult(stop_reason="end_turn", text="ok"),
+        ],
+        hooks=[counter],
+        tool_provider=_EchoTool(),
     )
     await runtime.run_turn("ping")
-    # The runtime accepts the hook method but has not yet wired the call.
-    assert tripwire.calls == 0
+    # Two model iterations (one tool_use, one end_turn) → two injections.
+    assert counter.iterations == [0, 1]
+
+
+@pytest.mark.asyncio
+async def test_mid_turn_inject_blocks_injected_into_system() -> None:
+    """Blocks returned from mid_turn_inject are spliced into the iteration system."""
+    captured_systems: list[Any] = []
+
+    class _SystemCapturingBackend(_ScriptedBackend):
+        async def stream_turn(self, **kwargs: Any) -> tuple[ModelTurnResult, Any]:
+            captured_systems.append(kwargs["system"])
+            return await super().stream_turn(**kwargs)
+
+    class _Injector(RuntimeHookBase):
+        async def mid_turn_inject(
+            self,
+            ctx: TurnContext,
+            iteration: int,
+        ) -> list[ContextBlock]:
+            return [ContextBlock(source="inner", text="[inner] keep it short", priority=1.0)]
+
+    backend = _SystemCapturingBackend([ModelTurnResult(stop_reason="end_turn", text="ok")])
+    registry = ToolRegistry()
+    runtime = AgentRuntime(backend=backend, tools=registry, hooks=[_Injector()])
+    await runtime.run_turn("ping", system_prompt="BASE")
+    assert captured_systems
+    assert "[inner] keep it short" in str(captured_systems[0])
+
+
+@pytest.mark.asyncio
+async def test_after_model_result_retry_decision_continues_loop() -> None:
+    """A RetryDecision from after_model_result rejects the reply and re-runs the loop."""
+
+    class _CoherenceGate(RuntimeHookBase):
+        def __init__(self) -> None:
+            self.seen = 0
+
+        async def after_model_result(
+            self,
+            ctx: TurnContext,
+            result: ModelTurnResult,
+        ) -> ModelTurnResult | RetryDecision | None:
+            self.seen += 1
+            if self.seen == 1:
+                return RetryDecision(
+                    retry=True,
+                    inject_user_message="[SELF-CHECK] fix the contradiction.",
+                )
+            return None
+
+    gate = _CoherenceGate()
+    backend = _ScriptedBackend(
+        [
+            ModelTurnResult(stop_reason="end_turn", text="bad answer"),
+            ModelTurnResult(stop_reason="end_turn", text="good answer"),
+        ]
+    )
+    registry = ToolRegistry()
+    runtime = AgentRuntime(backend=backend, tools=registry, hooks=[gate])
+    messages: list[Any] = []
+    result = await runtime.run_turn("hi", messages=messages)
+    assert result.final_text == "good answer"
+    assert gate.seen == 2
+    injected = [
+        m for m in messages if m.get("role") == "user" and "[SELF-CHECK]" in str(m.get("content"))
+    ]
+    assert injected
 
 
 @pytest.mark.asyncio
