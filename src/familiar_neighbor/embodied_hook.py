@@ -388,6 +388,11 @@ class EmbodiedAgentHook(RuntimeHookBase):
                     + "[Open unfinished business]\n"
                     + "\n".join(f"- {item['summary'][:160]}" for item in unfinished_business[:3])
                 )
+            commitments_ctx = agent._commitments_context()
+            if commitments_ctx:
+                continuity_ctx = (
+                    continuity_ctx + ("\n\n" if continuity_ctx else "") + commitments_ctx
+                )
             if plan_ctx:
                 logger.debug("TAPE plan (cached): %s", plan_ctx[:80])
             if workspace_ctx:
