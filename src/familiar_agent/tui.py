@@ -24,9 +24,11 @@ from ._ui_helpers import (
     ACTION_ICONS,
     DESIRE_COOLDOWN as _DESIRE_COOLDOWN,
     IDLE_CHECK_INTERVAL as _IDLE_CHECK_INTERVAL,
+    commitment_reminder_prompt,
     desire_tick_prompt,
     format_action as _format_action,
     format_tool_result as _format_tool_result,
+    should_fire_commitment_reminder,
     should_fire_idle_desire,
 )
 from .realtime_stt_session import create_realtime_stt_controller, RealtimeSttController
@@ -247,6 +249,7 @@ class FamiliarApp(App):
         for line in _make_banner(include_commands=False).splitlines():
             log.write(f"[bold]{line}[/bold]" if "familiar-ai" in line else f"[dim]{line}[/dim]")
         self._log_system(_t("startup", log_path=str(self._log_path)))
+        self.set_interval(IDLE_CHECK_INTERVAL, self._reminder_tick)
         self.set_interval(IDLE_CHECK_INTERVAL, self._desire_tick)
         self.run_worker(self._process_queue(), exclusive=False)
         # Start realtime STT if configured
@@ -348,6 +351,13 @@ class FamiliarApp(App):
             text = await self._input_queue.get()
             if text is None:
                 break
+            if self._agent_running:
+                # An autonomous turn (reminder/desire tick) started while we were
+                # parked in get(); put the input back so the running turn absorbs
+                # it via interrupt_queue instead of starting a second agent.run.
+                await self._input_queue.put(text)
+                await asyncio.sleep(0.05)
+                continue
             await self._run_agent(text)
 
     async def _spinner_loop(
@@ -508,6 +518,36 @@ class FamiliarApp(App):
                     await spinner_task
             stream.update("")
             self._agent_running = False
+
+    async def _reminder_tick(self) -> None:
+        """Proactively surface due commitments when idle (independent of auto_desire)."""
+        store = getattr(self.agent, "_commitment_store", None)
+        if store is None or not getattr(self.agent.config, "proactive_reminders", True):
+            return
+        try:
+            heartbeat = getattr(self.agent, "_heartbeat", None)
+            quiet = heartbeat.routine_state().quiet_hours if heartbeat else False
+            reminders = should_fire_commitment_reminder(
+                agent_running=self._agent_running,
+                has_pending_input=not self._input_queue.empty(),
+                last_interaction=self._last_interaction,
+                now=time.time(),
+                store=store,
+                quiet_hours=quiet,
+            )
+            if not reminders:
+                return
+            # Re-check the gate around the awaited run (input may have arrived).
+            if self._agent_running or not self._input_queue.empty():
+                return
+            # Record the fire BEFORE the turn: the cadence advances regardless of
+            # the turn's outcome, and a mid-turn snooze reset survives intact.
+            store.mark_reminded([c.id for c in reminders], at=time.time())
+        except Exception:
+            logger.exception("reminder tick gate failed; skipping this tick")
+            return
+        self._last_interaction = time.time()
+        await self._run_agent("", inner_voice=commitment_reminder_prompt(reminders))
 
     async def _desire_tick(self) -> None:
         """Check desires and fire autonomous actions when idle."""

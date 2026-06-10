@@ -21,8 +21,10 @@ from ._i18n import BANNER, _t
 from ._ui_helpers import (
     DESIRE_COOLDOWN,
     IDLE_CHECK_INTERVAL,
+    commitment_reminder_prompt,
     desire_tick_prompt,
     format_action as _format_action,
+    should_fire_commitment_reminder,
     should_fire_idle_desire,
 )
 
@@ -152,6 +154,54 @@ async def repl(agent: EmbodiedAgent, desires: DesireSystem, debug: bool = False)
                 queued_input = None
 
             if queued_input is None and input_queue.empty():
+                # Proactive commitment reminders fire independently of auto_desire
+                # (a baseline neighbour behaviour, toggled by FAMILIAR_PROACTIVE_REMINDERS).
+                store = getattr(agent, "_commitment_store", None)
+                if (
+                    store is not None
+                    and getattr(agent, "config", None)
+                    and agent.config.proactive_reminders
+                ):
+                    try:
+                        heartbeat = getattr(agent, "_heartbeat", None)
+                        quiet = heartbeat.routine_state().quiet_hours if heartbeat else False
+                        reminders = should_fire_commitment_reminder(
+                            agent_running=False,
+                            has_pending_input=not input_queue.empty(),
+                            last_interaction=last_interaction_time,
+                            now=time.time(),
+                            store=store,
+                            quiet_hours=quiet,
+                        )
+                        if reminders:
+                            # Record the fire BEFORE the turn: the cadence advances
+                            # regardless of the turn's outcome, and a mid-turn snooze
+                            # reset survives intact.
+                            store.mark_reminded([c.id for c in reminders], at=time.time())
+                    except Exception:
+                        logging.getLogger(__name__).exception("reminder gate failed")
+                        reminders = []
+                    if reminders:
+                        try:
+                            await agent.run(
+                                "",
+                                on_action=on_action,
+                                on_text=on_text,
+                                desires=desires,
+                                inner_voice=commitment_reminder_prompt(reminders),
+                                interrupt_queue=input_queue,
+                            )
+                        except (KeyboardInterrupt, EOFError, asyncio.CancelledError):
+                            raise
+                        except Exception:
+                            logging.getLogger(__name__).exception(
+                                "proactive reminder turn failed; continuing REPL"
+                            )
+                        # The reminder turn counts as an interaction: keep the
+                        # desire cooldown from firing back-to-back with it.
+                        last_interaction_time = time.time()
+                        continue
+
                 # Skip desire-driven turns when auto_desire is disabled
                 if not getattr(agent, "config", None) or not agent.config.auto_desire:
                     continue

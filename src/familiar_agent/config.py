@@ -217,6 +217,12 @@ class AgentConfig:
             or os.environ.get("FAMILIAR_AUTO", "").strip().lower() in ("1", "true", "yes")
         )
     )
+    # Proactive commitment reminders are a baseline neighbor behaviour: on by
+    # default and INDEPENDENT of auto_desire (you can silence idle musings yet
+    # still be reminded). Disable with FAMILIAR_PROACTIVE_REMINDERS=0.
+    proactive_reminders: bool = field(
+        default_factory=lambda: _bool_env("FAMILIAR_PROACTIVE_REMINDERS", default=True)
+    )
 
     max_tokens: int = 4096
     camera: CameraConfig = field(default_factory=CameraConfig)

@@ -61,7 +61,24 @@ class SQLiteCommitmentStore:
                 ON runtime_commitments(status);
             """
         )
+        self._ensure_columns()
         self._conn.commit()
+
+    def _ensure_columns(self) -> None:
+        """Idempotently add columns introduced after the initial schema.
+
+        Lets an existing commitments.db created by an earlier version pick up the
+        proactive-reminder columns without a separate migration runner.
+        """
+        existing = {
+            row["name"] for row in self._conn.execute("PRAGMA table_info(runtime_commitments)")
+        }
+        if "last_reminded_at" not in existing:
+            self._conn.execute("ALTER TABLE runtime_commitments ADD COLUMN last_reminded_at REAL")
+        if "reminder_count" not in existing:
+            self._conn.execute(
+                "ALTER TABLE runtime_commitments ADD COLUMN reminder_count INTEGER NOT NULL DEFAULT 0"
+            )
 
     # ── writes ──
 
@@ -98,9 +115,10 @@ class SQLiteCommitmentStore:
             """
             INSERT OR REPLACE INTO runtime_commitments (
                 id, summary, kind, status, due_at, priority, created_by, person,
-                created_at, updated_at, completed_at, snooze_until, metadata_json
+                created_at, updated_at, completed_at, snooze_until,
+                last_reminded_at, reminder_count, metadata_json
             )
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 commitment.id,
@@ -115,6 +133,8 @@ class SQLiteCommitmentStore:
                 commitment.updated_at,
                 commitment.completed_at,
                 commitment.snooze_until,
+                commitment.last_reminded_at,
+                commitment.reminder_count,
                 json.dumps(commitment.metadata, ensure_ascii=False),
             ),
         )
@@ -146,9 +166,25 @@ class SQLiteCommitmentStore:
         commitment = self._require(commitment_id)
         commitment.status = CommitmentStatus.SNOOZED
         commitment.snooze_until = until
+        # Explicit deferral restarts the proactive-reminder cadence.
+        commitment.reminder_count = 0
+        commitment.last_reminded_at = None
         commitment.updated_at = time.time()
         self.save(commitment)
         return commitment
+
+    def mark_reminded(self, commitment_ids: list[str], *, at: float) -> None:
+        """Record that a proactive reminder fired for these commitments."""
+        for commitment_id in commitment_ids:
+            self._conn.execute(
+                """
+                UPDATE runtime_commitments
+                SET last_reminded_at = ?, reminder_count = reminder_count + 1, updated_at = ?
+                WHERE id = ?
+                """,
+                (at, at, commitment_id),
+            )
+        self._conn.commit()
 
     # ── reads ──
 
@@ -177,6 +213,17 @@ class SQLiteCommitmentStore:
         upcoming = [c for c in self._active() if c.is_upcoming(now=now, horizon=horizon)]
         return sorted(upcoming, key=_sort_key)
 
+    def list_due_for_reminder(self, *, now: float, base_cooldown: float) -> list[Commitment]:
+        """Due commitments that warrant a *proactive* reminder right now.
+
+        Applies the per-commitment escalating backoff + cap, distinct from
+        ``list_due`` (which is used for passive context surfacing).
+        """
+        ready = [
+            c for c in self._active() if c.due_for_reminder(now=now, base_cooldown=base_cooldown)
+        ]
+        return sorted(ready, key=_sort_key)
+
     def _from_row(self, row: sqlite3.Row) -> Commitment:
         return Commitment(
             id=row["id"],
@@ -191,6 +238,8 @@ class SQLiteCommitmentStore:
             updated_at=row["updated_at"],
             completed_at=row["completed_at"],
             snooze_until=row["snooze_until"],
+            last_reminded_at=row["last_reminded_at"],
+            reminder_count=row["reminder_count"],
             metadata=json.loads(row["metadata_json"]),
         )
 

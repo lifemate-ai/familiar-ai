@@ -214,6 +214,103 @@ async def test_gui_idle_desire_logs_localized_murmur(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_gui_proactive_reminder_fires_when_due(monkeypatch, tmp_path):
+    from types import SimpleNamespace
+
+    from familiar_runtime.commitments import SQLiteCommitmentStore
+
+    win = _make_window_stub()
+    store = SQLiteCommitmentStore(tmp_path / "c.db")
+    store.create(summary="take meds", due_at=1.0, priority=1)
+    win._agent = SimpleNamespace(
+        config=SimpleNamespace(proactive_reminders=True, auto_desire=False),
+        _commitment_store=store,
+        _heartbeat=None,
+    )
+    win._agent_ready = True
+
+    captured: dict[str, str] = {}
+
+    async def _fake_run_agent(text: str, inner_voice: str = "") -> None:
+        captured["text"] = text
+        captured["inner_voice"] = inner_voice
+
+    win._run_agent = _fake_run_agent  # type: ignore[method-assign]
+
+    call_count = {"n": 0}
+
+    async def _fake_wait_for(awaitable, timeout):
+        if hasattr(awaitable, "close"):
+            awaitable.close()
+        call_count["n"] += 1
+        if call_count["n"] == 1:
+            raise asyncio.TimeoutError
+        return None
+
+    monkeypatch.setattr("familiar_agent.gui.asyncio.wait_for", _fake_wait_for)
+    # Bypass the idle-gap/cooldown timing gate; we are testing the wiring here.
+    monkeypatch.setattr(
+        "familiar_agent.gui.should_fire_commitment_reminder",
+        lambda **kwargs: list(store.list_open()),
+    )
+
+    await FamiliarWindow._process_queue(win)
+
+    assert captured["text"] == ""
+    assert "take meds" in captured["inner_voice"]
+    # mark_reminded advanced the cadence so it won't immediately re-fire.
+    assert store.list_open()[0].reminder_count == 1
+    store.close()
+
+
+@pytest.mark.asyncio
+async def test_gui_mid_turn_snooze_survives_mark(monkeypatch, tmp_path):
+    """GUI marks BEFORE the turn, so an in-turn snooze cadence reset is final."""
+    import time as _time
+    from types import SimpleNamespace
+
+    from familiar_runtime.commitments import SQLiteCommitmentStore
+
+    win = _make_window_stub()
+    store = SQLiteCommitmentStore(tmp_path / "c.db")
+    c = store.create(summary="take meds", due_at=1.0, priority=1)
+    win._agent = SimpleNamespace(
+        config=SimpleNamespace(proactive_reminders=True, auto_desire=False),
+        _commitment_store=store,
+        _heartbeat=None,
+    )
+    win._agent_ready = True
+
+    async def _snoozes_during_turn(text: str, inner_voice: str = "") -> None:
+        store.snooze(c.id, until=_time.time() + 3600)
+
+    win._run_agent = _snoozes_during_turn  # type: ignore[method-assign]
+
+    call_count = {"n": 0}
+
+    async def _fake_wait_for(awaitable, timeout):
+        if hasattr(awaitable, "close"):
+            awaitable.close()
+        call_count["n"] += 1
+        if call_count["n"] == 1:
+            raise asyncio.TimeoutError
+        return None
+
+    monkeypatch.setattr("familiar_agent.gui.asyncio.wait_for", _fake_wait_for)
+    monkeypatch.setattr(
+        "familiar_agent.gui.should_fire_commitment_reminder",
+        lambda **kwargs: store.list_due(now=_time.time()),
+    )
+
+    await FamiliarWindow._process_queue(win)
+
+    got = store.get(c.id)
+    assert got.reminder_count == 0  # snooze reset not clobbered by post-run mark
+    assert got.last_reminded_at is None
+    store.close()
+
+
+@pytest.mark.asyncio
 async def test_gui_cancel_turn_cancels_running_task_and_logs():
     win = _make_window_stub()
     win._agent_running = True

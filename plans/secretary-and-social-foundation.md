@@ -60,19 +60,49 @@ complete, priority+due 並び順, cancelled 除外。
 
 ---
 
-## Phase 3 — 自発的リマインド（due 検知 → proactive surface）
+## Phase 3 — 自発的リマインド（実装済 ✅）
 
-- `heartbeat` / continuation に「due commitment があれば次ターンで必ず言及 / 自発ターンを誘発」を接続。
-- quiet hours（`routines.py`）尊重: quiet 中は緊急(priority>=2)以外は抑制。
-- テスト: due ありで continuation/desire turn が誘発されること、quiet 中の抑制。
+ユーザ確定: トグル独立・既定ON / quiet hours は priority>=2 のみ / だんだん間隔を空けて止まる。
+
+- model: `last_reminded_at` / `reminder_count` / `due_for_reminder()`（backoff base×{1,3}, REMINDER_CAP=3 で沈黙。passive surface は継続）
+- store: `_ensure_columns()` idempotent ALTER / `list_due_for_reminder` / `mark_reminded`（targeted UPDATE）/ `snooze` で cadence リセット
+- config: `AgentConfig.proactive_reminders`（`FAMILIAR_PROACTIVE_REMINDERS`、既定 True、auto_desire 独立）+ settings_schema（advanced/bool）
+- i18n: `reminder_impulse`（en/ja、他言語 en フォールバック）。complete/snooze ツール呼び出しまで指示
+- `_ui_helpers`: `should_fire_commitment_reminder`（純粋ゲート: running/pending/idle-gap/quiet-priority）/ `commitment_reminder_prompt` / `decide_idle_action`
+- 3ループ配線: main repl / tui `_reminder_tick` / gui `_process_queue` — いずれも **auto_desire ガードの前**
+- テスト +33（store cadence・legacy DB 移行・ゲート全分岐・config 独立性・3ループ配線統合・mark-before-run 固定）
+
+**多角レビュー（4次元×敵対検証）→ 確定 10 findings を全修正:**
+- `mark_reminded` を**ターン前**に移動（3ループ）— ターン中の snooze による cadence リセットを保護、
+  失敗時セマンティクス統一（エラーでもスロット消費 → flapping backend が cap で自己制限）
+- TUI 二重 `agent.run` レース: `_process_queue` が `get()` 後に `_agent_running` ならキューへ差し戻し
+  （実行中ターンが interrupt_queue 経由で吸収）
+- REPL: reminder turn とゲート＋mark を try/except 保護（裸だと finally の `os._exit(0)` で silent death）、
+  ターン後に `last_interaction_time` 更新（desire の連続発火防止）
+- GUI/TUI: tick 本体（heartbeat/store 呼び出し）を例外ガード — sqlite エラーで idle ループが恒久死しない
+- `due_for_reminder` の idx を `max(0, ...)` でクランプ + 不整合状態のテスト
+- `decide_idle_action` docstring を実態（contract の参照実装）に修正
+- 修正後に per-fix 敵対検証 7/7 resolved + completeness 残渣（mark ガード/GUI mark-before-run pin/clamp テスト）も解消
 
 ---
 
 ## Phase 4 — Person Model 永続化（社会性: ToM 蓄積）
 
-- **新規** `src/familiar_neighbor/mind/person_model.py`: 相手ごとの推定（現在ニーズ/気分/最近の懸念/コミュニケーション好み）を時系列で保持（memory DB or 専用テーブル + migration）。
-- `ToMTool` 結果を person_model に書き戻し、prompt に surface。
-- テスト + migration。
+**問題**: ToMTool の LLM 推論は構造化 JSON `{evidence, inference[{state,confidence}], policy}` を生成するのに
+markdown に平坦化して捨てている（`_last_policy` のみ揮発保持）。相手の心的モデルが蓄積されない。
+
+**設計**（RelationshipTracker の永続パターン踏襲: lazy conn + WAL + apply_migrations）:
+- migration `2026-06-XX-010_person_models.py`: `person_inferences` テーブル
+  （id TEXT PK, person TEXT, state TEXT, confidence REAL, evidence_json TEXT, policy TEXT,
+  source TEXT default 'tom', created_at TEXT ISO）+ person/created_at index。observations.db に同居。
+- **新規** `src/familiar_neighbor/mind/person_model.py` `PersonModelTracker`:
+  `record_inference(person, states, evidence, policy)` / `recent(person, n)` /
+  `context_for_prompt(person)` → `[Person model: X]` ブロック（最近の推定＋確信度＋最後に効いた方針、recency 順）
+- `ToMTool`: `_llm_inference` で JSON parse 成功時に tracker へ書き戻し（optional 依存、None なら従来挙動）
+- `agent.py`: tracker 構築 → ToMTool へ注入。`embodied_hook.prepare_turn` で companion の
+  `context_for_prompt` を relationship ctx の隣に注入
+- テスト: tracker CRUD/プロンプト整形/migration 適用（test_memory_migrations.py パターン）/
+  ToM 書き戻し（fake backend が JSON 返却）/ hook surface
 
 ---
 
@@ -97,15 +127,9 @@ uv run pytest -q
 
 - [x] Phase 1: Commitment ストア + tests（9件）
 - [x] Phase 2: tool + capability + 配線 + surface + tests（13件）
-- [ ] Phase 3: 自発的リマインド（continuation/desire-turn 機構に踏み込む。慎重に）
-- [ ] Phase 4: Person Model
+- [x] Phase 3: 自発的リマインド（独立トグル・quiet hours・escalating backoff+cap、3ループ配線）
+- [ ] Phase 4: Person Model（設計確定済、上記参照）
 - [ ] Phase 5: 社会的学習ループ
 
-本セッション: Phase 1–2 完遂。フルスイート **1007 passed**（+22）、ruff/format/mypy(116) 緑。
-秘書の動く核（期日・優先度付き commitment を保存し、due になればターン文脈へ自動 surface）。
-
-### Phase 3 設計メモ（次セッション）
-due commitment があるとき、ユーザ入力が無くても自発ターンを誘発する。
-`heartbeat`/desire-turn の起動条件に `commitment_store.list_due(now)` を加える。
-quiet hours（`routines.py`）尊重 — quiet 中は priority>=2 のみ。
-plan の codex待ち境界に近い fragile 領域なので、コウタが見てる時にやる。
+Phase 3 時点: フルスイート **1032 passed**、ruff/format(236)/mypy(116) 緑。
+push は未実施（コウタ判断）。

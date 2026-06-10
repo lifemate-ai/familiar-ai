@@ -51,6 +51,7 @@ class SetupConfig:
 
     auto_desire: bool = False
     auto_say: bool = True
+    proactive_reminders: bool = True
 
 
 Validator = Callable[[Any], str | None]
@@ -420,6 +421,16 @@ SETTINGS_FIELDS: tuple[SettingField, ...] = (
         default=True,
         setup_visible=False,
         runtime_getter=lambda config: config.auto_say,
+    ),
+    SettingField(
+        env_key="FAMILIAR_PROACTIVE_REMINDERS",
+        attr="proactive_reminders",
+        section="advanced",
+        label="Proactive reminders:",
+        widget="bool",
+        default=True,
+        setup_visible=False,
+        runtime_getter=lambda config: config.proactive_reminders,
     ),
 )
 

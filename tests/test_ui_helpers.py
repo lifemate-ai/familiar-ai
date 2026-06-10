@@ -9,10 +9,14 @@ from __future__ import annotations
 
 from familiar_agent._ui_helpers import (
     ACTION_ICONS,
+    commitment_reminder_prompt,
+    decide_idle_action,
     desire_tick_prompt,
     format_action,
+    should_fire_commitment_reminder,
     should_fire_idle_desire,
 )
+from familiar_runtime.commitments import SQLiteCommitmentStore
 
 
 # ---------------------------------------------------------------------------
@@ -217,4 +221,162 @@ class TestShouldFireIdleDesire:
             last_interaction=100.0,
             now=190.0,
             cooldown=90.0,
+        )
+
+
+# ---------------------------------------------------------------------------
+# Proactive commitment reminders (Phase 3)
+# ---------------------------------------------------------------------------
+
+BASE = 600.0
+NOW = 10_000.0
+
+
+def _store(tmp_path):
+    return SQLiteCommitmentStore(tmp_path / "commitments.db")
+
+
+class TestShouldFireCommitmentReminder:
+    def test_fires_for_due_commitment_when_idle(self, tmp_path):
+        store = _store(tmp_path)
+        store.create(summary="ping", due_at=NOW - 5)
+        ready = should_fire_commitment_reminder(
+            agent_running=False,
+            has_pending_input=False,
+            last_interaction=NOW - 1000,
+            now=NOW,
+            store=store,
+            base_cooldown=BASE,
+        )
+        assert [c.summary for c in ready] == ["ping"]
+        store.close()
+
+    def test_suppressed_while_agent_running(self, tmp_path):
+        store = _store(tmp_path)
+        store.create(summary="ping", due_at=NOW - 5)
+        assert (
+            should_fire_commitment_reminder(
+                agent_running=True,
+                has_pending_input=False,
+                last_interaction=NOW - 1000,
+                now=NOW,
+                store=store,
+                base_cooldown=BASE,
+            )
+            == []
+        )
+        store.close()
+
+    def test_suppressed_with_pending_input(self, tmp_path):
+        store = _store(tmp_path)
+        store.create(summary="ping", due_at=NOW - 5)
+        assert (
+            should_fire_commitment_reminder(
+                agent_running=False,
+                has_pending_input=True,
+                last_interaction=NOW - 1000,
+                now=NOW,
+                store=store,
+                base_cooldown=BASE,
+            )
+            == []
+        )
+        store.close()
+
+    def test_suppressed_within_min_idle_gap(self, tmp_path):
+        store = _store(tmp_path)
+        store.create(summary="ping", due_at=NOW - 5)
+        assert (
+            should_fire_commitment_reminder(
+                agent_running=False,
+                has_pending_input=False,
+                last_interaction=NOW - 5,  # only 5s since last interaction
+                now=NOW,
+                store=store,
+                base_cooldown=BASE,
+                min_idle_gap=30.0,
+            )
+            == []
+        )
+        store.close()
+
+    def test_quiet_hours_blocks_low_priority(self, tmp_path):
+        store = _store(tmp_path)
+        store.create(summary="trivial", due_at=NOW - 5, priority=1)
+        ready = should_fire_commitment_reminder(
+            agent_running=False,
+            has_pending_input=False,
+            last_interaction=NOW - 1000,
+            now=NOW,
+            store=store,
+            base_cooldown=BASE,
+            quiet_hours=True,
+        )
+        assert ready == []
+        store.close()
+
+    def test_quiet_hours_allows_urgent(self, tmp_path):
+        store = _store(tmp_path)
+        store.create(summary="urgent", due_at=NOW - 5, priority=2)
+        ready = should_fire_commitment_reminder(
+            agent_running=False,
+            has_pending_input=False,
+            last_interaction=NOW - 1000,
+            now=NOW,
+            store=store,
+            base_cooldown=BASE,
+            quiet_hours=True,
+        )
+        assert [c.summary for c in ready] == ["urgent"]
+        store.close()
+
+    def test_empty_store(self, tmp_path):
+        store = _store(tmp_path)
+        assert (
+            should_fire_commitment_reminder(
+                agent_running=False,
+                has_pending_input=False,
+                last_interaction=NOW - 1000,
+                now=NOW,
+                store=store,
+                base_cooldown=BASE,
+            )
+            == []
+        )
+        store.close()
+
+
+def test_commitment_reminder_prompt_includes_summaries(tmp_path):
+    store = _store(tmp_path)
+    a = store.create(summary="call dentist", due_at=NOW - 5)
+    b = store.create(summary="water plants", due_at=NOW - 5)
+    text = commitment_reminder_prompt([a, b])
+    assert "call dentist" in text
+    assert "water plants" in text
+    store.close()
+
+
+class TestDecideIdleAction:
+    def test_user_input_wins(self):
+        assert (
+            decide_idle_action(has_pending_input=True, reminder_ready=True, desire_ready=True)
+            == "user"
+        )
+
+    def test_reminder_beats_desire(self):
+        assert (
+            decide_idle_action(has_pending_input=False, reminder_ready=True, desire_ready=True)
+            == "reminder"
+        )
+
+    def test_desire_when_no_reminder(self):
+        assert (
+            decide_idle_action(has_pending_input=False, reminder_ready=False, desire_ready=True)
+            == "desire"
+        )
+
+    def test_idle_when_nothing(self):
+        assert (
+            decide_idle_action(has_pending_input=False, reminder_ready=False, desire_ready=False)
+            == "idle"
         )
