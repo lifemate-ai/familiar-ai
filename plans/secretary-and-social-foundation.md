@@ -138,7 +138,9 @@ uv run pytest -q
 - [x] Phase 4: Person Model（person_inferences + PersonModelTracker + ToM 書き戻し + prompt surface）
 - [x] Phase 5: 社会的学習ループ（failed patterns → decide() 補正、契約テスト付き）
 
-push は未実施（コウタ判断）。全5フェーズ完了 + アジェンダ + staleness カットオフ + CLAUDE.md 更新。
+**PR #175 作成済み**（https://github.com/lifemate-ai/familiar-ai/pull/175、develop 向け）。
+CI 全緑（lint + test macos/ubuntu/windows）。**merge はコウタ判断。**
+全5フェーズ完了 + アジェンダ + staleness カットオフ + CLAUDE.md 更新 + レビュー指摘全消化。
 
 ---
 
