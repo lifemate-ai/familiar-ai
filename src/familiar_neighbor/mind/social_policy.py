@@ -14,27 +14,30 @@ from .mental_state import AffectiveState
 # anchored / word-bounded / morphology-aware, and reproduce-by-running before
 # loosening anything.
 
-# Interrogative advice forms only — bare どう also matched どうも/どうぞ/どうでもいい.
+# Interrogative advice forms only — bare どう also matched どうも/どうぞ/
+# どうでもいい; どうしようもない is resignation, not an advice ask.
 _ADVICE_PATTERNS = [
-    r"どう(?:したら|すれば|しよう|思う|やったら|かな)",
+    r"どう(?:したら|すれば|しよう(?!もな)|思う|やったら|かな)",
     r"教えて",
     r"\badvice\b",
     r"\bshould i\b",
 ]
 # Request morphology only — bare して/やって matched past-progressives (してた)
-# and dismay (やってもうた).
+# and dismay (やってもうた); bare \brun\b matched "went for a run".
 _ACTION_PATTERNS = [
     r"して(?:くれ|ください|もらえ|ほしい|頂|いただ)",
     r"して[よなや]?[!！。]?$",
     r"やって(?:くれ|ください|もらえ|ほしい)",
     r"やって[よなや]?[!！。]?$",
-    r"\brun\b",
+    r"\b(?:can|could|would|will|please)\s+(?:you\s+)?run\b",
+    r"^run\b",
     r"\bfix\b",
     r"please do",
     r"頼む",
 ]
 # Relational hurt only — repair is the FIRST branch, so bare "hurt" turned
-# "My back hurts" into an apology.
+# "My back hurts" into an apology, and bare つらかった made ordinary past-tense
+# vents (会議きつかったわ) read as relational repair.
 _REPAIR_PATTERNS = [
     r"hurt (?:me|my feelings)",
     r"feel(?:ing)?s? hurt",
@@ -42,8 +45,7 @@ _REPAIR_PATTERNS = [
     r"that hurt\b",
     r"傷つ",
     r"前の返事",
-    r"つらかった",
-    r"きつかった",
+    r"(?:返事|言葉|言い方|さっきの|あの一言).{0,10}(?:つらかった|きつかった)",
 ]
 # "やった" only as an exclamation: utterance-initial (but not やったら/やったん
 # conditionals/questions) or followed by an exclamatory mark. Kansai past tense
@@ -54,28 +56,55 @@ _DELIGHT_PATTERNS = [
     r"嬉し",
     r"うれし",
     r"最高",
-    r"できた",
-    # negated happy must not celebrate ("I'm not happy with…")
-    r"(?<!not )(?<!n't )(?<!never )\bhappy\b",
+    # できた only as clause-final/exclamatory accomplishment — the formation
+    # sense (腫瘍ができたって言われた) must not celebrate.
+    r"できた(?:[!！ー〜♪]|で|ぞ|やん|わ|$)",
+    r"\bhappy\b",
     r"\byay\b",
 ]
-# bare "ugh" matched laughed/daughter/thought/enough; うんざり added here so the
-# fed-up reading is caught positively (it used to read as silence via うん).
-_VENTING_PATTERNS = [r"むかつ", r"最悪", r"つらい", r"しんど", r"疲れ", r"うんざり", r"\bugh+\b"]
+# Negation veto for the delight branch — fixed-width lookbehinds can't catch
+# "I'm not VERY happy with…", so the branch checks this window separately.
+_NEGATED_POSITIVE_RE = re.compile(
+    r"\b(?:not|never|n't|isn't|wasn't|don't|ain't)\b[\w\s']{0,16}\b(?:happy|glad)\b"
+)
+# bare "ugh" matched laughed/daughter/thought/enough; うんざり and the past
+# forms つらかった/きつかった live here so ordinary vents validate instead of
+# repairing; 疲れ excludes the お疲れ greeting.
+_VENTING_PATTERNS = [
+    r"むかつ",
+    r"最悪",
+    r"つらい",
+    r"つらかった",
+    r"きつかった",
+    r"しんど",
+    r"(?<!お)疲れ",
+    r"うんざり",
+    r"\bugh+\b",
+]
 # bereavement forms only — bare 死 matched 死ぬほど笑った/必死, bare "lost"
-# matched "lost track of time".
+# matched "lost track of time"; polite/Kansai death forms and pronoun objects
+# ("we lost him") must still reach the comfort register.
 _GRIEF_PATTERNS = [
     r"寂し",
     r"悲し",
     r"\bgrief\b",
-    r"\blost (?:a |my |our |her |his )?(?:someone|mom|dad|mother|father|grand\w+|friend|husband|wife|partner|dog|cat|pet|baby)\b",
+    r"\blost (?:a |my |our |her |his )?(?:\w+ )?(?:someone|mom|dad|mother|father|grand\w+|friend|husband|wife|partner|dog|cat|pet|baby)\b",
+    r"\b(?:we|i|she|he|they) (?:just )?lost (?:him|her|them)\b",
     r"passed away",
     r"亡くな",
-    r"死ん(?:だ|でしまっ|じゃっ)",
+    r"死ん(?:だ|でしまっ|でしも|でもう|じゃっ)",
+    r"死にました",
     r"死別",
     r"つらい",
 ]
-_FATIGUE_PATTERNS = [r"疲れ", r"眠い", r"しんど", r"だるい", r"\bexhausted\b", r"\btired\b"]
+_FATIGUE_PATTERNS = [
+    r"(?<!お)疲れ",
+    r"眠い",
+    r"しんど",
+    r"だるい",
+    r"\bexhausted\b",
+    r"\btired\b",
+]
 # 君 only as a standalone second-person pronoun (not 田中君/君津); "how do you"
 # only for introspective targets (not "how do you make carbonara").
 _META_PATTERNS = [
@@ -89,19 +118,20 @@ _META_PATTERNS = [
 # ("we went..." must not classify as playful); "play" needs word boundaries
 # ("display" is not playful).
 _PLAYFUL_PATTERNS = [
-    r"(?<![a-z])[wｗ]+(?![a-z])",
+    # laugh-w must not match URLs (www.) or kaomoji eyes (;w;)
+    r"(?<![a-z./:;])[wｗ]+(?![a-z./;])",
     r"笑",
     r"ふふ",
     r"\bplay(?:ful|ing)?\b",
     r"\bteas(?:e|ing)\b",
     r"冗談",
 ]
-# "no more" as protest only (not "no more milk"); \b kills "nonstop that".
+# "no more" as protest only — utterance-final or "no more of this/that";
+# an opener ("No more bugs! We shipped!") is usually celebration, not protest.
 _BOUNDARY_PATTERNS = [
     r"やめて",
     r"やめろ",
     r"それは嫌",
-    r"^no more\b",
     r"\bno more[.!！]*$",
     r"no more of (?:this|that)",
     r"\bstop that\b",
@@ -116,10 +146,15 @@ _SILENCE_PATTERNS = [
     r"おけ$",
     r"寝る(?:わ|ね|で|ぞ)?[ー〜。…!！]*$",
 ]
+# Whole-utterance anchors: a greeting that merely OPENS a longer message
+# ("おはよう。昨日じいちゃんが亡くなった") must not short-circuit the branches
+# that follow (grief/venting/…). お疲れ様 is a greeting, not a fatigue signal.
 _GREETING_PATTERNS = [
-    r"^おはよ",
-    r"^こんにちは",
-    r"^こんばんは",
+    r"^おはよ(?:う|うございます)?[ー〜!！。\s]*$",
+    r"^こんにちは[ー〜!！。\s]*$",
+    r"^こんばんは[ー〜!！。\s]*$",
+    r"^お疲れ(?:様|さま)?(?:です|でした)?[ー〜!！。\s]*$",
+    r"^おつかれ(?:さま)?(?:です|でした)?[ー〜!！。\s]*$",
     r"^おーい$",
     r"^もしもし$",
 ]
@@ -141,8 +176,9 @@ _CORRECTION_PATTERNS = [
     r"食い違",
     r"そういう意味じゃ",
     r"そうじゃない",
-    # 間違う is the mistake-verb, not a correction of the agent
-    r"(?<!間)違う",
+    # 間違う is the mistake-verb; prenominal 違う+noun (違う話なんやけど…) is a
+    # topic shift, not a correction — only predicate-final 違う corrects.
+    r"(?<!間)違う(?:[よでわぞ]|って|ねん|やん|と思)?\s*(?:[、。!！?？…]|$)",
     # Kansai ちゃう as a correction needs a clause boundary or demonstrative —
     # bare ちゃう hijacked めっちゃ (めっ「ちゃう」れしい) and the 〜ちゃう
     # contraction (食べちゃう).
@@ -376,7 +412,11 @@ class SocialPolicyEngine:
                 mention_memory=False,
             )
 
-        if _matches(text, _DELIGHT_PATTERNS) and affect.valence >= -0.1:
+        if (
+            _matches(text, _DELIGHT_PATTERNS)
+            and not _NEGATED_POSITIVE_RE.search(text.lower())
+            and affect.valence >= -0.1
+        ):
             return SocialPolicyDecision(
                 primary_act="delight_share",
                 response_mode="celebrate",

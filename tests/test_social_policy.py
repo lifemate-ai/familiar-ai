@@ -478,3 +478,49 @@ def test_audit_intended_positives_still_classify() -> None:
     assert act_of("もう寝るわ") == "silence_or_low_presence"
     assert act_of("君はどう思う？") in ("meta_conversation", "request_for_advice")
     assert act_of("I'm so happy for you!") == "delight_share"
+
+
+# ── classifier audit round 2: variation + tail misfires must stay fixed ──
+
+
+def test_audit_round2_misfires_fixed() -> None:
+    cases = [
+        ("I'm not very happy with how the demo went", "delight_share"),  # adverb-negation
+        ("I am not at all happy about this", "delight_share"),
+        ("もうどうしようもないわ", "request_for_advice"),  # どうしようもない resignation
+        ("No more bugs! We finally shipped it!", "boundary_assertion"),
+        ("Went for a run this morning, it was great", "request_for_action"),
+        ("お疲れ様です！", "fatigue_signal"),  # workplace greeting
+        ("今日の会議ほんまきつかったわ", "repair_attempt"),  # ordinary vent
+        ("健康診断で腫瘍ができたって言われた", "delight_share"),  # medical bad news
+        ("これ見てや https://www.example.com/news/2026", "playful_probe"),  # URL www
+        ("迷子の猫がまだ見つからへん ;w;", "playful_probe"),  # crying kaomoji
+        ("違う話なんやけど、ばあちゃんが死んでしまった", "clarification"),  # prenominal 違う
+        ("おはよう。昨日じいちゃんが亡くなったんや", "greeting"),  # multi-clause opener
+    ]
+    for text, wrong_act in cases:
+        decision = _decide(text)
+        assert decision.primary_act != wrong_act, f"{text!r} still {wrong_act}"
+
+
+def test_audit_round2_fix_regressions_restored() -> None:
+    """Round-1 narrowing dropped real grief forms — they must classify again."""
+    for text in ("祖父が死にました", "じいちゃんが死んでもうた", "We lost him last night"):
+        decision = _decide(text, mood="sad")
+        assert decision.primary_act == "grief_signal", text
+
+
+def test_audit_round2_intended_positives_still_classify() -> None:
+    assert _decide("お疲れ様です！").primary_act == "greeting"
+    assert (
+        _decide("おはよう。昨日じいちゃんが亡くなったんや", mood="sad").primary_act
+        == "grief_signal"
+    )
+    assert _decide("今日の会議ほんまきつかったわ", mood="frustrated").primary_act == "venting"
+    assert _decide("やっとアプリできたで！").primary_act == "delight_share"
+    assert _decide("can you run the tests?").primary_act == "request_for_action"
+    assert _decide("no more of this, please").primary_act == "boundary_assertion"
+    assert _decide("それ違うで").primary_act == "clarification"
+    assert _decide("どうしよう、財布なくしたかも").primary_act == "request_for_advice"
+    assert _decide("I'm so happy for you!").primary_act == "delight_share"
+    assert _decide("それなwww").primary_act == "playful_probe"
