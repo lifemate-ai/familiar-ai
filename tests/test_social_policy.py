@@ -389,3 +389,22 @@ def test_exclamatory_yatta_still_delight() -> None:
     for text in ("やったー、うまくいった！", "やった！受かった！", "やったぜ"):
         decision = _decide(text)
         assert decision.primary_act == "delight_share", text
+
+
+# ── playful "w" must be the laugh marker, not the letter w ──────────────────
+
+
+def test_english_sentences_with_w_are_not_playful() -> None:
+    for text in (
+        "we went to the new bakery today",
+        "I was reading a book about whales",
+        "the display is broken again",
+    ):
+        decision = _decide(text)
+        assert decision.primary_act != "playful_probe", text
+
+
+def test_laugh_markers_still_playful() -> None:
+    for text in ("それなwww", "おもろすぎるw", "なんでやねん笑", "let's play a game"):
+        decision = _decide(text)
+        assert decision.primary_act == "playful_probe", text

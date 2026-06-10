@@ -28,7 +28,17 @@ _VENTING_PATTERNS = [r"むかつ", r"最悪", r"つらい", r"しんど", r"疲�
 _GRIEF_PATTERNS = [r"寂し", r"悲し", r"grief", r"lost", r"死", r"つらい"]
 _FATIGUE_PATTERNS = [r"疲れ", r"眠い", r"しんど", r"だるい", r"exhausted", r"tired"]
 _META_PATTERNS = [r"君", r"あなた", r"この会話", r"meta", r"how do you", r"あなたは"]
-_PLAYFUL_PATTERNS = [r"w", r"笑", r"ふふ", r"play", r"tease", r"冗談"]
+# "w" is the Japanese laugh marker only when not embedded in an ASCII word
+# ("we went..." must not classify as playful); "play" needs word boundaries
+# ("display" is not playful).
+_PLAYFUL_PATTERNS = [
+    r"(?<![a-z])[wｗ]+(?![a-z])",
+    r"笑",
+    r"ふふ",
+    r"\bplay(?:ful|ing)?\b",
+    r"\bteas(?:e|ing)\b",
+    r"冗談",
+]
 _BOUNDARY_PATTERNS = [r"やめて", r"やめろ", r"それは嫌", r"no more", r"stop that"]
 _SILENCE_PATTERNS = [r"…", r"\.\.\.", r"うん", r"ok$", r"おけ$", r"寝る"]
 _GREETING_PATTERNS = [
