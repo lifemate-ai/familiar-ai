@@ -306,3 +306,71 @@ def test_positive_pattern_with_resolved_does_not_trigger() -> None:
         failed_patterns=["they resolved things alone, I was not needed"],
     )
     assert same == baseline  # "resolved" must not match the "solve" marker
+
+
+# ── Agency boundary: honest capacity acknowledgement ────────────────────────
+#
+# When the agent itself is running low (need_rest high) and the companion asks
+# for work or repair, the policy should tell the model to be honest about
+# capacity instead of overpromising — never to fake being fine.
+
+
+def _decide_pressured(text: str, *, need_rest: float, mood: str = "engaged", **kwargs):
+    appraisal = AppraisalEngine()
+    policy_engine = SocialPolicyEngine()
+    pressure = _pressure(need_rest=need_rest)
+    affect = appraisal.appraise(
+        AppraisalContext(user_text=text, companion_mood=mood, interoception=pressure)
+    )
+    return policy_engine.decide(
+        user_text=text,
+        affect=affect,
+        trust=0.5,
+        intimacy=0.5,
+        interoception=pressure,
+        **kwargs,
+    )
+
+
+def test_exhausted_action_request_acknowledges_capacity() -> None:
+    rested = _decide_pressured("これ全部直しといて、頼むわ", need_rest=0.2)
+    assert rested.primary_act == "request_for_action"
+    assert rested.acknowledge_capacity is False
+
+    exhausted = _decide_pressured("これ全部直しといて、頼むわ", need_rest=0.85)
+    assert exhausted.primary_act == "request_for_action"
+    assert exhausted.acknowledge_capacity is True
+    assert exhausted.initiative < rested.initiative
+
+
+def test_exhausted_repair_request_acknowledges_capacity_but_keeps_repair() -> None:
+    decision = _decide_pressured(
+        "さっきの返事ちょっと傷ついた", need_rest=0.85, previous_response_hurt=True
+    )
+    assert decision.primary_act == "repair_attempt"
+    assert decision.response_mode == "repair"  # repair still happens
+    assert decision.acknowledge_capacity is True
+
+
+def test_exhausted_greeting_does_not_volunteer_fatigue() -> None:
+    decision = _decide_pressured("おはよう", need_rest=0.85)
+    assert decision.primary_act == "greeting"
+    assert decision.acknowledge_capacity is False
+
+
+def test_rested_default_is_false_everywhere() -> None:
+    decision = _decide_pressured("これどうしたらいいかな", need_rest=0.2)
+    assert decision.acknowledge_capacity is False
+
+
+def test_capacity_prompt_line_rendered() -> None:
+    from familiar_agent.agent import EmbodiedAgent
+
+    decision = _decide_pressured("これ直してくれへん", need_rest=0.85)
+    assert decision.primary_act == "request_for_action"
+    text = EmbodiedAgent._format_social_policy_prompt(decision)
+    assert "capacity" in text.lower()
+
+    rested = _decide_pressured("これ直してくれへん", need_rest=0.2)
+    text2 = EmbodiedAgent._format_social_policy_prompt(rested)
+    assert "capacity" not in text2.lower()

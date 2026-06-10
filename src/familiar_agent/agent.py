@@ -1294,6 +1294,11 @@ class EmbodiedAgent:
             lines.append("- a memory mention is allowed only if it fits naturally")
         if policy.avoid_raw_interoception_numbers:
             lines.append("- never mention raw internal/body metrics")
+        if policy.acknowledge_capacity:
+            lines.append(
+                "- you are running low right now; be honest about your current "
+                "capacity instead of overpromising — offer a smaller step or a deferral"
+            )
         return "\n".join(lines)
 
     def _build_mental_snapshot(

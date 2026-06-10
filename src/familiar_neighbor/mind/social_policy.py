@@ -68,6 +68,31 @@ _ADVICE_FAILURE_RE = re.compile(r"\b(advice|advise|solution|solve|lecture)\b")
 _ADVICE_FAILURE_MARKERS_JA = ("正論", "アドバイス", "解決", "説教")
 _VALIDATE_FIRST_STYLES = {"validate_first", "listen_first", "listen_only"}
 
+# Agency boundary: above this need_rest, demanding turns trigger an honest
+# capacity acknowledgement instead of silently degraded effort.
+_CAPACITY_HONESTY_THRESHOLD = 0.7
+_CAPACITY_SENSITIVE_ACTS = {"request_for_action", "request_for_advice", "repair_attempt"}
+
+
+def _apply_capacity_honesty(
+    decision: "SocialPolicyDecision",
+    interoception: InteroceptivePressure,
+) -> "SocialPolicyDecision":
+    """Never fake being fine: flag demanding turns when the agent runs low.
+
+    Only acts the companion *initiated* (work, advice, repair) get the flag —
+    a greeting must not volunteer fatigue. The response mode is unchanged
+    (repair still repairs); the model is just told to be honest about capacity
+    and offer a smaller step instead of overpromising.
+    """
+    if interoception.need_rest < _CAPACITY_HONESTY_THRESHOLD:
+        return decision
+    if decision.primary_act not in _CAPACITY_SENSITIVE_ACTS:
+        return decision
+    decision.acknowledge_capacity = True
+    decision.initiative = max(0.0, decision.initiative - 0.15)
+    return decision
+
 
 def relationship_learning_inputs(relationship) -> tuple[list[str], list[str]]:
     """Extract decide() learning inputs from a RelationshipTracker-like object."""
@@ -135,6 +160,9 @@ class SocialPolicyDecision:
     avoid_problem_solving: bool
     mention_memory: bool
     avoid_raw_interoception_numbers: bool = True
+    # Agency boundary: when the agent itself is running low and is asked for
+    # work or repair, be honest about capacity instead of overpromising.
+    acknowledge_capacity: bool = False
 
 
 class SocialPolicyEngine:
@@ -160,11 +188,12 @@ class SocialPolicyEngine:
             interoception=interoception,
             previous_response_hurt=previous_response_hurt,
         )
-        return _apply_relationship_learning(
+        decision = _apply_relationship_learning(
             decision,
             support_styles=support_styles,
             failed_patterns=failed_patterns,
         )
+        return _apply_capacity_honesty(decision, interoception)
 
     def _base_decision(
         self,
