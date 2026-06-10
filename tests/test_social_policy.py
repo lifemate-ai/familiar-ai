@@ -563,3 +563,43 @@ def test_audit_round3_intended_positives_still_classify() -> None:
     assert _decide("さっきの返事、ちょっとつらかった").primary_act == "repair_attempt"
     assert _decide("やっとアプリできたで！").primary_act == "delight_share"
     assert _decide("How was your day?").primary_act == "meta_conversation"
+
+
+# ── classifier audit round 4: lexicon frames and reported speech ─────────────
+
+
+def test_audit_round4_misfires_fixed() -> None:
+    cases = [
+        ("虫歯ができた", "delight_share"),  # off-list ailment
+        ("ものもらいができたわ、痛い", "delight_share"),
+        ("足にまめができた", "delight_share"),  # locative formation frame
+        ("上司に嫌味言われてん。それは嫌やったわ", "boundary_assertion"),
+        ("この前の返事ありがとうな", "repair_attempt"),
+        ("I stubbed my toe this morning, wow that hurt", "repair_attempt"),
+        ("昨日のライブ最高すぎて死んだ", "grief_signal"),  # hyperbolic joy slang
+        ("笑いすぎて死んだわ", "grief_signal"),
+        ("昨日友達を傷つけてしまったかもしれん", "repair_attempt"),  # third-party guilt
+        ("医者に酒やめろって言われてん", "boundary_assertion"),  # reported speech
+        ("嬉しいわけないやろ、こんなん", "delight_share"),
+    ]
+    for text, wrong_act in cases:
+        decision = _decide(text)
+        assert decision.primary_act != wrong_act, f"{text!r} still {wrong_act}"
+
+
+def test_audit_round4_concessive_joy_celebrates() -> None:
+    assert _decide("疲れたけど最高の一日やった！", mood="happy").primary_act == "delight_share"
+    assert _decide("嬉しくて泣きそうや", mood="happy").primary_act == "delight_share"
+
+
+def test_audit_round4_intended_positives_still_classify() -> None:
+    assert _decide("彼女ができた！").primary_act == "delight_share"
+    assert _decide("新しい友達ができたわ").primary_act == "delight_share"
+    assert _decide("それは嫌や").primary_act == "boundary_assertion"
+    assert _decide("やめろ！").primary_act == "boundary_assertion"
+    assert _decide("さっきの返事、ちょっと傷ついた").primary_act == "repair_attempt"
+    assert _decide("おばあちゃんが死んでしまった", mood="sad").primary_act == "grief_signal"
+    assert (
+        _decide("最悪や、最高の誕生日になるはずやったのに", mood="frustrated").primary_act
+        == "venting"
+    )

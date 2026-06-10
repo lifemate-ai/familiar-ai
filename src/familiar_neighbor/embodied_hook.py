@@ -376,7 +376,8 @@ class EmbodiedAgentHook(RuntimeHookBase):
                 "hurt my feelings",
                 "you hurt",
                 "that hurt",
-                "傷つ",
+                "傷つい",
+                "傷つけられ",
                 "前の返事",
                 "嫌だった",
             )

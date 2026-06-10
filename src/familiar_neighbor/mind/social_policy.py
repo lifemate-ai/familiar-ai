@@ -35,16 +35,19 @@ _ACTION_PATTERNS = [
     r"please do",
     r"頼む",
 ]
-# Relational hurt only — repair is the FIRST branch, so bare "hurt" turned
-# "My back hurts" into an apology, and bare つらかった made ordinary past-tense
-# vents (会議きつかったわ) read as relational repair.
+# Relational hurt only — repair is the FIRST branch, so it must never fire on
+# physical pain ("my back hurts" / "stubbed my toe, that hurt"), third-party
+# guilt (友達を傷つけてしまった), or benign references (この前の返事ありがとう).
 _REPAIR_PATTERNS = [
     r"hurt (?:me|my feelings)",
     r"feel(?:ing)?s? hurt",
     r"you hurt",
-    r"that hurt\b",
-    r"傷つ",
-    r"前の返事",
+    r"(?:^|[\"”」]\s*)that (?:really )?hurt\b",
+    # self-directed hurt only: intransitive 傷つい, passive 傷つけられ, or an
+    # explicit first-person object
+    r"(?<!を)傷つい",
+    r"傷つけられ",
+    r"(?:私|ウチ|うち|俺|僕)を?傷つけ",
     r"(?:返事|言葉|言い方|あの一言|さっきの(?:返事|言葉|言い方|発言|あれ|やつ)).{0,10}(?:つらかった|きつかった)",
 ]
 # "やった" only as an exclamation: utterance-initial (but not やったら/やったん
@@ -74,10 +77,19 @@ _NEGATED_POSITIVE_RE = re.compile(
 # sarcasm (最高かよ), and ailment formations (しこりができた must not celebrate).
 _DELIGHT_VETO_JA_RE = re.compile(
     r"(?:嬉し|うれし)く(?:も|は)?な(?:い|かった|さそう)"
+    r"|(?:嬉し|うれし)い?(?:わけ|はず)(?:が|も|は)?な(?:い|かった)"
     r"|最高(?:じゃ|では|や)?な(?:い|かった)"
     r"|最高ちゃう"
     r"|(?:最高|嬉し)(?:すぎ)?かよ"
-    r"|(?:しこり|腫瘍|口内炎|ニキビ|湿疹|あざ|肩こり|クマ)(?:まで|が)?できた"
+    # ailment formations never celebrate: a lexicon net plus the locative
+    # frame 体部位+に…できた (the lexicon alone can't enumerate every ailment)
+    r"|(?:しこり|腫瘍|口内炎|ニキビ|湿疹|あざ|肩こり|クマ|虫歯|ものもらい|たんこぶ|まめ|ヘルペス|結石|できもの|吹き出物|イボ|蕁麻疹|血豆|水ぶくれ)(?:まで|が|も)?できた"
+    r"|(?:首|肩|足|腰|口|目|歯|顔|背中|腕|手|肌|喉|おでこ|まぶた)(?:の[^、。]{0,4})?に[^、。]{0,8}できた"
+)
+# Concessive joy: 疲れたけど最高の一日やった！ — the distress token concedes to
+# the delight that follows, so the distress-precedence veto must not fire.
+_CONCESSIVE_JOY_RE = re.compile(
+    r"(?:けど|けれど|のに|\bbut\b)[^、。!！]{0,12}(?:最高|嬉し|うれし|\bhappy\b)"
 )
 # bare "ugh" matched laughed/daughter/thought/enough; うんざり and the past
 # forms つらかった/きつかった live here so ordinary vents validate instead of
@@ -91,7 +103,8 @@ _VENTING_PATTERNS = [
     r"しんど",
     r"(?<!お)疲れ",
     r"うんざり",
-    r"泣きそう",
+    # 嬉しくて泣きそう is joy, not distress
+    r"(?<!くて)泣きそう(?!なくらい)",
     r"落ち込",
     r"へこむ",
     r"\bugh+\b",
@@ -107,7 +120,8 @@ _GRIEF_PATTERNS = [
     r"\b(?:we|i|she|he|they) (?:just )?lost (?:him|her|them)\b",
     r"passed away",
     r"亡くな",
-    r"死ん(?:だ|でしまっ|でしも|でもう|じゃっ)",
+    # すぎて死んだ is hyperbolic joy slang (最高すぎて死んだ), not bereavement
+    r"(?<!すぎて)(?<!過ぎて)死ん(?:だ|でしまっ|でしも|でもう|じゃっ)",
     r"死にました",
     r"死別",
     r"つらい",
@@ -148,10 +162,11 @@ _PLAYFUL_PATTERNS = [
 # an opener ("No more bugs! We shipped!") is usually celebration, not protest.
 _BOUNDARY_PATTERNS = [
     # imperative/request form only — やめてん is "I quit" (a disclosure),
-    # やめてって言われた is reported speech, neither is a boundary at the agent
-    r"やめて(?:[よやな]|くれ|ください|ほしい|[ー〜!！。…]|$)",
-    r"やめろ",
-    r"それは嫌",
+    # やめてって言われた / やめろって言われた are reported speech, それは嫌やった
+    # is a past-tense disclosure: none of them is a boundary at the agent
+    r"やめて(?:[よやな]|くれ|ください|ほしい|もらえ|もらって|[ー〜!！。…]|$)",
+    r"やめろ(?!って|と(?:言|の|か))",
+    r"それは嫌(?:や|だ|です)?[ー〜!！。…]*$",
     r"\bno more[.!！]*$",
     r"no more of (?:this|that)",
     r"\bstop that\b",
@@ -435,13 +450,16 @@ class SocialPolicyEngine:
             )
 
         # Delight must lose to explicit distress in the same utterance
-        # (「最悪や、最高の誕生日になるはずやったのに」 is a lament, not a share).
+        # (「最悪や、最高の誕生日になるはずやったのに」 is a lament, not a share)
+        # — unless the distress is concessive (疲れたけど最高の一日やった！).
+        distress_overrides_delight = (
+            _matches(text, _VENTING_PATTERNS) or _matches(text, _GRIEF_PATTERNS)
+        ) and not _CONCESSIVE_JOY_RE.search(text)
         if (
             _matches(text, _DELIGHT_PATTERNS)
             and not _NEGATED_POSITIVE_RE.search(text.lower())
             and not _DELIGHT_VETO_JA_RE.search(text)
-            and not _matches(text, _VENTING_PATTERNS)
-            and not _matches(text, _GRIEF_PATTERNS)
+            and not distress_overrides_delight
             and affect.valence >= -0.1
         ):
             return SocialPolicyDecision(
