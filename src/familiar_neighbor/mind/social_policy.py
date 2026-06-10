@@ -8,9 +8,43 @@ import re
 from .interoception import InteroceptivePressure
 from .mental_state import AffectiveState
 
-_ADVICE_PATTERNS = [r"どう", r"教えて", r"advice", r"should i", r"どうしたら"]
-_ACTION_PATTERNS = [r"して", r"やって", r"run", r"fix", r"please do", r"頼む"]
-_REPAIR_PATTERNS = [r"hurt", r"傷つ", r"前の返事", r"つらかった", r"きつかった"]
+# Pattern hygiene (2026-06 audit): every short pattern below was once a bare
+# substring and misfired on common speech (めっちゃ→ちゃう, laughed→ugh,
+# 死ぬほど笑った→grief, retired→tired, brunch→run, …). Keep new entries
+# anchored / word-bounded / morphology-aware, and reproduce-by-running before
+# loosening anything.
+
+# Interrogative advice forms only — bare どう also matched どうも/どうぞ/どうでもいい.
+_ADVICE_PATTERNS = [
+    r"どう(?:したら|すれば|しよう|思う|やったら|かな)",
+    r"教えて",
+    r"\badvice\b",
+    r"\bshould i\b",
+]
+# Request morphology only — bare して/やって matched past-progressives (してた)
+# and dismay (やってもうた).
+_ACTION_PATTERNS = [
+    r"して(?:くれ|ください|もらえ|ほしい|頂|いただ)",
+    r"して[よなや]?[!！。]?$",
+    r"やって(?:くれ|ください|もらえ|ほしい)",
+    r"やって[よなや]?[!！。]?$",
+    r"\brun\b",
+    r"\bfix\b",
+    r"please do",
+    r"頼む",
+]
+# Relational hurt only — repair is the FIRST branch, so bare "hurt" turned
+# "My back hurts" into an apology.
+_REPAIR_PATTERNS = [
+    r"hurt (?:me|my feelings)",
+    r"feel(?:ing)?s? hurt",
+    r"you hurt",
+    r"that hurt\b",
+    r"傷つ",
+    r"前の返事",
+    r"つらかった",
+    r"きつかった",
+]
 # "やった" only as an exclamation: utterance-initial (but not やったら/やったん
 # conditionals/questions) or followed by an exclamatory mark. Kansai past tense
 # "〜やった" ("散々やった") must NOT read as delight.
@@ -21,13 +55,36 @@ _DELIGHT_PATTERNS = [
     r"うれし",
     r"最高",
     r"できた",
-    r"happy",
-    r"yay",
+    # negated happy must not celebrate ("I'm not happy with…")
+    r"(?<!not )(?<!n't )(?<!never )\bhappy\b",
+    r"\byay\b",
 ]
-_VENTING_PATTERNS = [r"むかつ", r"最悪", r"つらい", r"しんど", r"疲れ", r"ugh"]
-_GRIEF_PATTERNS = [r"寂し", r"悲し", r"grief", r"lost", r"死", r"つらい"]
-_FATIGUE_PATTERNS = [r"疲れ", r"眠い", r"しんど", r"だるい", r"exhausted", r"tired"]
-_META_PATTERNS = [r"君", r"あなた", r"この会話", r"meta", r"how do you", r"あなたは"]
+# bare "ugh" matched laughed/daughter/thought/enough; うんざり added here so the
+# fed-up reading is caught positively (it used to read as silence via うん).
+_VENTING_PATTERNS = [r"むかつ", r"最悪", r"つらい", r"しんど", r"疲れ", r"うんざり", r"\bugh+\b"]
+# bereavement forms only — bare 死 matched 死ぬほど笑った/必死, bare "lost"
+# matched "lost track of time".
+_GRIEF_PATTERNS = [
+    r"寂し",
+    r"悲し",
+    r"\bgrief\b",
+    r"\blost (?:a |my |our |her |his )?(?:someone|mom|dad|mother|father|grand\w+|friend|husband|wife|partner|dog|cat|pet|baby)\b",
+    r"passed away",
+    r"亡くな",
+    r"死ん(?:だ|でしまっ|じゃっ)",
+    r"死別",
+    r"つらい",
+]
+_FATIGUE_PATTERNS = [r"疲れ", r"眠い", r"しんど", r"だるい", r"\bexhausted\b", r"\btired\b"]
+# 君 only as a standalone second-person pronoun (not 田中君/君津); "how do you"
+# only for introspective targets (not "how do you make carbonara").
+_META_PATTERNS = [
+    r"(?<![一-龯ァ-ヶぁ-んー])君(?=[はがのにをもと]|って|$)",
+    r"あなた",
+    r"この会話",
+    r"\bmeta\b",
+    r"how do you (?:feel|think|remember|decide|work|see|experience|know)\b",
+]
 # "w" is the Japanese laugh marker only when not embedded in an ASCII word
 # ("we went..." must not classify as playful); "play" needs word boundaries
 # ("display" is not playful).
@@ -39,8 +96,26 @@ _PLAYFUL_PATTERNS = [
     r"\bteas(?:e|ing)\b",
     r"冗談",
 ]
-_BOUNDARY_PATTERNS = [r"やめて", r"やめろ", r"それは嫌", r"no more", r"stop that"]
-_SILENCE_PATTERNS = [r"…", r"\.\.\.", r"うん", r"ok$", r"おけ$", r"寝る"]
+# "no more" as protest only (not "no more milk"); \b kills "nonstop that".
+_BOUNDARY_PATTERNS = [
+    r"やめて",
+    r"やめろ",
+    r"それは嫌",
+    r"^no more\b",
+    r"\bno more[.!！]*$",
+    r"no more of (?:this|that)",
+    r"\bstop that\b",
+]
+# うん only as a standalone acknowledgement (not うんざり/ううん); 寝る only as
+# an utterance-final sign-off (not 寝る前に…).
+_SILENCE_PATTERNS = [
+    r"…",
+    r"\.\.\.",
+    r"^うん(?:うん)?[。…〜ー]?$",
+    r"ok$",
+    r"おけ$",
+    r"寝る(?:わ|ね|で|ぞ)?[ー〜。…!！]*$",
+]
 _GREETING_PATTERNS = [
     r"^おはよ",
     r"^こんにちは",
@@ -66,8 +141,14 @@ _CORRECTION_PATTERNS = [
     r"食い違",
     r"そういう意味じゃ",
     r"そうじゃない",
-    r"違う",
-    r"ちゃう",
+    # 間違う is the mistake-verb, not a correction of the agent
+    r"(?<!間)違う",
+    # Kansai ちゃう as a correction needs a clause boundary or demonstrative —
+    # bare ちゃう hijacked めっちゃ (めっ「ちゃう」れしい) and the 〜ちゃう
+    # contraction (食べちゃう).
+    r"(?:^|[\s、。!！?？])ちゃう",
+    r"(?:それ|これ)(?:は)?ちゃう",
+    r"ちゃうちゃう",
     r"^いや[、, ]",
 ]
 

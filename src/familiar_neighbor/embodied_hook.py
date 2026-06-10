@@ -367,8 +367,19 @@ class EmbodiedAgentHook(RuntimeHookBase):
         )
 
         # ── Social policy + provisional relationship update ──
+        # Relational-hurt tokens only — bare "hurt" turned "My back hurts"
+        # into a repair turn.
         previous_response_hurt = any(
-            token in user_input.lower() for token in ("hurt", "傷つ", "前の返事", "嫌だった")
+            token in user_input.lower()
+            for token in (
+                "hurt me",
+                "hurt my feelings",
+                "you hurt",
+                "that hurt",
+                "傷つ",
+                "前の返事",
+                "嫌だった",
+            )
         )
         learned_styles, learned_failures = relationship_learning_inputs(agent._relationship)
         social_policy = agent._social_policy.decide(
