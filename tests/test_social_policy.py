@@ -374,3 +374,18 @@ def test_capacity_prompt_line_rendered() -> None:
     rested = _decide_pressured("これ直してくれへん", need_rest=0.2)
     text2 = EmbodiedAgent._format_social_policy_prompt(rested)
     assert "capacity" not in text2.lower()
+
+
+# ── Kansai past-tense "〜やった" must not read as delight ───────────────────
+
+
+def test_kansai_past_tense_yatta_is_not_delight() -> None:
+    for text in ("今日ほんま散々やった", "えらい目にあって大変やった", "最悪の一日やった"):
+        decision = _decide(text, mood="frustrated")
+        assert decision.primary_act != "delight_share", text
+
+
+def test_exclamatory_yatta_still_delight() -> None:
+    for text in ("やったー、うまくいった！", "やった！受かった！", "やったぜ"):
+        decision = _decide(text)
+        assert decision.primary_act == "delight_share", text

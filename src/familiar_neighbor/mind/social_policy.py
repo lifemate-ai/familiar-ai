@@ -11,7 +11,19 @@ from .mental_state import AffectiveState
 _ADVICE_PATTERNS = [r"どう", r"教えて", r"advice", r"should i", r"どうしたら"]
 _ACTION_PATTERNS = [r"して", r"やって", r"run", r"fix", r"please do", r"頼む"]
 _REPAIR_PATTERNS = [r"hurt", r"傷つ", r"前の返事", r"つらかった", r"きつかった"]
-_DELIGHT_PATTERNS = [r"やった", r"嬉し", r"うれし", r"最高", r"できた", r"happy", r"yay"]
+# "やった" only as an exclamation: utterance-initial (but not やったら/やったん
+# conditionals/questions) or followed by an exclamatory mark. Kansai past tense
+# "〜やった" ("散々やった") must NOT read as delight.
+_DELIGHT_PATTERNS = [
+    r"^やった(?![らん])",
+    r"やった[ー〜!！ぜ]",
+    r"嬉し",
+    r"うれし",
+    r"最高",
+    r"できた",
+    r"happy",
+    r"yay",
+]
 _VENTING_PATTERNS = [r"むかつ", r"最悪", r"つらい", r"しんど", r"疲れ", r"ugh"]
 _GRIEF_PATTERNS = [r"寂し", r"悲し", r"grief", r"lost", r"死", r"つらい"]
 _FATIGUE_PATTERNS = [r"疲れ", r"眠い", r"しんど", r"だるい", r"exhausted", r"tired"]
