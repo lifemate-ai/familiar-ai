@@ -176,8 +176,8 @@ person-key fragmentation (canonicalization + COLLATE NOCASE).
 
 ## Tests
 
-+86 tests across store cadence/backoff, legacy-DB migration, idle-loop
++87 tests across store cadence/backoff, legacy-DB migration, idle-loop
 wiring (REPL/TUI/GUI), config independence, person-model roundtrip and
 writeback isolation, social-policy learning invariance. Full suite
-1069 passed; ruff/format/mypy green.
+1070 passed; ruff/format/mypy green.
 ```

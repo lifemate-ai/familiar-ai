@@ -399,7 +399,9 @@ class EmbodiedAgentHook(RuntimeHookBase):
                     + "[Open unfinished business]\n"
                     + "\n".join(f"- {item['summary'][:160]}" for item in unfinished_business[:3])
                 )
-            commitments_ctx = agent._commitments_context()
+            # First turn already carries [Today's agenda] in morning_ctx; skip the
+            # per-turn reminders block there to avoid listing the same items twice.
+            commitments_ctx = "" if first_turn else agent._commitments_context()
             if commitments_ctx:
                 continuity_ctx = (
                     continuity_ctx + ("\n\n" if continuity_ctx else "") + commitments_ctx

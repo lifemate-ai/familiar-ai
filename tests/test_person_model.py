@@ -234,3 +234,17 @@ def test_context_for_prompt_excludes_stale_inferences(tracker):
     ctx = tracker.context_for_prompt("kota")
     assert "fresh mood" in ctx
     assert "ancient mood" not in ctx
+
+
+def test_unparseable_created_at_treated_as_stale(tracker):
+    tracker.record_inference(person="kota", states=[("fresh", 0.5)], evidence=[], policy="")
+    db = tracker._ensure_db()
+    db.execute(
+        "INSERT INTO person_inferences (id, person, state, confidence, evidence_json,"
+        " policy, source, created_at) VALUES ('pinf_bad', 'kota', 'garbled', 0.9,"
+        " '[]', '', 'tom', 'not-a-timestamp')"
+    )
+    db.commit()
+    ctx = tracker.context_for_prompt("kota")
+    assert "fresh" in ctx
+    assert "garbled" not in ctx
