@@ -44,6 +44,22 @@ from familiar_neighbor.mind.social_policy import (
 )
 from familiar_runtime.runtime import RuntimeHookBase
 
+
+def _should_auto_tom(
+    social_policy: "SocialPolicyDecision",
+    *,
+    brief_reply_turn: bool,
+    is_desire_turn: bool,
+    user_input: str,
+) -> bool:
+    """Gate for deterministic ToM: only flagged, full, companion-driven turns."""
+    if not social_policy.should_use_tom:
+        return False
+    if brief_reply_turn or is_desire_turn:
+        return False
+    return bool(user_input.strip())
+
+
 if TYPE_CHECKING:
     from familiar_agent.agent import EmbodiedAgent
 
@@ -367,6 +383,18 @@ class EmbodiedAgentHook(RuntimeHookBase):
             is_desire_turn=is_desire_turn,
         )
 
+        # ── Deterministic perspective-taking ──
+        # should_use_tom used to be advisory only; now the inference actually
+        # runs (and accumulates into the person model) on flagged turns.
+        auto_tom_ctx = ""
+        if _should_auto_tom(
+            social_policy,
+            brief_reply_turn=brief_reply_turn,
+            is_desire_turn=is_desire_turn,
+            user_input=user_input,
+        ):
+            auto_tom_ctx = await agent._run_auto_tom(user_input)
+
         # ── Append user message to history ──
         agent.messages.append(agent.backend.make_user_message(user_input_with_ctx))
 
@@ -436,6 +464,7 @@ class EmbodiedAgentHook(RuntimeHookBase):
                     agent._mental_state_bus.summarize_recent_for_prompt(2),
                     mental_snapshot.prompt_summary(),
                     agent._format_social_policy_prompt(social_policy),
+                    auto_tom_ctx,
                 )
                 if part
             )

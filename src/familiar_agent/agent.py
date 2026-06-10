@@ -1182,6 +1182,28 @@ class EmbodiedAgent:
         lines.extend(format_commitment_line(c, now=now) for c in items)
         return "\n".join(lines)
 
+    async def _run_auto_tom(self, user_input: str, *, timeout: float = 12.0) -> str:
+        """Run the ToM tool deterministically when social policy demands it.
+
+        The model is not relied on to call the tool itself; this guarantees
+        perspective-taking happens on emotionally loaded turns (and the result
+        feeds the persistent person model as a side effect). Failures and
+        timeouts degrade to an empty string — never break the turn.
+        """
+        tom_tool = getattr(self, "_tom_tool", None)
+        if tom_tool is None:
+            return ""
+        try:
+            text, _image = await asyncio.wait_for(
+                tom_tool.call("tom", {"situation": user_input[:500]}),
+                timeout=timeout,
+            )
+        except (asyncio.TimeoutError, Exception):
+            logger.debug("auto ToM failed", exc_info=True)
+            return ""
+        text = str(text).strip()
+        return text[:1200] if text else ""
+
     def _person_model_context(self) -> str:
         """Surface the accumulated ToM model of the companion, if any."""
         tracker = getattr(self, "_person_model", None)
