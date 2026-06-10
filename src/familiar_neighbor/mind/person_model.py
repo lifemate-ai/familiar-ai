@@ -17,7 +17,7 @@ import json
 import logging
 import sqlite3
 import uuid
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 from familiar_agent.sqlite_migrations import apply_migrations, default_migration_dir
@@ -25,6 +25,17 @@ from familiar_agent.sqlite_migrations import apply_migrations, default_migration
 logger = logging.getLogger(__name__)
 
 DEFAULT_PERSON_MODEL_DB_PATH = Path.home() / ".familiar_ai" / "observations.db"
+
+
+def _parse_created_at(created_at_iso: str) -> datetime:
+    """Parse a stored timestamp, treating unparseable values as very old."""
+    try:
+        then = datetime.fromisoformat(created_at_iso)
+    except ValueError:
+        return datetime.min.replace(tzinfo=timezone.utc)
+    if then.tzinfo is None:
+        then = then.replace(tzinfo=timezone.utc)
+    return then
 
 
 def _age_label(created_at_iso: str, *, now: datetime | None = None) -> str:
@@ -138,9 +149,18 @@ class PersonModelTracker:
             for row in rows
         ]
 
-    def context_for_prompt(self, person: str, n: int = 4) -> str:
-        """Compact accumulated-model block for the system prompt."""
-        rows = self.recent(person, n=n)
+    def context_for_prompt(self, person: str, n: int = 4, max_age_days: float = 7.0) -> str:
+        """Compact accumulated-model block for the system prompt.
+
+        Inferences older than ``max_age_days`` are excluded — a stale guess
+        ("exhausted", ten days ago) misleads more than it helps.
+        """
+        cutoff = datetime.now(timezone.utc) - timedelta(days=max_age_days)
+        rows = [
+            row
+            for row in self.recent(person, n=n)
+            if _parse_created_at(row["created_at"]) >= cutoff
+        ]
         if not rows:
             return ""
         lines = [f"[Person model: {person} — accumulated impressions, may be stale]"]

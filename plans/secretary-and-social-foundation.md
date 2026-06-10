@@ -138,4 +138,46 @@ uv run pytest -q
 - [x] Phase 4: Person Model（person_inferences + PersonModelTracker + ToM 書き戻し + prompt surface）
 - [x] Phase 5: 社会的学習ループ（failed patterns → decide() 補正、契約テスト付き）
 
-push は未実施（コウタ判断）。全5フェーズ完了。
+push は未実施（コウタ判断）。全5フェーズ完了 + アジェンダ + staleness カットオフ + CLAUDE.md 更新。
+
+---
+
+## PR ドラフト（コウタ用 — push 後にそのまま使える）
+
+**タイトル:** `feat: secretary layer (commitments + proactive reminders) and social accumulation (person model + learned policy)`
+
+**本文:**
+
+```markdown
+## Summary
+
+Two pillars toward "more human, more socially capable":
+
+**Secretary layer** — the agent can now hold commitments (reminders,
+appointments, promises, follow-ups) with due times and priorities, surface
+them passively in every turn, proactively speak up when they come due
+(independent of auto_desire, FAMILIAR_PROACTIVE_REMINDERS, default ON,
+quiet-hours aware, escalating backoff capped at 3), and open the day with a
+[Today's agenda] block on the first turn.
+
+**Social accumulation** — ToM inferences now persist per person
+(person_inferences, migration 010) and surface as an accumulated
+[Person model] block (7-day staleness cutoff); recorded support failures
+and preferences now feed back into SocialPolicyEngine.decide() so the same
+support misstep is not repeated.
+
+## Hardening
+
+All three idle loops were wired through multi-agent adversarial review;
+11 confirmed findings fixed and re-verified, including: mark-before-run
+(mid-turn snooze survives), TUI concurrent agent.run race (re-queue for
+interrupt drain), REPL silent-death via os._exit(0) on backend errors,
+person-key fragmentation (canonicalization + COLLATE NOCASE).
+
+## Tests
+
++86 tests across store cadence/backoff, legacy-DB migration, idle-loop
+wiring (REPL/TUI/GUI), config independence, person-model roundtrip and
+writeback isolation, social-policy learning invariance. Full suite
+1069 passed; ruff/format/mypy green.
+```

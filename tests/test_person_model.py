@@ -213,3 +213,24 @@ async def test_tom_canonicalizes_companion_case_variants(tmp_path):
 def test_recent_reads_case_insensitively(tracker):
     tracker.record_inference(person="Kota", states=[("calm", 0.5)], evidence=[], policy="")
     assert tracker.recent("kota", n=5)[0]["state"] == "calm"
+
+
+def test_context_for_prompt_excludes_stale_inferences(tracker):
+    """Inferences older than the max age must not steer the agent."""
+    from datetime import datetime, timedelta, timezone
+
+    tracker.record_inference(person="kota", states=[("fresh mood", 0.6)], evidence=[], policy="")
+    # Inject an old row directly (record_inference always stamps now).
+    old = (datetime.now(timezone.utc) - timedelta(days=10)).isoformat()
+    db = tracker._ensure_db()
+    db.execute(
+        "INSERT INTO person_inferences (id, person, state, confidence, evidence_json,"
+        " policy, source, created_at) VALUES ('pinf_old', 'kota', 'ancient mood', 0.9,"
+        " '[]', '', 'tom', ?)",
+        (old,),
+    )
+    db.commit()
+
+    ctx = tracker.context_for_prompt("kota")
+    assert "fresh mood" in ctx
+    assert "ancient mood" not in ctx
