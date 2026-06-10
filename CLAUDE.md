@@ -1,154 +1,147 @@
-# familiar-ai — Developer Guide
+# CLAUDE.md
+
+This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
 ## Project overview
 
 familiar-ai is an embodied companion agent. It combines:
 
-- a ReAct tool loop
+- a provider-neutral ReAct tool loop
 - local SQLite memory
-- prediction / workspace / self-state layers
-- explicit relationship, appraisal, social policy, and drive regulation
+- prediction / workspace / self-state cognition layers
+- explicit relationship, appraisal, social policy, and drive (desire) regulation
 - optional camera, mobility, TTS, STT, GUI, and MCP integrations
 
-The codebase is backend-agnostic. Anthropic is supported, but it is no longer the only runtime path.
+The codebase is backend-agnostic. Anthropic is supported, but it is one of several
+provider adapters — not the only runtime path.
 
-## Source tree
+## Commands
 
-```text
-src/familiar_agent/
-├── agent.py              # Main embodied turn loop
-├── appraisal.py          # Low-dimensional affect updates
-├── attention_schema.py   # Recent focus / attention state
-├── backend.py            # LLM backend protocol + implementations
-├── bootstrap.py          # Startup/setup/configured-state handling
-├── concern_engine.py     # Active unfinished concerns
-├── config.py             # Runtime config objects
-├── default_mode.py       # Idle/default-mode memory processing
-├── desires.py            # Autonomous drives + drive selection
-├── diagnostics.py        # GUI diagnostics and connection tests
-├── gui.py                # GTK GUI
-├── heartbeat.py          # Continuation/runtime status logic
-├── interoception.py      # Interoception providers + semantic pressure
-├── main.py               # CLI entry point / mode selection
-├── mental_state.py       # Mental-state bus and JSONL snapshots
-├── meta_monitor.py       # Metacognitive logging + response gating
-├── prediction.py         # Prediction error / agency error
-├── relationship.py       # Longitudinal relationship state
-├── routines.py           # Quiet-hours / routine config helpers
-├── self_narrative.py     # Session-spanning autobiographical narrative
-├── self_state.py         # Persistent latent bodily state
-├── setup.py              # Setup flow, env migration, validation
-├── social_policy.py      # Speech-act classification + response mode
-├── sqlite_migrations.py  # Migration runner
-├── tools/
-│   ├── camera.py
-│   ├── coding.py
-│   ├── memory.py
-│   ├── mic.py
-│   ├── mobility.py
-│   ├── realtime_stt.py
-│   ├── stt.py
-│   ├── tom.py
-│   └── tts.py
-├── tui.py                # Text UI
-├── voice_guard.py        # TTS/STT loop prevention
-└── workspace.py          # Coalition competition / broadcast
+```bash
+# Run the app (CLI entry point — defined in pyproject [project.scripts])
+uv run familiar
+
+# Discover ONVIF/Tapo cameras on the LAN
+uv run familiar-discover-cameras
+
+# Tests (pytest-asyncio; ~990 tests)
+uv run pytest -q
+uv run pytest -q tests/test_runtime_hooks.py            # one file
+uv run pytest -q tests/test_runtime_hooks.py::test_name # one test
+uv run pytest -q -k "interrupt"                          # by keyword
+
+# Lint / format / types — the full pre-merge gate
+uv run ruff check .
+uv run ruff format --check .
+uv run --group dev mypy src/familiar_agent src/familiar_runtime src/familiar_capabilities src/familiar_neighbor
 ```
 
-## Runtime architecture
+Optional extras are installed by default via `[tool.uv] default-groups`
+(`dev`, `gui`, `camera`, `voice`). `torch` resolves to the CPU wheel index.
 
-The current turn flow in `agent.py` is:
+## Architecture: four packages, one app
 
-1. ingest user input and tool/scene context
-2. collect interoception
-3. read prediction state
-4. activate memory, working memory, and open episodes
-5. update provisional relationship evidence
-6. appraise affect
-7. choose social policy
-8. regulate drives
-9. run workspace competition
-10. execute the ReAct loop
-11. meta-gate the response
-12. persist post-turn traces and mental-state snapshots
+The repo is mid-migration from a single `familiar_agent` monolith toward a
+**generic runtime substrate + a persona profile**. Four packages under `src/`:
 
-The old prompt-only social logic is no longer the full story. Deterministic state layers now sit between raw input and response planning.
+| Package | Role | Depends on |
+|---|---|---|
+| `familiar_runtime` | Generic, persona-free substrate: ReAct loop, runtime facade, LLM model adapters (`models/`), tool registry, memory/events/tasks stores, generic prompt fragments | nothing in-repo |
+| `familiar_capabilities` | Thin `ToolProvider` adapters wrapping `familiar_agent` tools so the runtime can register them (camera, coding, mcp, memory, mobility, tom, voice) | runtime, agent tools |
+| `familiar_neighbor` | The "neighbor" persona on the substrate: `NeighborProfile` (`app.py`), `EmbodiedAgentHook` (`embodied_hook.py`), and all cognition under `mind/` | runtime |
+| `familiar_agent` | The legacy/main application: `EmbodiedAgent` turn loop, GUI/TUI, CLI entry, concrete tool implementations, config/setup/backend factories | all of the above |
+
+**Dependency direction is one-way:** `runtime` knows nothing about personas;
+`neighbor` and `capabilities` build on `runtime`; `agent` ties everything together.
+
+### The shim pattern (read before editing cognition modules)
+
+Cognition modules were physically moved into `familiar_neighbor/mind/`, but the
+old `familiar_agent.<name>` import paths are preserved as **3-line shims**:
+
+```python
+"""Compatibility shim — implementation moved to familiar_neighbor.mind.scene."""
+from familiar_neighbor.mind.scene import *  # noqa: F401, F403
+```
+
+This applies to `scene.py`, `appraisal.py`, `mental_state.py`, `desires.py`,
+`prediction.py`, `relationship.py`, `social_policy.py`, and others. **Edit the real
+implementation in `familiar_neighbor/mind/`, not the shim.** The shims exist so the
+large body of tests and callers importing `familiar_agent.X` keep working — do not
+delete them without migrating every caller. `familiar_agent/backend.py` is a similar
+re-export surface: provider adapters live in `familiar_runtime/models/`, while
+`backend.py` keeps the historical import path plus the config-driven factory
+functions (`create_utility_backend`, `create_scene_backend`).
+
+### Runtime substrate: hooks, loop, and the in-progress migration
+
+`familiar_runtime/runtime.py` exposes `AgentRuntime.run_turn(...)`, which drives
+`familiar_runtime/react_loop.py`'s `ReActLoop`. Behavior is customized through the
+**`RuntimeHook` Protocol** (with a no-op `RuntimeHookBase`). Three hook shapes are
+wired and live:
+
+- `mid_turn_inject(ctx, iteration) -> list[ContextBlock]` — injected into the
+  per-iteration **system prompt** (not as a user message — appending a user message
+  after a tool_result would break role alternation).
+- `InterruptSource` (`drain()` / `empty()`) — polled each loop iteration; non-empty
+  drains are injected as a user message.
+- `RetryDecision` returned from `after_model_result` — appends the assistant turn,
+  injects `inject_user_message`, and continues the loop instead of finalizing.
+
+`ReActLoop.run(...)` has a **public signature that must be preserved**. The system
+prompt is `str | tuple[str, str]`, where the tuple is `(stable, variable)` — the
+Anthropic adapter's `cache_control` depends on this shape. Use `_with_extra_system`
+to append to the variable half.
+
+**Important caveat:** `EmbodiedAgent.run()` in `familiar_agent/agent.py` (~2400 lines)
+still runs its **own** ReAct loop and has not yet been routed through
+`AgentRuntime.run_turn`. `EmbodiedAgentHook` already structurally implements
+`RuntimeHook` but currently drives the agent via `prepare_turn` /
+`commit_after_end_turn`. Routing `EmbodiedAgent.run()` through the substrate is the
+known next step — it is **high-risk** (touches the TAPE replan / coherence retry /
+interrupt drain / say-reminder loop internals and ~23 `test_agent_react_loop.py`
+tests) and should not be attempted without explicit confirmation.
+
+### Turn flow (conceptual)
+
+ingest input → interoception → prediction state → activate memory / working memory /
+open episodes → relationship evidence → appraise affect → social policy → drive
+regulation → workspace competition → ReAct loop → meta-gate response → persist
+traces + mental-state snapshot.
 
 ## Persistence
 
-Primary persistent stores:
+Primary stores under `~/.familiar_ai/`:
 
-- `~/.familiar_ai/observations.db`
-  - observations
-  - embeddings
-  - semantic facts
-  - behavior policies
-  - revisions
-  - episodes
-  - episode membership
-  - memory activation
-  - unfinished business
-  - relationship state
-- `~/.familiar_ai/mental_state.jsonl`
-  - append-only mental-state snapshots
-- `~/.familiar_ai/heartbeat_state.json`
-  - continuation / carryover status
-- `~/.familiar_ai/desires.json`
-  - drive levels
-- `~/.familiar_ai/self_state.json`
-  - latent bodily carryover
+- `observations.db` — observations, embeddings, semantic facts, behavior policies,
+  revisions, episodes + membership, memory activation, unfinished business,
+  relationship state, memory graph
+- `mental_state.jsonl` — append-only mental-state snapshots
+- `heartbeat_state.json` — continuation / carryover status
+- `desires.json` — drive levels
+- `self_state.json` — latent bodily carryover
+- `relationship.json` — legacy; imported once if present, then SQLite is authoritative
 
-Legacy compatibility:
-
-- `~/.familiar_ai/relationship.json`
-  - imported once if present, then SQLite becomes authoritative
-
-Schema changes must go through timestamped files under `migration/`.
+**Every schema change must add a timestamped migration under `migration/`**
+(e.g. `2026-04-15-008_memory_graph_runtime.py`) with migration test coverage.
+SQLite stays the primary storage.
 
 ## Development rules
 
-- Python 3.10+
-- Async-first style
-- SQLite stays the primary storage
-- Prefer deterministic logic and typed dataclasses over giant prompt blobs
-- Do not leak raw interoception/body metrics into normal user-facing text
-- Keep compatibility for existing memory DBs; add migrations for every schema change
-
-## Validation before merge
-
-Run before opening a PR:
-
-```bash
-uv run ruff check .
-uv run --group dev mypy src/familiar_agent
-uv run pytest -q
-```
+- Python 3.10+, async-first style
+- Prefer deterministic, typed dataclasses over giant prompt blobs
+- Do not leak raw interoception / body metrics into user-facing text
+- Keep compatibility for existing memory DBs (migrations, not breaking changes)
+- When adding a tool, wire all three: implementation (`familiar_agent/tools/` or a
+  capability), agent registration / routing, and tests
+- When changing social behavior, prefer appraisal / social-policy / meta-gate logic
+  first; only extend prompt instructions when state logic is insufficient
+- Prompt changes that must stay byte-stable are pinned by SHA-256 in
+  `tests/test_prompt_assembly.py` — update the pin only when output legitimately changes
 
 ## Git workflow
 
-- Work from `develop`
-- Cut a feature branch before changes
-- Open focused PRs into `develop`
-- Use Conventional Commits in English
-
-Examples:
-
-```text
-feat(memory): add episode compression to recall
-fix(agent): gate raw interoception leakage
-docs: refresh technical architecture guide
-```
-
-## Editing guidance
-
-- When adding a tool, wire all three places:
-  - tool implementation
-  - agent registration / routing
-  - tests
-- When changing state or persistence:
-  - add a migration
-  - add migration coverage
-  - update docs
-- When changing social behavior:
-  - prefer appraisal / social policy / meta gate logic first
-  - only extend prompt instructions when state logic is insufficient
+- Work from `develop`; cut a feature branch before changes; open focused PRs into `develop`
+- Conventional Commits in English, e.g. `feat(runtime): wire interrupt polling into ReActLoop`
+- Run the full lint / format / mypy / pytest gate green before opening a PR
+- Push only the current branch explicitly; never force-push; merging is the user's decision
