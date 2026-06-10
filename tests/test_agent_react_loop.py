@@ -951,3 +951,26 @@ async def test_normal_input_records_no_deferral():
             p.stop()
 
     open_mock.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_deferral_dedup_sees_beyond_surfaced_top3():
+    """A duplicate whose twin sits at position >=4 must still be deduped."""
+    agent = _make_agent()
+    agent.backend.stream_turn = AsyncMock(return_value=(_turn("end_turn", text="ええよ"), "ええよ"))
+    dup = {"id": "biz-4", "summary": "deferred topic: その話はあとで話すわ、ごめんな"}
+    fresher = [{"id": f"biz-{i}", "summary": f"other {i}"} for i in range(3)]
+    agent._memory.list_unfinished_business_async = AsyncMock(return_value=fresher + [dup])
+    open_mock = AsyncMock(return_value="biz-5")
+    agent._memory.open_unfinished_business_async = open_mock
+
+    ps = _patch_heavy()
+    for p in ps:
+        p.start()
+    try:
+        await agent.run("その話はあとで話すわ、ごめんな")
+    finally:
+        for p in ps:
+            p.stop()
+
+    open_mock.assert_not_awaited()

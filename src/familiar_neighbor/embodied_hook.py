@@ -258,18 +258,21 @@ class EmbodiedAgentHook(RuntimeHookBase):
             list_unfinished_business = getattr(
                 agent._memory, "list_unfinished_business_async", None
             )
-            unfinished_business = await _call_optional_async(
+            # Fetch a wider window than the surfaced top-3 so deferral dedup
+            # doesn't re-insert an item that merely fell off the visible slice.
+            unfinished_open = await _call_optional_async(
                 list_unfinished_business,
-                limit=3,
+                limit=20,
                 fallback=[],
             )
+            unfinished_business = unfinished_open[:3]
             # ── Deferred-topic capture ──
             # "後で話すわ" must not be lost: record it as unfinished business so
             # it stays surfaced until the model resolves it.
             deferral = detect_deferral(user_input) if not is_desire_turn else None
             if deferral:
                 summary = f"{DEFERRAL_PREFIX}{deferral}"
-                if not any(item.get("summary") == summary for item in unfinished_business):
+                if not any(item.get("summary") == summary for item in unfinished_open):
                     open_unfinished = getattr(agent._memory, "open_unfinished_business_async", None)
                     await _call_optional_async(
                         open_unfinished,

@@ -1923,6 +1923,14 @@ class ObservationMemory:
             return []
 
     def resolve_unfinished_business(self, business_id: str) -> bool:
+        """Resolve by full id, or by a unique prefix of an open item.
+
+        The prompt surfaces ids truncated to 8 chars, so the model passes a
+        prefix; resolve it as long as it is unambiguous among open items.
+        """
+        business_id = str(business_id).strip()
+        if len(business_id) < 4:
+            return False
         try:
             with self._db_lock:
                 db = self._ensure_connected()
@@ -1930,6 +1938,23 @@ class ObservationMemory:
                     "UPDATE unfinished_business SET status = 'resolved', resolved_at = ? WHERE id = ?",
                     (self._now_iso(), business_id),
                 )
+                if updated.rowcount != 1:
+                    escaped = (
+                        business_id.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+                    )
+                    rows = db.execute(
+                        "SELECT id FROM unfinished_business "
+                        "WHERE id LIKE ? ESCAPE '\\' AND status = 'open'",
+                        (escaped + "%",),
+                    ).fetchall()
+                    if len(rows) != 1:
+                        db.commit()
+                        return False
+                    updated = db.execute(
+                        "UPDATE unfinished_business SET status = 'resolved', resolved_at = ? "
+                        "WHERE id = ?",
+                        (self._now_iso(), rows[0]["id"]),
+                    )
                 db.commit()
             return updated.rowcount == 1
         except Exception as e:

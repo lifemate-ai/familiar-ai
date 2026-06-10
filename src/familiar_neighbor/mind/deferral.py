@@ -15,13 +15,24 @@ import re
 
 _DEFERRAL_PATTERNS = [
     r"(?:あとで|後で)(?:ゆっくり)?(?:話|説明|教え|言う|聞かせ|相談)",
-    r"また今度",
+    # また今度 is verb-anchored too: a bare また今度ね is a polite decline,
+    # not a topic the agent should keep raising.
+    r"また今度(?:ゆっくり)?(?:話|説明|聞かせ|相談|教え)",
     r"その(?:話|件)は(?:また|あとで|後で)",
     r"後日(?:話|説明|相談|連絡|改めて)",
     r"\btell you later\b",
     r"\btalk (?:about (?:it|this) )?(?:later|another time)\b",
     r"\banother time\b",
 ]
+
+# "後で教えてくれる？" is the companion asking the AGENT to do something later —
+# that is the commitments/reminder domain, not a topic the companion deferred.
+# Request forms (てくれ/てもらえ/てほしい/てください, or a bare て-imperative not
+# followed by あげ/やる) are excluded.
+_REQUEST_TO_AGENT = re.compile(
+    r"て(?:くれ|もらえ|ほしい|ちょうだい|頂戴|ください|下さい)"
+    r"|(?:教え|聞かせ|話し)て(?!あげ|やる)"
+)
 
 _COMPILED = [re.compile(p) for p in _DEFERRAL_PATTERNS]
 
@@ -35,6 +46,8 @@ def detect_deferral(user_input: str) -> str | None:
     if not text:
         return None
     lower = text.lower()
-    if any(p.search(lower) for p in _COMPILED):
-        return text[:120]
-    return None
+    if not any(p.search(lower) for p in _COMPILED):
+        return None
+    if _REQUEST_TO_AGENT.search(lower):
+        return None
+    return text[:120]

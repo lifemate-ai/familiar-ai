@@ -41,11 +41,26 @@ class TestDetectDeferral:
             "あとでお風呂入る",  # doing something later, not deferring a topic
             "これ直しといて",
             "やったー！うまくいった",
+            "また今度ね",  # polite decline, not a topic to keep raising
+            "また今度にしよう",
+            "後で教えてくれる？",  # a request TO the agent — commitments domain
+            "あとで話してくれへん",
+            "あとで聞かせてほしい",
             "",
         ],
     )
     def test_non_deferrals_ignored(self, text):
         assert detect_deferral(text) is None
+
+    @pytest.mark.parametrize(
+        "text",
+        [
+            "あとで教えてあげるわ",  # user WILL tell — genuine deferral
+            "また今度ゆっくり話そう",
+        ],
+    )
+    def test_user_offering_to_tell_later_is_deferral(self, text):
+        assert detect_deferral(text) is not None
 
     def test_snippet_is_bounded(self):
         long = "また今度話すわ。" + "あ" * 300
@@ -89,3 +104,42 @@ async def test_resolve_tool_unknown_id(memory_tool):
     tool, _store = memory_tool
     text, _ = await tool.call("resolve_unfinished_business", {"id": "nope"})
     assert "not" in text.lower() or "error" in text.lower()
+
+
+@pytest.mark.asyncio
+async def test_resolve_tool_accepts_surfaced_8char_prefix(memory_tool):
+    """The prompt shows ids truncated to 8 chars — that prefix MUST resolve.
+
+    Regression for the review-critical bug where exact-match resolve made the
+    surfaced id useless.
+    """
+    tool, store = memory_tool
+    business_id = store.open_unfinished_business(summary="deferred: 旅行の話")
+    short = business_id[:8]
+
+    text, _ = await tool.call("resolve_unfinished_business", {"id": short})
+    assert "✓" in text or "resolved" in text.lower()
+    assert not any(b["id"] == business_id for b in store.list_unfinished_business())
+
+
+def test_resolve_ambiguous_prefix_fails(memory_tool):
+    _tool, store = memory_tool
+    # Craft two open items sharing a prefix (uuid4 collisions are improbable;
+    # insert directly to force the case).
+    with store._db_lock:
+        db = store._ensure_connected()
+        for suffix in ("one", "two"):
+            db.execute(
+                "INSERT INTO unfinished_business "
+                "(id, summary, status, source, related_memory_id, metadata_json, created_at, resolved_at) "
+                "VALUES (?, ?, 'open', 'test', NULL, '{}', '2026-06-11T00:00:00', NULL)",
+                (f"aaaaaaaa-{suffix}", f"item {suffix}"),
+            )
+        db.commit()
+    assert store.resolve_unfinished_business("aaaaaaaa") is False
+
+
+def test_resolve_too_short_prefix_fails(memory_tool):
+    _tool, store = memory_tool
+    store.open_unfinished_business(summary="x")
+    assert store.resolve_unfinished_business("a") is False
