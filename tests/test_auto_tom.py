@@ -95,3 +95,45 @@ class TestRunAutoTom:
         tom = types.SimpleNamespace(call=AsyncMock(return_value=("x" * 5000, None)))
         out = await EmbodiedAgent._run_auto_tom(_agent_stub(tom), "y")
         assert len(out) <= 1300
+
+
+class TestAutoTomCooldown:
+    def test_same_act_within_cooldown_blocked(self):
+        assert not _should_auto_tom(
+            types.SimpleNamespace(should_use_tom=True, primary_act="venting"),
+            brief_reply_turn=False,
+            is_desire_turn=False,
+            user_input="まだむかつくわ",
+            turns_since_last=1,
+            last_act="venting",
+        )
+
+    def test_act_change_bypasses_cooldown(self):
+        assert _should_auto_tom(
+            types.SimpleNamespace(should_use_tom=True, primary_act="grief_signal"),
+            brief_reply_turn=False,
+            is_desire_turn=False,
+            user_input="ほんまは悲しいんよ",
+            turns_since_last=1,
+            last_act="venting",
+        )
+
+    def test_cooldown_expires_after_enough_turns(self):
+        assert _should_auto_tom(
+            types.SimpleNamespace(should_use_tom=True, primary_act="venting"),
+            brief_reply_turn=False,
+            is_desire_turn=False,
+            user_input="まだむかつくわ",
+            turns_since_last=3,
+            last_act="venting",
+        )
+
+    def test_no_history_fires(self):
+        assert _should_auto_tom(
+            types.SimpleNamespace(should_use_tom=True, primary_act="venting"),
+            brief_reply_turn=False,
+            is_desire_turn=False,
+            user_input="むかつく",
+            turns_since_last=None,
+            last_act=None,
+        )

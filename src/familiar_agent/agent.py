@@ -532,6 +532,9 @@ class EmbodiedAgent:
         )
         self._last_tool_error: str | None = None
         self._tool_failure_streak: int = 0
+        # Deterministic ToM cooldown bookkeeping (see embodied_hook._should_auto_tom)
+        self._last_auto_tom_turn: int | None = None
+        self._last_auto_tom_act: str | None = None
 
         # Mood persistence (Phase 2 companion-likeness)
         self._mood: str = "neutral"
@@ -1194,11 +1197,13 @@ class EmbodiedAgent:
         if tom_tool is None:
             return ""
         try:
+            # 12s default is deliberately tighter than _TOOL_TIMEOUTS["tom"] (20s):
+            # this runs serially before the main loop, so it caps time-to-first-token.
             text, _image = await asyncio.wait_for(
                 tom_tool.call("tom", {"situation": user_input[:500]}),
                 timeout=timeout,
             )
-        except (asyncio.TimeoutError, Exception):
+        except Exception:
             logger.debug("auto ToM failed", exc_info=True)
             return ""
         text = str(text).strip()

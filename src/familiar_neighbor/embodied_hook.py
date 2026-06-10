@@ -45,19 +45,35 @@ from familiar_neighbor.mind.social_policy import (
 from familiar_runtime.runtime import RuntimeHookBase
 
 
+# Within a sustained distress conversation, re-running ToM every turn adds a
+# serial utility call to time-to-first-token and writes near-duplicate person
+# model rows. Re-run only after this many turns unless the speech act changed.
+_AUTO_TOM_COOLDOWN_TURNS = 3
+
+
 def _should_auto_tom(
     social_policy: "SocialPolicyDecision",
     *,
     brief_reply_turn: bool,
     is_desire_turn: bool,
     user_input: str,
+    turns_since_last: int | None = None,
+    last_act: str | None = None,
 ) -> bool:
     """Gate for deterministic ToM: only flagged, full, companion-driven turns."""
     if not social_policy.should_use_tom:
         return False
     if brief_reply_turn or is_desire_turn:
         return False
-    return bool(user_input.strip())
+    if not user_input.strip():
+        return False
+    if (
+        turns_since_last is not None
+        and turns_since_last < _AUTO_TOM_COOLDOWN_TURNS
+        and last_act == social_policy.primary_act
+    ):
+        return False
+    return True
 
 
 if TYPE_CHECKING:
@@ -387,13 +403,25 @@ class EmbodiedAgentHook(RuntimeHookBase):
         # should_use_tom used to be advisory only; now the inference actually
         # runs (and accumulates into the person model) on flagged turns.
         auto_tom_ctx = ""
+        last_auto_tom_turn = getattr(agent, "_last_auto_tom_turn", None)
         if _should_auto_tom(
             social_policy,
             brief_reply_turn=brief_reply_turn,
             is_desire_turn=is_desire_turn,
             user_input=user_input,
+            turns_since_last=(
+                agent._turn_count - last_auto_tom_turn if last_auto_tom_turn is not None else None
+            ),
+            last_act=getattr(agent, "_last_auto_tom_act", None),
         ):
+            agent._last_auto_tom_turn = agent._turn_count
+            agent._last_auto_tom_act = social_policy.primary_act
             auto_tom_ctx = await agent._run_auto_tom(user_input)
+            if auto_tom_ctx:
+                auto_tom_ctx = (
+                    "[Perspective-taking already done this turn — do not call the "
+                    "tom tool again]\n" + auto_tom_ctx
+                )
 
         # ── Append user message to history ──
         agent.messages.append(agent.backend.make_user_message(user_input_with_ctx))

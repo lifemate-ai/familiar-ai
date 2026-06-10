@@ -825,3 +825,59 @@ async def test_post_response_pipeline_updates_self_continuity_state():
 
     agent._concerns.update_from_turn.assert_called_once()
     agent._self_state.apply_turn_context.assert_called_once()
+
+
+# ---------------------------------------------------------------------------
+# Tests: deterministic ToM wiring (auto_tom_ctx -> mental_ctx -> system prompt)
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_flagged_turn_runs_auto_tom_and_injects_result():
+    """A venting turn (should_use_tom=True) runs ToM deterministically and the
+    result reaches the system prompt via mental_ctx."""
+    agent = _make_agent()
+    agent.backend.stream_turn = AsyncMock(return_value=(_turn("end_turn", text="うん"), "うん"))
+
+    auto_tom = AsyncMock(return_value="TOM-SENTINEL-XYZ")
+    patches = dict(_HEAVY_PATCHES)
+    patches["familiar_agent.agent.EmbodiedAgent._run_auto_tom"] = auto_tom
+
+    ps = [patch(t, n) for t, n in patches.items()]
+    for p in ps:
+        p.start()
+    try:
+        await agent.run("むかつくわ、ほんまに最悪な一日や")
+    finally:
+        for p in ps:
+            p.stop()
+
+    auto_tom.assert_awaited_once()
+    system = agent.backend.stream_turn.await_args.kwargs.get("system")
+    if system is None:
+        system = agent.backend.stream_turn.await_args.args[0]
+    joined = "\n".join(system) if isinstance(system, tuple) else str(system)
+    assert "TOM-SENTINEL-XYZ" in joined
+
+
+@pytest.mark.asyncio
+async def test_brief_greeting_turn_skips_auto_tom():
+    agent = _make_agent(with_tts=True)
+    agent.backend.stream_turn = AsyncMock(
+        return_value=(_turn("end_turn", text="おはよう。"), "おはよう。")
+    )
+
+    auto_tom = AsyncMock(return_value="TOM-SENTINEL-XYZ")
+    patches = dict(_HEAVY_PATCHES)
+    patches["familiar_agent.agent.EmbodiedAgent._run_auto_tom"] = auto_tom
+
+    ps = [patch(t, n) for t, n in patches.items()]
+    for p in ps:
+        p.start()
+    try:
+        await agent.run("おはよう")
+    finally:
+        for p in ps:
+            p.stop()
+
+    auto_tom.assert_not_awaited()
