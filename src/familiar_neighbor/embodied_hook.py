@@ -35,6 +35,7 @@ from familiar_agent._runtime_helpers import (
 from familiar_agent.heartbeat import HeartbeatRuntime
 from familiar_agent.routines import parse_schedule_config
 from familiar_neighbor.mind.appraisal import AppraisalContext, AppraisalEngine
+from familiar_neighbor.mind.deferral import DEFERRAL_PREFIX, detect_deferral
 from familiar_neighbor.mind.desires import DesireSystem
 from familiar_neighbor.mind.mental_state import MentalStateBus, MentalStateSnapshot
 from familiar_neighbor.mind.social_policy import (
@@ -262,6 +263,20 @@ class EmbodiedAgentHook(RuntimeHookBase):
                 limit=3,
                 fallback=[],
             )
+            # ── Deferred-topic capture ──
+            # "後で話すわ" must not be lost: record it as unfinished business so
+            # it stays surfaced until the model resolves it.
+            deferral = detect_deferral(user_input) if not is_desire_turn else None
+            if deferral:
+                summary = f"{DEFERRAL_PREFIX}{deferral}"
+                if not any(item.get("summary") == summary for item in unfinished_business):
+                    open_unfinished = getattr(agent._memory, "open_unfinished_business_async", None)
+                    await _call_optional_async(
+                        open_unfinished,
+                        summary,
+                        source="deferral",
+                        fallback=None,
+                    )
         companion_mood = "engaged"
         working_memory: list[dict] = []
         semantic_facts: list[dict] = []
@@ -452,8 +467,11 @@ class EmbodiedAgentHook(RuntimeHookBase):
                 continuity_ctx = (
                     continuity_ctx
                     + ("\n\n" if continuity_ctx else "")
-                    + "[Open unfinished business]\n"
-                    + "\n".join(f"- {item['summary'][:160]}" for item in unfinished_business[:3])
+                    + "[Open unfinished business — resolve_unfinished_business(id) once addressed]\n"
+                    + "\n".join(
+                        f"- [{str(item.get('id', ''))[:8]}] {item['summary'][:160]}"
+                        for item in unfinished_business[:3]
+                    )
                 )
             # First turn already carries [Today's agenda] in morning_ctx; skip the
             # per-turn reminders block there to avoid listing the same items twice.

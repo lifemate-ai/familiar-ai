@@ -853,7 +853,12 @@ class EmbodiedAgent:
             registry.register(MobilityCapability(self._mobility))
         if self._tts:
             registry.register(VoiceCapability(self._tts))
-        registry.register(MemoryCapability(self._memory_tool, names={"remember", "recall"}))
+        registry.register(
+            MemoryCapability(
+                self._memory_tool,
+                names={"remember", "recall", "resolve_unfinished_business"},
+            )
+        )
         registry.register(ToMCapability(self._tom_tool))
         registry.register(CodingCapability(self._coding))
         commitment_tool = getattr(self, "_commitment_tool", None)

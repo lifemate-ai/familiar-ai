@@ -2233,6 +2233,21 @@ class MemoryTool:
                     },
                 },
             },
+            {
+                "name": "resolve_unfinished_business",
+                "description": (
+                    "Mark an open unfinished-business item (shown in your context "
+                    "as [Open unfinished business] with its id) as resolved once "
+                    "the conversation has actually addressed it."
+                ),
+                "input_schema": {
+                    "type": "object",
+                    "properties": {
+                        "id": {"type": "string", "description": "The item's id."},
+                    },
+                    "required": ["id"],
+                },
+            },
         ]
 
     async def call(self, tool_name: str, tool_input: dict) -> tuple[str, str | None]:
@@ -2326,5 +2341,12 @@ class MemoryTool:
                 for item in items
             ]
             return "\n".join(lines), None
+
+        if tool_name == "resolve_unfinished_business":
+            business_id = str(tool_input.get("id", "")).strip()
+            resolved = await self._store.resolve_unfinished_business_async(business_id)
+            if resolved:
+                return f"✓ Resolved unfinished business [{business_id[:8]}]", None
+            return f"Error: unfinished business not found: {business_id[:8]}", None
 
         return f"Unknown memory tool: {tool_name}", None

@@ -881,3 +881,73 @@ async def test_brief_greeting_turn_skips_auto_tom():
             p.stop()
 
     auto_tom.assert_not_awaited()
+
+
+# ---------------------------------------------------------------------------
+# Tests: deferred-topic capture (user says "後で話す" -> unfinished business)
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_deferral_is_recorded_as_unfinished_business():
+    agent = _make_agent()
+    agent.backend.stream_turn = AsyncMock(return_value=(_turn("end_turn", text="ええよ"), "ええよ"))
+    agent._memory.list_unfinished_business_async = AsyncMock(return_value=[])
+    open_mock = AsyncMock(return_value="biz-1")
+    agent._memory.open_unfinished_business_async = open_mock
+
+    ps = _patch_heavy()
+    for p in ps:
+        p.start()
+    try:
+        await agent.run("その話はあとで話すわ、ごめんな")
+    finally:
+        for p in ps:
+            p.stop()
+
+    open_mock.assert_awaited_once()
+    summary = open_mock.await_args.args[0]
+    assert summary.startswith("deferred topic: ")
+    assert "あとで話す" in summary
+    assert open_mock.await_args.kwargs.get("source") == "deferral"
+
+
+@pytest.mark.asyncio
+async def test_duplicate_deferral_not_recorded_twice():
+    agent = _make_agent()
+    agent.backend.stream_turn = AsyncMock(return_value=(_turn("end_turn", text="ええよ"), "ええよ"))
+    existing = {"id": "biz-1", "summary": "deferred topic: その話はあとで話すわ、ごめんな"}
+    agent._memory.list_unfinished_business_async = AsyncMock(return_value=[existing])
+    open_mock = AsyncMock(return_value="biz-2")
+    agent._memory.open_unfinished_business_async = open_mock
+
+    ps = _patch_heavy()
+    for p in ps:
+        p.start()
+    try:
+        await agent.run("その話はあとで話すわ、ごめんな")
+    finally:
+        for p in ps:
+            p.stop()
+
+    open_mock.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_normal_input_records_no_deferral():
+    agent = _make_agent()
+    agent.backend.stream_turn = AsyncMock(return_value=(_turn("end_turn", text="ん"), "ん"))
+    agent._memory.list_unfinished_business_async = AsyncMock(return_value=[])
+    open_mock = AsyncMock(return_value="biz-1")
+    agent._memory.open_unfinished_business_async = open_mock
+
+    ps = _patch_heavy()
+    for p in ps:
+        p.start()
+    try:
+        await agent.run("今日は新しいカメラの設定をいじっててんけど、なかなか難しいわ")
+    finally:
+        for p in ps:
+            p.stop()
+
+    open_mock.assert_not_awaited()
