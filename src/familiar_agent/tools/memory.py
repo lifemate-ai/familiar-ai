@@ -2036,6 +2036,27 @@ class ObservationMemory:
     # Associative links
     # ------------------------------------------------------------------
 
+    def _resolve_observation_id(self, db: sqlite3.Connection, candidate: str) -> str | None:
+        """Resolve a full or surfaced-prefix memory id to the stored full id.
+
+        Tool outputs show ids truncated to 8 chars, so the model passes
+        prefixes; accept them when unambiguous, reject unknown/ambiguous ids.
+        """
+        candidate = str(candidate).strip()
+        if len(candidate) < 4:
+            return None
+        row = db.execute("SELECT id FROM observations WHERE id = ?", (candidate,)).fetchone()
+        if row:
+            return str(row["id"])
+        escaped = candidate.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+        rows = db.execute(
+            "SELECT id FROM observations WHERE id LIKE ? ESCAPE '\\' LIMIT 2",
+            (escaped + "%",),
+        ).fetchall()
+        if len(rows) == 1:
+            return str(rows[0]["id"])
+        return None
+
     def link_memories(
         self,
         source_id: str,
@@ -2045,6 +2066,9 @@ class ObservationMemory:
     ) -> bool:
         """Create a typed link between two memories. Returns True on success.
 
+        Accepts full ids or the surfaced 8-char prefixes; unknown or ambiguous
+        ids are rejected instead of silently inserting a dangling link.
+
         link_type: "related" | "similar" | "caused_by" | "leads_to"
         """
         link_id = str(uuid.uuid4())
@@ -2052,11 +2076,20 @@ class ObservationMemory:
         try:
             with self._db_lock:
                 db = self._ensure_connected()
+                resolved_source = self._resolve_observation_id(db, source_id)
+                resolved_target = self._resolve_observation_id(db, target_id)
+                if resolved_source is None or resolved_target is None:
+                    logger.debug(
+                        "link_memories rejected: unresolved id(s) %r -> %r",
+                        source_id,
+                        target_id,
+                    )
+                    return False
                 db.execute(
                     "INSERT OR IGNORE INTO memory_links "
                     "(id, source_id, target_id, link_type, note, created_at) "
                     "VALUES (?, ?, ?, ?, ?, ?)",
-                    (link_id, source_id, target_id, link_type, note, now),
+                    (link_id, resolved_source, resolved_target, link_type, note, now),
                 )
                 db.commit()
             return True
