@@ -7,6 +7,8 @@ import logging
 from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
+    from familiar_neighbor.mind.person_model import PersonModelTracker
+
     from .memory import ObservationMemory
     from ..workspace import Coalition
 
@@ -21,10 +23,12 @@ class ToMTool:
         memory: "ObservationMemory",
         default_person: str = "Alex",
         backend: Any | None = None,
+        person_model: "PersonModelTracker | None" = None,
     ) -> None:
         self._memory = memory
         self._default_person = default_person
         self._backend = backend
+        self._person_model = person_model
         self._last_situation: str | None = None
         self._last_person: str | None = None
         self._last_policy: str | None = None
@@ -47,7 +51,11 @@ class ToMTool:
                         },
                         "person": {
                             "type": "string",
-                            "description": f"Who you are talking to (default: {self._default_person}).",
+                            "description": (
+                                f"Who you are talking to. For your companion, use exactly "
+                                f"'{self._default_person}' (do not transliterate or vary the "
+                                f"spelling — accumulated impressions are keyed by this name)."
+                            ),
                         },
                     },
                     "required": ["situation"],
@@ -60,7 +68,11 @@ class ToMTool:
             return f"Unknown tool: {tool_name}", None
 
         situation = tool_input.get("situation", "")
-        person = tool_input.get("person", self._default_person)
+        person = str(tool_input.get("person", self._default_person)).strip() or self._default_person
+        # Canonicalize case variants of the companion name ("Kota" -> "kota") so
+        # accumulated person-model rows stay under one key and actually surface.
+        if person.casefold() == self._default_person.casefold():
+            person = self._default_person
 
         # Pull relevant memories about this person
         memories = await self._memory.recall_async(
@@ -114,10 +126,32 @@ class ToMTool:
             logger.warning("ToM backend call failed: %s", exc)
             return self._template_output(situation, person, memory_context)
 
-        return self._format_response(raw, person)
+        formatted, parsed = self._format_response(raw, person)
+        if parsed is not None:
+            self._record_to_person_model(person, parsed)
+        return formatted
 
-    def _format_response(self, raw: str, person: str) -> str:
-        """Parse JSON response and format as readable ToM output."""
+    def _record_to_person_model(self, person: str, data: dict) -> None:
+        """Persist the structured inference so the person model accumulates."""
+        if self._person_model is None:
+            return
+        try:
+            states = [
+                (str(item.get("state", "")), float(item.get("confidence", 0.0)))
+                for item in data.get("inference", [])
+                if isinstance(item, dict)
+            ]
+            self._person_model.record_inference(
+                person=person,
+                states=states,
+                evidence=[str(item) for item in data.get("evidence", [])],
+                policy=str(data.get("policy", "")),
+            )
+        except Exception:
+            logger.debug("person model writeback failed", exc_info=True)
+
+    def _format_response(self, raw: str, person: str) -> tuple[str, dict | None]:
+        """Parse JSON response; return (readable ToM output, parsed payload or None)."""
         # Strip markdown code fences if present
         text = raw.strip()
         if text.startswith("```"):
@@ -128,7 +162,7 @@ class ToMTool:
             data = json.loads(text)
         except json.JSONDecodeError:
             # Fallback: wrap raw text in minimal structure
-            return f"# ToM: {person}の視点分析\n\n{raw}"
+            return f"# ToM: {person}の視点分析\n\n{raw}", None
 
         parts = [f"# ToM: {person}の視点分析\n"]
 
@@ -153,7 +187,7 @@ class ToMTool:
             parts.append("## 応答方針")
             parts.append(policy)
 
-        return "\n".join(parts)
+        return "\n".join(parts), data if isinstance(data, dict) else None
 
     def _template_output(self, situation: str, person: str, memory_context: str) -> str:
         """Static template fallback (original behavior when no backend)."""

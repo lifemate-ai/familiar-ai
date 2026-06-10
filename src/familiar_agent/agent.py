@@ -71,6 +71,7 @@ from familiar_capabilities import (
     VoiceCapability,
 )
 from familiar_neighbor.embodied_hook import EmbodiedAgentHook
+from familiar_neighbor.mind.person_model import PersonModelTracker
 from familiar_neighbor.prompts import assemble_neighbor_system_prompt
 from familiar_runtime.commitments import SQLiteCommitmentStore
 from familiar_runtime.tools.registry import ToolRegistry
@@ -490,10 +491,12 @@ class EmbodiedAgent:
         self._memory = ObservationMemory()
         self._memory_worker = MemoryJobWorker(self._memory)
         self._memory_tool = MemoryTool(self._memory)
+        self._person_model = PersonModelTracker()
         self._tom_tool = ToMTool(
             self._memory,
             default_person=config.companion_name,
             backend=self._utility_backend,
+            person_model=self._person_model,
         )
         self._coding = CodingTool(config.coding)
         _commitments_dir = Path.home() / ".familiar_ai"
@@ -1075,6 +1078,9 @@ class EmbodiedAgent:
         variable_parts: list[str] = [intero]
         if relationship_ctx:
             variable_parts.append(relationship_ctx)
+        person_ctx = self._person_model_context()
+        if person_ctx:
+            variable_parts.append(person_ctx)
         if continuity_ctx:
             variable_parts.append(continuity_ctx)
         if mental_ctx:
@@ -1143,6 +1149,17 @@ class EmbodiedAgent:
             logger.debug("commitment context fetch failed", exc_info=True)
             return ""
         return format_commitments_for_context(due=due[:5], upcoming=upcoming[:5], now=now)
+
+    def _person_model_context(self) -> str:
+        """Surface the accumulated ToM model of the companion, if any."""
+        tracker = getattr(self, "_person_model", None)
+        if tracker is None:
+            return ""
+        try:
+            return tracker.context_for_prompt(self.config.companion_name)
+        except Exception:
+            logger.debug("person model context fetch failed", exc_info=True)
+            return ""
 
     def _exploration_context(self) -> str:
         """Return exploration history for ICL-based direction steering."""
@@ -2114,6 +2131,15 @@ class EmbodiedAgent:
             await asyncio.wait_for(asyncio.to_thread(self._memory.close), timeout=1.0)
         except (asyncio.TimeoutError, Exception):
             pass
+        for closable in (
+            getattr(self, "_person_model", None),
+            getattr(self, "_commitment_store", None),
+        ):
+            if closable is not None:
+                try:
+                    closable.close()
+                except Exception:
+                    pass
 
     async def run(
         self,
