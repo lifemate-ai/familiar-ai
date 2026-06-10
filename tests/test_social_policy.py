@@ -524,3 +524,42 @@ def test_audit_round2_intended_positives_still_classify() -> None:
     assert _decide("どうしよう、財布なくしたかも").primary_act == "request_for_advice"
     assert _decide("I'm so happy for you!").primary_act == "delight_share"
     assert _decide("それなwww").primary_act == "playful_probe"
+
+
+# ── classifier audit round 3: systematic vetoes ──────────────────────────────
+
+
+def test_audit_round3_misfires_fixed() -> None:
+    cases = [
+        ("さっきの会議、ほんまきつかったわ", "repair_attempt"),
+        ("首にしこりができたで、ちょっと怖い", "delight_share"),
+        ("全然嬉しくないわ", "delight_share"),  # JP negated positive
+        ("最高じゃないわ、これ", "delight_share"),
+        ("I can't say I'm happy about the layoffs", "delight_share"),
+        ("I'm not really all that happy with how it turned out", "delight_share"),
+        ("far from happy with the result", "delight_share"),
+        ("ありがとう、ほんま助かった。実は昨日ばあちゃんが亡くなってん", "acknowledgement"),
+        ("思い切って会社やめてん", "boundary_assertion"),
+        ("最悪や、最高の誕生日になるはずやったのに", "delight_share"),  # mixed sentiment
+        ("最高かよ、ほんま", "delight_share"),  # かよ sarcasm
+        ("泣きそうや…", "silence_or_low_presence"),
+    ]
+    for text, wrong_act in cases:
+        decision = _decide(text)
+        assert decision.primary_act != wrong_act, f"{text!r} still {wrong_act}"
+
+
+def test_audit_round3_mixed_sentiment_vents() -> None:
+    decision = _decide("最悪や、最高の誕生日になるはずやったのに", mood="frustrated")
+    assert decision.primary_act == "venting"
+    assert _decide("泣きそうや…", mood="sad").primary_act == "venting"
+
+
+def test_audit_round3_intended_positives_still_classify() -> None:
+    assert _decide("ありがとうな！").primary_act == "acknowledgement"
+    assert _decide("助かったわ").primary_act == "acknowledgement"
+    assert _decide("それやめてほしい").primary_act == "boundary_assertion"
+    assert _decide("やめてや！").primary_act == "boundary_assertion"
+    assert _decide("さっきの返事、ちょっとつらかった").primary_act == "repair_attempt"
+    assert _decide("やっとアプリできたで！").primary_act == "delight_share"
+    assert _decide("How was your day?").primary_act == "meta_conversation"

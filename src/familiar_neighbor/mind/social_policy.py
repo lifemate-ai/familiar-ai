@@ -45,7 +45,7 @@ _REPAIR_PATTERNS = [
     r"that hurt\b",
     r"傷つ",
     r"前の返事",
-    r"(?:返事|言葉|言い方|さっきの|あの一言).{0,10}(?:つらかった|きつかった)",
+    r"(?:返事|言葉|言い方|あの一言|さっきの(?:返事|言葉|言い方|発言|あれ|やつ)).{0,10}(?:つらかった|きつかった)",
 ]
 # "やった" only as an exclamation: utterance-initial (but not やったら/やったん
 # conditionals/questions) or followed by an exclamatory mark. Kansai past tense
@@ -63,9 +63,21 @@ _DELIGHT_PATTERNS = [
     r"\byay\b",
 ]
 # Negation veto for the delight branch — fixed-width lookbehinds can't catch
-# "I'm not VERY happy with…", so the branch checks this window separately.
+# "I'm not VERY happy with…". \w+n't covers every contraction (a bare \bn't\b
+# can never match inside one); the 32-char window absorbs multi-word hedges
+# ("not really all that happy").
 _NEGATED_POSITIVE_RE = re.compile(
-    r"\b(?:not|never|n't|isn't|wasn't|don't|ain't)\b[\w\s']{0,16}\b(?:happy|glad)\b"
+    r"\b(?:not|never|cannot|hardly|barely|far from|anything but|\w+n't)\b"
+    r"[\w\s']{0,32}\b(?:happy|glad|thrilled)\b"
+)
+# Japanese delight vetoes: negated positives (嬉しくない/最高やない), かよ
+# sarcasm (最高かよ), and ailment formations (しこりができた must not celebrate).
+_DELIGHT_VETO_JA_RE = re.compile(
+    r"(?:嬉し|うれし)く(?:も|は)?な(?:い|かった|さそう)"
+    r"|最高(?:じゃ|では|や)?な(?:い|かった)"
+    r"|最高ちゃう"
+    r"|(?:最高|嬉し)(?:すぎ)?かよ"
+    r"|(?:しこり|腫瘍|口内炎|ニキビ|湿疹|あざ|肩こり|クマ)(?:まで|が)?できた"
 )
 # bare "ugh" matched laughed/daughter/thought/enough; うんざり and the past
 # forms つらかった/きつかった live here so ordinary vents validate instead of
@@ -79,6 +91,9 @@ _VENTING_PATTERNS = [
     r"しんど",
     r"(?<!お)疲れ",
     r"うんざり",
+    r"泣きそう",
+    r"落ち込",
+    r"へこむ",
     r"\bugh+\b",
 ]
 # bereavement forms only — bare 死 matched 死ぬほど笑った/必死, bare "lost"
@@ -113,6 +128,9 @@ _META_PATTERNS = [
     r"この会話",
     r"\bmeta\b",
     r"how do you (?:feel|think|remember|decide|work|see|experience|know)\b",
+    # reciprocal social questions target the agent itself
+    r"\bhow (?:was|is|'s) your\b",
+    r"\bwhat (?:did|have) you\b",
 ]
 # "w" is the Japanese laugh marker only when not embedded in an ASCII word
 # ("we went..." must not classify as playful); "play" needs word boundaries
@@ -129,7 +147,9 @@ _PLAYFUL_PATTERNS = [
 # "no more" as protest only — utterance-final or "no more of this/that";
 # an opener ("No more bugs! We shipped!") is usually celebration, not protest.
 _BOUNDARY_PATTERNS = [
-    r"やめて",
+    # imperative/request form only — やめてん is "I quit" (a disclosure),
+    # やめてって言われた is reported speech, neither is a boundary at the agent
+    r"やめて(?:[よやな]|くれ|ください|ほしい|[ー〜!！。…]|$)",
     r"やめろ",
     r"それは嫌",
     r"\bno more[.!！]*$",
@@ -158,11 +178,13 @@ _GREETING_PATTERNS = [
     r"^おーい$",
     r"^もしもし$",
 ]
+# Whole-utterance anchors (same treatment as greetings): a thanks that merely
+# OPENS a longer message (ありがとう。実は昨日ばあちゃんが亡くなってん) must not
+# short-circuit the grief/venting branches.
 _ACK_PATTERNS = [
-    r"^ありがとう",
-    r"^ありがと",
-    r"^助か",
-    r"^よかった",
+    r"^ありがとう?(?:な|ね|やで|ございます|ございました)?[ー〜!！。\s]*$",
+    r"^助か(?:った|る|ります|りました)?(?:わ|で)?[ー〜!！。\s]*$",
+    r"^よかった[ー〜!！。\s]*$",
     r"^了解$",
     r"^ok$",
     r"^okay$",
@@ -412,9 +434,14 @@ class SocialPolicyEngine:
                 mention_memory=False,
             )
 
+        # Delight must lose to explicit distress in the same utterance
+        # (「最悪や、最高の誕生日になるはずやったのに」 is a lament, not a share).
         if (
             _matches(text, _DELIGHT_PATTERNS)
             and not _NEGATED_POSITIVE_RE.search(text.lower())
+            and not _DELIGHT_VETO_JA_RE.search(text)
+            and not _matches(text, _VENTING_PATTERNS)
+            and not _matches(text, _GRIEF_PATTERNS)
             and affect.valence >= -0.1
         ):
             return SocialPolicyDecision(
