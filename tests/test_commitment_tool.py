@@ -177,3 +177,46 @@ def test_build_tool_registry_includes_commitment_tools(tmp_path):
     assert "add_commitment" in names
     assert "complete_commitment" in names
     store.close()
+
+
+# ── today's agenda (morning secretary surface) ──
+
+
+def _agenda_stub(store):
+    import types
+
+    return types.SimpleNamespace(_commitment_store=store)
+
+
+def test_today_agenda_includes_due_and_today_only(tmp_path):
+    import time as _time
+
+    from familiar_agent.agent import EmbodiedAgent
+
+    store = SQLiteCommitmentStore(tmp_path / "c.db")
+    now = _time.time()
+    store.create(summary="overdue call", due_at=now - 600, priority=1)
+    store.create(summary="dentist 15:00", due_at=now + 3600)
+    store.create(summary="next week thing", due_at=now + 8 * 86400)
+    store.create(summary="no due note")
+
+    ctx = EmbodiedAgent._today_agenda_context(_agenda_stub(store))
+    assert "Today's agenda" in ctx
+    assert "overdue call" in ctx
+    assert "dentist 15:00" in ctx
+    assert "next week thing" not in ctx
+    assert "no due note" not in ctx
+    store.close()
+
+
+def test_today_agenda_empty_cases(tmp_path):
+    import types
+
+    from familiar_agent.agent import EmbodiedAgent
+
+    # no store at all
+    assert EmbodiedAgent._today_agenda_context(types.SimpleNamespace(_commitment_store=None)) == ""
+    # empty store
+    store = SQLiteCommitmentStore(tmp_path / "c.db")
+    assert EmbodiedAgent._today_agenda_context(_agenda_stub(store)) == ""
+    store.close()

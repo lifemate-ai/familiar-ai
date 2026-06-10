@@ -51,6 +51,11 @@ def _line(commitment: Commitment, *, now: float) -> str:
     return f"{flag} [{commitment.id}] {commitment.summary[:120]}{who} — {_format_due(commitment, now=now)}"
 
 
+def format_commitment_line(commitment: Commitment, *, now: float) -> str:
+    """Public single-line renderer (priority flag + summary + human due time)."""
+    return _line(commitment, now=now)
+
+
 def format_commitments_for_context(
     *,
     due: list[Commitment],

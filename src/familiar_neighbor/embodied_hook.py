@@ -206,6 +206,10 @@ class EmbodiedAgentHook(RuntimeHookBase):
                     morning_ctx = (
                         f"{morning_ctx}\n\n{routine_notes}" if morning_ctx else routine_notes
                     )
+            # Secretary: open the day with today's commitments in view.
+            agenda_ctx = agent._today_agenda_context()
+            if agenda_ctx:
+                morning_ctx = f"{morning_ctx}\n\n{agenda_ctx}" if morning_ctx else agenda_ctx
 
         # ── Context compaction ──
         if agent._should_compact():

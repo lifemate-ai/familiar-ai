@@ -52,7 +52,11 @@ from .memory_worker import MemoryJobWorker
 from .tape import check_plan_blocked, generate_plan, generate_replan
 from .tools.camera import CameraTool
 from .tools.coding import CodingTool
-from .tools.commitments import CommitmentTool, format_commitments_for_context
+from .tools.commitments import (
+    CommitmentTool,
+    format_commitment_line,
+    format_commitments_for_context,
+)
 from .tools.memory import MemoryTool, ObservationMemory
 from .tools.tom import ToMTool
 from .tools.mobility import MobilityTool
@@ -1149,6 +1153,34 @@ class EmbodiedAgent:
             logger.debug("commitment context fetch failed", exc_info=True)
             return ""
         return format_commitments_for_context(due=due[:5], upcoming=upcoming[:5], now=now)
+
+    def _today_agenda_context(self) -> str:
+        """Morning secretary surface: overdue + today's commitments as an agenda.
+
+        Horizon is the rest of the local day, extended to at least 12h so a
+        late-night first turn still previews the early morning.
+        """
+        store = getattr(self, "_commitment_store", None)
+        if store is None:
+            return ""
+        now = time.time()
+        local_now = datetime.now()
+        midnight = (
+            local_now.replace(hour=0, minute=0, second=0, microsecond=0)
+        ).timestamp() + 86400
+        horizon = max(midnight - now, 12 * 3600)
+        try:
+            due = store.list_due(now=now)
+            upcoming = store.list_upcoming(now=now, horizon=horizon)
+        except Exception:
+            logger.debug("agenda fetch failed", exc_info=True)
+            return ""
+        items = (due + upcoming)[:8]
+        if not items:
+            return ""
+        lines = ["[Today's agenda — weave these into the greeting naturally]"]
+        lines.extend(format_commitment_line(c, now=now) for c in items)
+        return "\n".join(lines)
 
     def _person_model_context(self) -> str:
         """Surface the accumulated ToM model of the companion, if any."""
