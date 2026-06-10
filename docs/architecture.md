@@ -66,6 +66,13 @@ JSONL append-only logging with replay support remains available.
 - Preferences (likes/dislikes)
 - Boundaries (things to avoid)
 - Session/conversation counting, days-together tracking
+- Support preferences and failed support patterns feed back into social
+  policy decisions (learned validate-first, advice aversion)
+
+**Person model** — `familiar_neighbor/mind/person_model.py`:
+- ToM inferences accumulate per person (states + confidence + chosen policy)
+- Surfaced as an accumulated-impressions prompt block (7-day staleness cutoff)
+- Written deterministically: flagged turns run the ToM inference themselves
 
 **Working memory** — Recent context + workspace coalitions
 
@@ -95,6 +102,12 @@ JSONL append-only logging with replay support remains available.
 - Score = activation × (0.4×urgency + 0.3×novelty + 0.3)
 - Ignition threshold modulated by prediction error
 - Winner's context injected into LLM prompt
+
+**Commitments / proactive reminders** — `familiar_runtime/commitments` + idle-loop wiring:
+- Due-time promises (reminders, appointments, follow-ups) with priority and snooze
+- Fire self-initiated turns from REPL/TUI/GUI idle loops, independent of desires
+- Quiet hours pass urgent-only; escalating backoff goes quiet after 3 reminders
+- Passive surface every turn + `[Today's agenda]` on the first turn of the day
 
 ### Layer E: Expression → `agent.py` ReAct loop + `tools/tts.py`
 
