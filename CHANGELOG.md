@@ -8,6 +8,12 @@ This project adheres to [Semantic Versioning](https://semver.org/).
 ## [Unreleased]
 
 ### Added
+- Secretary layer: commitments (reminders, appointments, promises, follow-ups) with due times, priorities, and snooze in a dedicated store; add/list/complete/snooze tools; due and upcoming items surface in every turn and a `[Today's agenda]` block opens the day
+- Proactive reminders: due commitments fire self-initiated turns from REPL/TUI/GUI idle loops, independent of `auto_desire` (`FAMILIAR_PROACTIVE_REMINDERS`, default on), quiet-hours aware (urgent-only at night), with escalating backoff capped at 3 reminders
+- Persistent person model: ToM inferences accumulate per person (`person_inferences`) and surface as an accumulated `[Person model]` prompt block with a 7-day staleness cutoff
+- Social learning loop: recorded failed support patterns and support preferences now adjust `SocialPolicyEngine.decide()` (surface relational memory and soften on distress; force perspective-taking on advice requests)
+- Deterministic perspective-taking: `should_use_tom` turns now actually run the ToM inference (bounded, cooldown-protected) and inject the result instead of relying on the model to call the tool
+- Agency boundary: when the agent itself is running low and is asked for work, advice, or repair, the policy instructs honest capacity acknowledgement instead of overpromising
 - GitHub Actions-based release automation for the new `develop -> main -> tag` flow, including a manual release PR workflow and an automatic tag/release workflow on `main`
 - Bootstrap-based startup recovery for missing or legacy `.env` files, including shared setup persistence and `ANTHROPIC_* -> PLATFORM/API_KEY/MODEL` migration support
 - Schema-driven settings metadata that powers both the GUI settings dialog and the first-run setup wizard from one definition
@@ -50,6 +56,7 @@ This project adheres to [Semantic Versioning](https://semver.org/).
 - Embodied tool routing now goes through the generic ToolRegistry while preserving existing camera, voice, memory, coding, and MCP behavior
 
 ### Fixed
+- Kansai past-tense "〜やった" (e.g. 「散々やった」) no longer classifies as delight; only exclamatory forms (やったー/やった！/やったぜ) celebrate
 - `scripts/new_migration.sh` now accepts Windows-style `--dir` paths in Git Bash so cross-platform CI migration tests pass on `windows-latest`
 - The app no longer exits before opening setup when `API_KEY` is missing; GUI users are routed into first-run setup and non-GUI users get a clear fallback path
 - Realtime STT no longer re-ingests the agent's own speech during or immediately after TTS playback, and repeated echo loops now trigger an automatic reconnect
