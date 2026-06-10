@@ -109,13 +109,57 @@ open episodes → relationship evidence → appraise affect → social policy �
 regulation → workspace competition → ReAct loop → meta-gate response → persist
 traces + mental-state snapshot.
 
+### Secretary layer: commitments and proactive reminders
+
+`familiar_runtime/commitments/` is the persona-neutral secretary core: a
+`Commitment` (reminder/appointment/promise/followup/task) carries an optional
+due time, priority (0-3), and snooze state in a dedicated `commitments.db`
+(self-init schema + idempotent `ALTER` migration in `_ensure_columns`, NOT the
+`migration/` runner). `CommitmentTool` (`familiar_agent/tools/commitments.py`)
+exposes add/list/complete/snooze; due + upcoming items surface passively into
+every turn's continuity context, and a `[Today's agenda]` block joins the
+first-turn morning reconstruction.
+
+**Proactive reminders** make due commitments fire self-initiated turns from the
+three idle loops (REPL `main.py`, TUI `_reminder_tick`, GUI `_process_queue`).
+Invariants to preserve when touching these loops:
+
+- The reminder branch sits **before** the `auto_desire` guard — the
+  `proactive_reminders` toggle (`FAMILIAR_PROACTIVE_REMINDERS`, default ON) is
+  independent of `auto_desire`.
+- Idle precedence is user input > reminder > desire > idle
+  (`decide_idle_action` in `_ui_helpers.py` is the tested reference
+  implementation; the loops inline it).
+- `mark_reminded` is called **before** the turn runs, so a mid-turn snooze
+  cadence reset survives and error turns still burn a capped slot. Cadence:
+  escalating backoff (600s × {1,3}) capped at 3 reminders, then quiet; quiet
+  hours (23-7) pass only priority>=2.
+- `repl()`'s finally block calls `os._exit(0)` — tests touching it must patch
+  `familiar_agent.main.os._exit` or pytest dies silently.
+
+### Social accumulation: person model and learned policy
+
+- `familiar_neighbor/mind/person_model.py` persists ToM inferences per person
+  (`person_inferences` table, migration 010). The ToM tool writes back
+  successful structured inferences; the accumulated `[Person model]` block is
+  injected next to the relationship context. Person keys are canonicalized to
+  the companion name (case-insensitive) — keep writes keyed consistently or
+  rows silently stop surfacing.
+- `SocialPolicyEngine.decide()` consumes `failed_support_patterns` /
+  `support_preferences` from the RelationshipTracker (wired in
+  `embodied_hook.prepare_turn` via `relationship_learning_inputs`): distress
+  acts surface the relational memory and soften; explicit advice requests force
+  ToM on with gentler delivery. Defaults keep historical decisions byte-stable.
+
 ## Persistence
 
 Primary stores under `~/.familiar_ai/`:
 
 - `observations.db` — observations, embeddings, semantic facts, behavior policies,
   revisions, episodes + membership, memory activation, unfinished business,
-  relationship state, memory graph
+  relationship state, memory graph, person inferences
+- `commitments.db` — secretary commitments (self-init schema, outside the
+  `migration/` runner)
 - `mental_state.jsonl` — append-only mental-state snapshots
 - `heartbeat_state.json` — continuation / carryover status
 - `desires.json` — drive levels
