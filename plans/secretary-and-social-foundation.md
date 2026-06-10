@@ -106,11 +106,18 @@ markdown に平坦化して捨てている（`_last_policy` のみ揮発保持�
 
 ---
 
-## Phase 5 — 社会的学習ループを閉じる
+## Phase 5 — 社会的学習ループを閉じる（実装済 ✅）
 
-- `relationship.failed_support_patterns` / 成功パターンを `SocialPolicyEngine.decide()` の入力に追加し、response_mode 選択を補正。
-- 「以前これで失敗した」を避け「効いた」を優先。
-- テスト: 同一状況で過去失敗パターンが response_mode を変えること。
+記録するだけで参照されなかった `failed_support_patterns` / `support_preferences` を
+`SocialPolicyEngine.decide()` に接続。決定論補正 `_apply_relationship_learning`:
+- アドバイス系失敗履歴（advice/solution/正論/説教 等のマーカー）or validate-first 系 style を検知したら:
+  - distress 系 act（venting/fatigue/grief/conflict）→ `should_recall_relational_memory=True`
+    （relational ctx に失敗パターンが描画されるのでモデルが「前に失敗したこと」を見る）+ softness 微増
+  - 明示的依頼（request_for_advice/action）→ 依頼は尊重しつつ `should_use_tom=True` +
+    directness 減・softness 増（validate-first な伝え方へ）
+- `relationship_learning_inputs()` が Tracker のアイテム形状（style / pattern|evidence）を吸収（契約テスト付き）
+- `embodied_hook.prepare_turn` の decide() 呼び出しに配線
+- テスト +7（無履歴で不変・和文マーカー・無関係パターン不発・契約）
 
 ---
 
@@ -127,9 +134,8 @@ uv run pytest -q
 
 - [x] Phase 1: Commitment ストア + tests（9件）
 - [x] Phase 2: tool + capability + 配線 + surface + tests（13件）
-- [x] Phase 3: 自発的リマインド（独立トグル・quiet hours・escalating backoff+cap、3ループ配線）
-- [ ] Phase 4: Person Model（設計確定済、上記参照）
-- [ ] Phase 5: 社会的学習ループ
+- [x] Phase 3: 自発的リマインド（独立トグル・quiet hours・escalating backoff+cap、3ループ配線、レビュー10件全修正）
+- [x] Phase 4: Person Model（person_inferences + PersonModelTracker + ToM 書き戻し + prompt surface）
+- [x] Phase 5: 社会的学習ループ（failed patterns → decide() 補正、契約テスト付き）
 
-Phase 3 時点: フルスイート **1032 passed**、ruff/format(236)/mypy(116) 緑。
-push は未実施（コウタ判断）。
+push は未実施（コウタ判断）。全5フェーズ完了。

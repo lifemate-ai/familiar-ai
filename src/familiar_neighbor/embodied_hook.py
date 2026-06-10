@@ -37,7 +37,11 @@ from familiar_agent.routines import parse_schedule_config
 from familiar_neighbor.mind.appraisal import AppraisalContext, AppraisalEngine
 from familiar_neighbor.mind.desires import DesireSystem
 from familiar_neighbor.mind.mental_state import MentalStateBus, MentalStateSnapshot
-from familiar_neighbor.mind.social_policy import SocialPolicyDecision, SocialPolicyEngine
+from familiar_neighbor.mind.social_policy import (
+    SocialPolicyDecision,
+    SocialPolicyEngine,
+    relationship_learning_inputs,
+)
 from familiar_runtime.runtime import RuntimeHookBase
 
 if TYPE_CHECKING:
@@ -312,6 +316,7 @@ class EmbodiedAgentHook(RuntimeHookBase):
         previous_response_hurt = any(
             token in user_input.lower() for token in ("hurt", "傷つ", "前の返事", "嫌だった")
         )
+        learned_styles, learned_failures = relationship_learning_inputs(agent._relationship)
         social_policy = agent._social_policy.decide(
             user_text=user_input,
             affect=affect,
@@ -319,6 +324,8 @@ class EmbodiedAgentHook(RuntimeHookBase):
             intimacy=agent._relationship.intimacy,
             interoception=interoception_pressure,
             previous_response_hurt=previous_response_hurt,
+            support_styles=learned_styles,
+            failed_patterns=learned_failures,
         )
         agent._provisional_relationship_update(user_text=user_input, social_policy=social_policy)
 

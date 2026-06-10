@@ -55,6 +55,74 @@ def _matches(text: str, patterns: list[str]) -> bool:
     return any(re.search(pattern, lower) for pattern in patterns)
 
 
+# ── Relationship-learned adjustment (Phase 5: closing the social loop) ──
+#
+# Recorded support failures / preferences feed back into policy selection so
+# the same misstep ("went straight to advice when they needed validation")
+# is not repeated turn after turn.
+
+_DISTRESS_ACTS = {"venting", "fatigue_signal", "grief_signal", "conflict_signal"}
+# Word-boundary regex for ASCII markers ("solve" must not match "resolved");
+# Japanese markers match as plain substrings.
+_ADVICE_FAILURE_RE = re.compile(r"\b(advice|advise|solution|solve|lecture)\b")
+_ADVICE_FAILURE_MARKERS_JA = ("正論", "アドバイス", "解決", "説教")
+_VALIDATE_FIRST_STYLES = {"validate_first", "listen_first", "listen_only"}
+
+
+def relationship_learning_inputs(relationship) -> tuple[list[str], list[str]]:
+    """Extract decide() learning inputs from a RelationshipTracker-like object."""
+    styles = [str(item.get("style", "")) for item in relationship.support_preferences()]
+    patterns = [
+        str(item.get("pattern", item.get("evidence", "")))
+        for item in relationship.failed_support_patterns()
+    ]
+    return styles, patterns
+
+
+def _learned_advice_aversion(
+    support_styles: list[str] | None,
+    failed_patterns: list[str] | None,
+) -> bool:
+    if failed_patterns and any(
+        _ADVICE_FAILURE_RE.search(pattern.lower())
+        or any(marker in pattern for marker in _ADVICE_FAILURE_MARKERS_JA)
+        for pattern in failed_patterns
+    ):
+        return True
+    if support_styles and any(
+        style.strip().lower() in _VALIDATE_FIRST_STYLES for style in support_styles
+    ):
+        return True
+    return False
+
+
+def _apply_relationship_learning(
+    decision: "SocialPolicyDecision",
+    *,
+    support_styles: list[str] | None,
+    failed_patterns: list[str] | None,
+) -> "SocialPolicyDecision":
+    """Adjust a base decision using what past support attempts taught us.
+
+    Distress turns surface the relational memory (so the model sees the
+    recorded failed patterns) and soften slightly; explicit advice requests are
+    still honored but with perspective-taking forced on and a gentler delivery.
+    Action requests ("fix this") are deliberately NOT adjusted — advice aversion
+    is about advice, not about acting on explicit asks.
+    """
+    if not _learned_advice_aversion(support_styles, failed_patterns):
+        return decision
+    if decision.primary_act in _DISTRESS_ACTS:
+        decision.should_recall_relational_memory = True
+        decision.softness = min(1.0, decision.softness + 0.05)
+    elif decision.primary_act == "request_for_advice":
+        decision.should_use_tom = True
+        decision.should_recall_relational_memory = True
+        decision.directness = max(0.0, decision.directness - 0.15)
+        decision.softness = min(1.0, decision.softness + 0.1)
+    return decision
+
+
 @dataclass(slots=True)
 class SocialPolicyDecision:
     primary_act: str
@@ -73,6 +141,32 @@ class SocialPolicyEngine:
     """Deterministic interaction policy driven by affect + input."""
 
     def decide(
+        self,
+        *,
+        user_text: str,
+        affect: AffectiveState,
+        trust: float,
+        intimacy: float,
+        interoception: InteroceptivePressure,
+        previous_response_hurt: bool = False,
+        support_styles: list[str] | None = None,
+        failed_patterns: list[str] | None = None,
+    ) -> SocialPolicyDecision:
+        decision = self._base_decision(
+            user_text=user_text,
+            affect=affect,
+            trust=trust,
+            intimacy=intimacy,
+            interoception=interoception,
+            previous_response_hurt=previous_response_hurt,
+        )
+        return _apply_relationship_learning(
+            decision,
+            support_styles=support_styles,
+            failed_patterns=failed_patterns,
+        )
+
+    def _base_decision(
         self,
         *,
         user_text: str,

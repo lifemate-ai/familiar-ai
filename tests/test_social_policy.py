@@ -149,3 +149,160 @@ def test_user_correction_prefers_plain_clarification_without_extra_inference() -
     assert decision.response_mode == "clarify"
     assert decision.should_use_tom is False
     assert decision.avoid_problem_solving is True
+
+
+# ── Phase 5: relationship-learned policy adjustment ────────────────────────
+#
+# Recorded support failures / preferences must actually change future policy
+# decisions — closing the social learning loop.
+
+
+def _decide(text: str, *, mood: str = "engaged", **kwargs):
+    appraisal = AppraisalEngine()
+    policy_engine = SocialPolicyEngine()
+    affect = appraisal.appraise(
+        AppraisalContext(user_text=text, companion_mood=mood, interoception=_pressure())
+    )
+    return policy_engine.decide(
+        user_text=text,
+        affect=affect,
+        trust=0.4,
+        intimacy=0.4,
+        interoception=_pressure(),
+        **kwargs,
+    )
+
+
+def test_no_history_leaves_decision_unchanged() -> None:
+    baseline = _decide("むかつくわ、最悪や")
+    same = _decide("むかつくわ、最悪や", support_styles=[], failed_patterns=[])
+    assert same == baseline
+
+
+def test_failed_advice_pattern_surfaces_relational_memory_on_venting() -> None:
+    text = "むかつくわ、最悪や"
+    baseline = _decide(text, mood="frustrated")
+    assert baseline.primary_act == "venting"
+    assert baseline.should_recall_relational_memory is False  # trust 0.4 < 0.5
+
+    learned = _decide(
+        text,
+        mood="frustrated",
+        failed_patterns=["went straight to advice, felt lectured"],
+    )
+    assert learned.should_recall_relational_memory is True
+    assert learned.softness > baseline.softness
+
+
+def test_failed_advice_pattern_japanese_markers_match() -> None:
+    learned = _decide(
+        "むかつくわ、最悪や",
+        mood="frustrated",
+        failed_patterns=["正論で返してしまって逆効果だった"],
+    )
+    assert learned.should_recall_relational_memory is True
+
+
+def test_advice_request_with_learned_aversion_softens_and_uses_tom() -> None:
+    text = "これどうしたらいいかな"
+    baseline = _decide(text)
+    assert baseline.primary_act == "request_for_advice"
+    assert baseline.should_use_tom is False  # low threat
+
+    learned = _decide(text, failed_patterns=["unsolicited solution dump"])
+    assert learned.primary_act == "request_for_advice"  # still advises — they asked
+    assert learned.should_use_tom is True
+    assert learned.should_recall_relational_memory is True
+    assert learned.directness < baseline.directness
+    assert learned.softness > baseline.softness
+    assert learned.avoid_problem_solving is False  # explicit ask still honored
+
+
+def test_validate_first_support_style_triggers_learning_too() -> None:
+    learned = _decide(
+        "もう疲れたわ、しんどい",
+        mood="tired",
+        support_styles=["validate_first"],
+    )
+    assert learned.primary_act == "fatigue_signal"
+    assert learned.should_recall_relational_memory is True
+
+
+def test_unrelated_failed_pattern_does_not_adjust() -> None:
+    text = "むかつくわ、最悪や"
+    baseline = _decide(text, mood="frustrated")
+    same = _decide(text, mood="frustrated", failed_patterns=["forgot a promised reminder"])
+    assert same == baseline
+
+
+def test_relationship_learning_inputs_contract(tmp_path) -> None:
+    """The extraction helper must match RelationshipTracker's stored item shapes."""
+    from familiar_agent.relationship import RelationshipTracker
+    from familiar_agent.social_policy import relationship_learning_inputs
+
+    tracker = RelationshipTracker(
+        state_path=tmp_path / "relationship.json",
+        db_path=tmp_path / "observations.db",
+    )
+    tracker.record_support_preference("listen before fixing", style="validate_first")
+    tracker.record_failed_support_pattern("went straight to advice", consequence="felt lectured")
+
+    styles, patterns = relationship_learning_inputs(tracker)
+    assert "validate_first" in styles
+    assert any("advice" in p for p in patterns)
+    tracker.close()
+
+
+def test_conflict_signal_gets_learning_softening() -> None:
+    from familiar_agent.mental_state import AffectiveState
+
+    policy_engine = SocialPolicyEngine()
+    hot_affect = AffectiveState(
+        valence=-0.4,
+        arousal=0.7,
+        dominance=-0.2,
+        attachment_pull=0.2,
+        tenderness=0.2,
+        threat=0.7,
+        uncertainty=0.4,
+        frustration=0.6,
+        loneliness=0.2,
+        summary="",
+    )
+    base = policy_engine.decide(
+        user_text="そうきたか",
+        affect=hot_affect,
+        trust=0.4,
+        intimacy=0.4,
+        interoception=_pressure(),
+    )
+    assert base.primary_act == "conflict_signal"
+
+    learned = policy_engine.decide(
+        user_text="そうきたか",
+        affect=hot_affect,
+        trust=0.4,
+        intimacy=0.4,
+        interoception=_pressure(),
+        failed_patterns=["jumped to advice mid-conflict"],
+    )
+    assert learned.softness > base.softness
+
+
+def test_action_request_is_not_adjusted_by_advice_aversion() -> None:
+    text = "これ直しといて、頼むわ"
+    baseline = _decide(text)
+    assert baseline.primary_act == "request_for_action"
+    learned = _decide(text, failed_patterns=["unsolicited advice dump"])
+    assert learned == baseline  # acting on explicit asks is not advice-giving
+
+
+def test_positive_pattern_with_resolved_does_not_trigger() -> None:
+    text = "むかつくわ、最悪や"
+    baseline = _decide(text, mood="frustrated")
+    same = _decide(
+        text,
+        mood="frustrated",
+        failed_patterns=["they resolved things alone, I was not needed"],
+    )
+    assert same == baseline  # "resolved" must not match the "solve" marker
