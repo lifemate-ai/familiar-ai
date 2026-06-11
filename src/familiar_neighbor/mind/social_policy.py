@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 import re
+from typing import cast
 
 from .interoception import InteroceptivePressure
 from .mental_state import AffectiveState
@@ -341,6 +342,294 @@ class SocialPolicyDecision:
     acknowledge_capacity: bool = False
 
 
+# ── ADR 0004: LLM fallback for speech-act classification ──
+#
+# The regex layer above is the deterministic fast path. An optional
+# ``llm_act_hint`` (computed by the caller via the utility backend) applies in
+# exactly two zones: pattern fallthrough (nothing matched, the turn would land
+# in the trailing attuned default) and the {delight, distress, repair,
+# boundary} conflict zone where branch order — not meaning — used to pick the
+# winner. Everywhere else the hint is ignored, so historical decisions stay
+# byte-stable.
+
+SPEECH_ACT_VOCABULARY: frozenset[str] = frozenset(
+    {
+        "repair_attempt",
+        "boundary_assertion",
+        "clarification",
+        "greeting",
+        "acknowledgement",
+        "delight_share",
+        "grief_signal",
+        "fatigue_signal",
+        "venting",
+        "request_for_action",
+        "request_for_advice",
+        "meta_conversation",
+        "playful_probe",
+        "bid_for_connection",
+        "conflict_signal",
+    }
+)
+
+# Acts the LLM may pick when arbitrating the inversion-risk conflict zone.
+_CONFLICT_HINT_ACTS = frozenset(
+    {"delight_share", "venting", "grief_signal", "repair_attempt", "boundary_assertion"}
+)
+
+
+@dataclass(slots=True)
+class SpeechActAssessment:
+    """Cheap provenance probe: does this utterance warrant the LLM fallback?"""
+
+    is_pattern_fallthrough: bool
+    conflict_groups: tuple[str, ...]
+
+    @property
+    def wants_llm(self) -> bool:
+        return self.is_pattern_fallthrough or len(self.conflict_groups) >= 2
+
+
+def assess_classification(user_text: str) -> SpeechActAssessment:
+    """Detect the two zones where the regex verdict is least trustworthy."""
+    text = user_text.strip()
+    if not text or _matches(text, _SILENCE_PATTERNS):
+        return SpeechActAssessment(is_pattern_fallthrough=False, conflict_groups=())
+    conflicts: list[str] = []
+    if _matches(text, _DELIGHT_PATTERNS):
+        conflicts.append("delight")
+    if _matches(text, _VENTING_PATTERNS) or _matches(text, _GRIEF_PATTERNS):
+        conflicts.append("distress")
+    if _matches(text, _REPAIR_PATTERNS):
+        conflicts.append("repair")
+    if _matches(text, _BOUNDARY_PATTERNS):
+        conflicts.append("boundary")
+    lexical_groups = (
+        _REPAIR_PATTERNS,
+        _BOUNDARY_PATTERNS,
+        _CORRECTION_PATTERNS,
+        _GREETING_PATTERNS,
+        _ACK_PATTERNS,
+        _DELIGHT_PATTERNS,
+        _GRIEF_PATTERNS,
+        _FATIGUE_PATTERNS,
+        _VENTING_PATTERNS,
+        _ACTION_PATTERNS,
+        _ADVICE_PATTERNS,
+        _META_PATTERNS,
+        _PLAYFUL_PATTERNS,
+    )
+    fallthrough = not any(_matches(text, group) for group in lexical_groups)
+    return SpeechActAssessment(
+        is_pattern_fallthrough=fallthrough,
+        conflict_groups=tuple(conflicts) if len(conflicts) >= 2 else (),
+    )
+
+
+def _default_initiative(intimacy: float, interoception: InteroceptivePressure) -> float:
+    initiative = 0.4 + intimacy * 0.2
+    if interoception.quiet_mode:
+        initiative *= 0.7
+    return initiative
+
+
+def _build_act_decision(
+    act: str,
+    *,
+    affect: AffectiveState,
+    trust: float,
+    intimacy: float,
+    interoception: InteroceptivePressure,
+) -> SocialPolicyDecision | None:
+    """Single source of truth for per-act decision shapes.
+
+    Used by the pattern branches in ``_base_decision`` and by the
+    ``llm_act_hint`` dispatch, so a hinted act is indistinguishable from the
+    same act matched by pattern.
+    """
+    if act == "repair_attempt":
+        return SocialPolicyDecision(
+            primary_act="repair_attempt",
+            response_mode="repair",
+            should_use_tom=True,
+            should_recall_relational_memory=True,
+            softness=0.92,
+            directness=0.55,
+            initiative=0.45,
+            avoid_problem_solving=True,
+            mention_memory=False,
+        )
+    if act == "boundary_assertion":
+        return SocialPolicyDecision(
+            primary_act="boundary_assertion",
+            response_mode="boundary",
+            should_use_tom=True,
+            should_recall_relational_memory=True,
+            softness=0.82,
+            directness=0.88,
+            initiative=0.2,
+            avoid_problem_solving=True,
+            mention_memory=False,
+        )
+    if act == "clarification":
+        return SocialPolicyDecision(
+            primary_act="clarification",
+            response_mode="clarify",
+            should_use_tom=False,
+            should_recall_relational_memory=False,
+            softness=0.86,
+            directness=0.82,
+            initiative=0.18,
+            avoid_problem_solving=True,
+            mention_memory=False,
+        )
+    if act == "greeting":
+        return SocialPolicyDecision(
+            primary_act="greeting",
+            response_mode="brief_warmth",
+            should_use_tom=False,
+            should_recall_relational_memory=False,
+            softness=0.86,
+            directness=0.36,
+            initiative=0.18,
+            avoid_problem_solving=True,
+            mention_memory=False,
+        )
+    if act == "acknowledgement":
+        return SocialPolicyDecision(
+            primary_act="acknowledgement",
+            response_mode="brief_attuned",
+            should_use_tom=False,
+            should_recall_relational_memory=False,
+            softness=0.8,
+            directness=0.44,
+            initiative=0.2,
+            avoid_problem_solving=True,
+            mention_memory=False,
+        )
+    if act == "delight_share":
+        return SocialPolicyDecision(
+            primary_act="delight_share",
+            response_mode="celebrate",
+            should_use_tom=False,
+            should_recall_relational_memory=False,
+            softness=0.8,
+            directness=0.45,
+            initiative=0.55,
+            avoid_problem_solving=True,
+            mention_memory=intimacy > 0.65,
+        )
+    if act == "grief_signal":
+        return SocialPolicyDecision(
+            primary_act="grief_signal",
+            response_mode="comfort",
+            should_use_tom=True,
+            should_recall_relational_memory=trust > 0.45,
+            softness=0.95,
+            directness=0.3,
+            initiative=0.3,
+            avoid_problem_solving=True,
+            mention_memory=False,
+        )
+    if act == "fatigue_signal":
+        return SocialPolicyDecision(
+            primary_act="fatigue_signal",
+            response_mode="validate",
+            should_use_tom=True,
+            should_recall_relational_memory=False,
+            softness=0.93,
+            directness=0.35,
+            initiative=0.25,
+            avoid_problem_solving=True,
+            mention_memory=False,
+        )
+    if act == "venting":
+        return SocialPolicyDecision(
+            primary_act="venting",
+            response_mode="validate",
+            should_use_tom=True,
+            should_recall_relational_memory=trust > 0.5,
+            softness=0.88,
+            directness=0.4,
+            initiative=0.35,
+            avoid_problem_solving=True,
+            mention_memory=False,
+        )
+    if act == "request_for_action":
+        return SocialPolicyDecision(
+            primary_act="request_for_action",
+            response_mode="act_or_explain",
+            should_use_tom=False,
+            should_recall_relational_memory=False,
+            softness=0.62,
+            directness=0.82,
+            initiative=0.7,
+            avoid_problem_solving=False,
+            mention_memory=False,
+        )
+    if act == "request_for_advice":
+        return SocialPolicyDecision(
+            primary_act="request_for_advice",
+            response_mode="advise",
+            should_use_tom=affect.threat > 0.4,
+            should_recall_relational_memory=trust > 0.55,
+            softness=0.72,
+            directness=0.72,
+            initiative=0.55,
+            avoid_problem_solving=False,
+            mention_memory=False,
+        )
+    if act == "meta_conversation":
+        return SocialPolicyDecision(
+            primary_act="meta_conversation",
+            response_mode="meta",
+            should_use_tom=True,
+            should_recall_relational_memory=False,
+            softness=0.7,
+            directness=0.7,
+            initiative=0.45,
+            avoid_problem_solving=False,
+            mention_memory=False,
+        )
+    if act == "playful_probe":
+        return SocialPolicyDecision(
+            primary_act="playful_probe",
+            response_mode="playful",
+            should_use_tom=False,
+            should_recall_relational_memory=intimacy > 0.7,
+            softness=0.7,
+            directness=0.45,
+            initiative=0.62,
+            avoid_problem_solving=True,
+            mention_memory=intimacy > 0.75,
+        )
+    if act == "bid_for_connection":
+        return SocialPolicyDecision(
+            primary_act="bid_for_connection",
+            response_mode="warm_presence",
+            should_use_tom=False,
+            should_recall_relational_memory=trust > 0.6,
+            softness=0.83,
+            directness=0.42,
+            initiative=min(1.0, _default_initiative(intimacy, interoception)),
+            avoid_problem_solving=affect.tenderness >= 0.45,
+            mention_memory=trust > 0.75,
+        )
+    if act == "conflict_signal":
+        return SocialPolicyDecision(
+            primary_act="conflict_signal",
+            response_mode="deescalate",
+            should_use_tom=True,
+            should_recall_relational_memory=True,
+            softness=0.86,
+            directness=0.46,
+            initiative=0.32,
+            avoid_problem_solving=True,
+            mention_memory=False,
+        )
+    return None
+
+
 class SocialPolicyEngine:
     """Deterministic interaction policy driven by affect + input."""
 
@@ -355,6 +644,7 @@ class SocialPolicyEngine:
         previous_response_hurt: bool = False,
         support_styles: list[str] | None = None,
         failed_patterns: list[str] | None = None,
+        llm_act_hint: str | None = None,
     ) -> SocialPolicyDecision:
         decision = self._base_decision(
             user_text=user_text,
@@ -363,6 +653,7 @@ class SocialPolicyEngine:
             intimacy=intimacy,
             interoception=interoception,
             previous_response_hurt=previous_response_hurt,
+            llm_act_hint=llm_act_hint,
         )
         decision = _apply_relationship_learning(
             decision,
@@ -380,74 +671,47 @@ class SocialPolicyEngine:
         intimacy: float,
         interoception: InteroceptivePressure,
         previous_response_hurt: bool = False,
+        llm_act_hint: str | None = None,
     ) -> SocialPolicyDecision:
         text = user_text.strip()
         low_presence = (not text) or _matches(text, _SILENCE_PATTERNS)
 
-        if previous_response_hurt or _matches(text, _REPAIR_PATTERNS):
-            return SocialPolicyDecision(
-                primary_act="repair_attempt",
-                response_mode="repair",
-                should_use_tom=True,
-                should_recall_relational_memory=True,
-                softness=0.92,
-                directness=0.55,
-                initiative=0.45,
-                avoid_problem_solving=True,
-                mention_memory=False,
+        def _act(name: str) -> SocialPolicyDecision:
+            decision = _build_act_decision(
+                name,
+                affect=affect,
+                trust=trust,
+                intimacy=intimacy,
+                interoception=interoception,
             )
+            assert decision is not None  # acts below are always in the table
+            return decision
+
+        # ADR 0004 conflict arbitration: when the inversion-risk groups
+        # co-match, branch order used to pick the winner; a valid hint from
+        # the LLM arbitrates instead. Relationship state (a hurt previous
+        # response) still outranks the hint.
+        if (
+            llm_act_hint in _CONFLICT_HINT_ACTS
+            and not previous_response_hurt
+            and len(assess_classification(text).conflict_groups) >= 2
+        ):
+            return _act(cast(str, llm_act_hint))
+
+        if previous_response_hurt or _matches(text, _REPAIR_PATTERNS):
+            return _act("repair_attempt")
 
         if _matches(text, _BOUNDARY_PATTERNS):
-            return SocialPolicyDecision(
-                primary_act="boundary_assertion",
-                response_mode="boundary",
-                should_use_tom=True,
-                should_recall_relational_memory=True,
-                softness=0.82,
-                directness=0.88,
-                initiative=0.2,
-                avoid_problem_solving=True,
-                mention_memory=False,
-            )
+            return _act("boundary_assertion")
 
         if _matches(text, _CORRECTION_PATTERNS):
-            return SocialPolicyDecision(
-                primary_act="clarification",
-                response_mode="clarify",
-                should_use_tom=False,
-                should_recall_relational_memory=False,
-                softness=0.86,
-                directness=0.82,
-                initiative=0.18,
-                avoid_problem_solving=True,
-                mention_memory=False,
-            )
+            return _act("clarification")
 
         if _matches(text, _GREETING_PATTERNS):
-            return SocialPolicyDecision(
-                primary_act="greeting",
-                response_mode="brief_warmth",
-                should_use_tom=False,
-                should_recall_relational_memory=False,
-                softness=0.86,
-                directness=0.36,
-                initiative=0.18,
-                avoid_problem_solving=True,
-                mention_memory=False,
-            )
+            return _act("greeting")
 
         if _matches(text, _ACK_PATTERNS):
-            return SocialPolicyDecision(
-                primary_act="acknowledgement",
-                response_mode="brief_attuned",
-                should_use_tom=False,
-                should_recall_relational_memory=False,
-                softness=0.8,
-                directness=0.44,
-                initiative=0.2,
-                avoid_problem_solving=True,
-                mention_memory=False,
-            )
+            return _act("acknowledgement")
 
         # Delight must lose to explicit distress in the same utterance
         # (「最悪や、最高の誕生日になるはずやったのに」 is a lament, not a share)
@@ -462,108 +726,28 @@ class SocialPolicyEngine:
             and not distress_overrides_delight
             and affect.valence >= -0.1
         ):
-            return SocialPolicyDecision(
-                primary_act="delight_share",
-                response_mode="celebrate",
-                should_use_tom=False,
-                should_recall_relational_memory=False,
-                softness=0.8,
-                directness=0.45,
-                initiative=0.55,
-                avoid_problem_solving=True,
-                mention_memory=intimacy > 0.65,
-            )
+            return _act("delight_share")
 
         if _matches(text, _GRIEF_PATTERNS):
-            return SocialPolicyDecision(
-                primary_act="grief_signal",
-                response_mode="comfort",
-                should_use_tom=True,
-                should_recall_relational_memory=trust > 0.45,
-                softness=0.95,
-                directness=0.3,
-                initiative=0.3,
-                avoid_problem_solving=True,
-                mention_memory=False,
-            )
+            return _act("grief_signal")
 
         if _matches(text, _FATIGUE_PATTERNS):
-            return SocialPolicyDecision(
-                primary_act="fatigue_signal",
-                response_mode="validate",
-                should_use_tom=True,
-                should_recall_relational_memory=False,
-                softness=0.93,
-                directness=0.35,
-                initiative=0.25,
-                avoid_problem_solving=True,
-                mention_memory=False,
-            )
+            return _act("fatigue_signal")
 
         if _matches(text, _VENTING_PATTERNS):
-            return SocialPolicyDecision(
-                primary_act="venting",
-                response_mode="validate",
-                should_use_tom=True,
-                should_recall_relational_memory=trust > 0.5,
-                softness=0.88,
-                directness=0.4,
-                initiative=0.35,
-                avoid_problem_solving=True,
-                mention_memory=False,
-            )
+            return _act("venting")
 
         if _matches(text, _ACTION_PATTERNS):
-            return SocialPolicyDecision(
-                primary_act="request_for_action",
-                response_mode="act_or_explain",
-                should_use_tom=False,
-                should_recall_relational_memory=False,
-                softness=0.62,
-                directness=0.82,
-                initiative=0.7,
-                avoid_problem_solving=False,
-                mention_memory=False,
-            )
+            return _act("request_for_action")
 
         if _matches(text, _ADVICE_PATTERNS):
-            return SocialPolicyDecision(
-                primary_act="request_for_advice",
-                response_mode="advise",
-                should_use_tom=affect.threat > 0.4,
-                should_recall_relational_memory=trust > 0.55,
-                softness=0.72,
-                directness=0.72,
-                initiative=0.55,
-                avoid_problem_solving=False,
-                mention_memory=False,
-            )
+            return _act("request_for_advice")
 
         if _matches(text, _META_PATTERNS):
-            return SocialPolicyDecision(
-                primary_act="meta_conversation",
-                response_mode="meta",
-                should_use_tom=True,
-                should_recall_relational_memory=False,
-                softness=0.7,
-                directness=0.7,
-                initiative=0.45,
-                avoid_problem_solving=False,
-                mention_memory=False,
-            )
+            return _act("meta_conversation")
 
         if _matches(text, _PLAYFUL_PATTERNS):
-            return SocialPolicyDecision(
-                primary_act="playful_probe",
-                response_mode="playful",
-                should_use_tom=False,
-                should_recall_relational_memory=intimacy > 0.7,
-                softness=0.7,
-                directness=0.45,
-                initiative=0.62,
-                avoid_problem_solving=True,
-                mention_memory=intimacy > 0.75,
-            )
+            return _act("playful_probe")
 
         if low_presence:
             return SocialPolicyDecision(
@@ -578,34 +762,18 @@ class SocialPolicyEngine:
                 mention_memory=False,
             )
 
-        initiative = 0.4 + intimacy * 0.2
-        if interoception.quiet_mode:
-            initiative *= 0.7
+        # ADR 0004 fallthrough: nothing lexical matched, so the regex layer
+        # has no signal here — adopt a valid LLM hint over the affect-driven
+        # and trailing defaults.
+        if llm_act_hint is not None and llm_act_hint in SPEECH_ACT_VOCABULARY:
+            return _act(llm_act_hint)
+
+        initiative = _default_initiative(intimacy, interoception)
         if affect.attachment_pull > 0.65:
-            return SocialPolicyDecision(
-                primary_act="bid_for_connection",
-                response_mode="warm_presence",
-                should_use_tom=False,
-                should_recall_relational_memory=trust > 0.6,
-                softness=0.83,
-                directness=0.42,
-                initiative=min(1.0, initiative),
-                avoid_problem_solving=affect.tenderness >= 0.45,
-                mention_memory=trust > 0.75,
-            )
+            return _act("bid_for_connection")
 
         if affect.threat > 0.55 or affect.frustration > 0.55:
-            return SocialPolicyDecision(
-                primary_act="conflict_signal",
-                response_mode="deescalate",
-                should_use_tom=True,
-                should_recall_relational_memory=True,
-                softness=0.86,
-                directness=0.46,
-                initiative=0.32,
-                avoid_problem_solving=True,
-                mention_memory=False,
-            )
+            return _act("conflict_signal")
 
         return SocialPolicyDecision(
             primary_act="request_for_advice" if "?" in text else "bid_for_connection",

@@ -2,7 +2,7 @@
 
 ## Status
 
-Proposed
+Accepted (2026-06-11)
 
 ## Context
 
@@ -32,7 +32,7 @@ regular expressions cannot close:
 Each class was patched for its reproduced instances, but the tail is
 structural: these distinctions require parsing, not matching.
 
-## Decision (proposed)
+## Decision
 
 Keep the regex layer as the deterministic fast path, and add an **LLM
 fallback** via the existing utility backend for exactly two situations:
@@ -71,8 +71,12 @@ the vocabulary.
 
 ## Consequences
 
-- `SocialPolicyEngine.decide()` would gain an optional async variant or a
-  pre-computed `llm_act_hint` input (computed in `prepare_turn` alongside
-  auto-ToM) so the engine itself stays synchronous and testable.
-- The fallback prompt and act vocabulary become versioned artifacts pinned by
-  the existing regression suite.
+- `SocialPolicyEngine.decide()` gained a pre-computed `llm_act_hint` input
+  (computed in `prepare_turn`, like auto-ToM) so the engine itself stays
+  synchronous and testable. `assess_classification()` is the cheap provenance
+  probe that gates the call.
+- Per-act decision shapes moved into `_build_act_decision`, the single source
+  of truth shared by the pattern branches and the hint dispatch, so a hinted
+  act is indistinguishable from the same act matched by pattern.
+- The fallback prompt and act vocabulary (`SPEECH_ACT_VOCABULARY`) are
+  versioned artifacts pinned by the existing regression suite.

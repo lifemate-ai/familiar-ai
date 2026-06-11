@@ -8,6 +8,7 @@ This project adheres to [Semantic Versioning](https://semver.org/).
 ## [Unreleased]
 
 ### Added
+- LLM fallback for speech-act classification (ADR 0004, accepted): when the regex layer has no signal (pattern fallthrough) or branch order would decide an inversion-risk conflict ({delight, distress, repair, boundary} co-match), one bounded utility call picks the act from the fixed vocabulary; the deterministic layer stays authoritative everywhere else and on any fallback failure
 - Runtime substrate extensions toward hosting the embodied turn loop: `after_tool_result` hooks can replace tool results (adaptive replan), new `mid_turn_user_messages` and `format_interrupt_message` hooks, `run_turn` accepts the cache-preserving `(stable, variable)` system-prompt tuple, and `on_action` / `on_image` / `on_tool_result` observer callbacks thread through the ReAct loop
 - Secretary layer: commitments (reminders, appointments, promises, follow-ups) with due times, priorities, and snooze in a dedicated store; add/list/complete/snooze tools; due and upcoming items surface in every turn and a `[Today's agenda]` block opens the day
 - Proactive reminders: due commitments fire self-initiated turns from REPL/TUI/GUI idle loops, independent of `auto_desire` (`FAMILIAR_PROACTIVE_REMINDERS`, default on), quiet-hours aware (urgent-only at night), with escalating backoff capped at 3 reminders

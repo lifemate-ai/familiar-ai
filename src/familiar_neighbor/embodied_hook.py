@@ -41,8 +41,10 @@ from familiar_neighbor.mind.deferral import DEFERRAL_PREFIX, detect_deferral
 from familiar_neighbor.mind.desires import DesireSystem
 from familiar_neighbor.mind.mental_state import MentalStateBus, MentalStateSnapshot
 from familiar_neighbor.mind.social_policy import (
+    SPEECH_ACT_VOCABULARY,
     SocialPolicyDecision,
     SocialPolicyEngine,
+    assess_classification,
     relationship_learning_inputs,
 )
 from familiar_runtime.runtime import RuntimeHookBase
@@ -84,6 +86,40 @@ if TYPE_CHECKING:
     from familiar_runtime.models import ModelTurnResult, ToolCall
     from familiar_runtime.runtime import RetryDecision, TurnContext
     from familiar_runtime.tools.base import ToolExecutionResult
+
+
+# ADR 0004: only substantive turns are worth a fallback classification call.
+_ACT_FALLBACK_MIN_CHARS = 12
+_ACT_FALLBACK_TIMEOUT_S = 2.0
+
+
+async def _classify_speech_act_llm(
+    agent: Any,
+    user_input: str,
+    *,
+    timeout_s: float = _ACT_FALLBACK_TIMEOUT_S,
+) -> str | None:
+    """One bounded utility call: pick a speech act from the fixed vocabulary.
+
+    Degrades to None on timeout, backend failure, or any answer outside the
+    vocabulary — the regex verdict then stands unchanged.
+    """
+    vocabulary = ", ".join(sorted(SPEECH_ACT_VOCABULARY))
+    try:
+        raw = await asyncio.wait_for(
+            agent._utility_backend.complete(
+                "Classify the speaker's primary speech act. Reply with exactly "
+                f"one label from this list and nothing else: {vocabulary}.\n\n"
+                f"Utterance: {user_input[:300]}",
+                max_tokens=12,
+            ),
+            timeout=timeout_s,
+        )
+    except Exception as exc:  # noqa: BLE001
+        logger.debug("Speech-act fallback classification failed: %s", exc)
+        return None
+    act = raw.strip().strip('"').strip("'").lower()
+    return act if act in SPEECH_ACT_VOCABULARY else None
 
 
 logger = logging.getLogger(__name__)
@@ -402,6 +438,19 @@ class EmbodiedAgentHook(RuntimeHookBase):
             )
         )
         learned_styles, learned_failures = relationship_learning_inputs(agent._relationship)
+        # ADR 0004: spend one bounded utility call only where the regex layer
+        # is least trustworthy (pattern fallthrough / conflict zone) on a
+        # substantive companion turn — and only when a dedicated utility
+        # backend exists, so the common case stays zero-latency.
+        llm_act_hint: str | None = None
+        if (
+            not is_desire_turn
+            and not candidate_brief_turn
+            and len(user_input.strip()) >= _ACT_FALLBACK_MIN_CHARS
+            and agent._utility_backend is not agent.backend
+            and assess_classification(user_input).wants_llm
+        ):
+            llm_act_hint = await _classify_speech_act_llm(agent, user_input)
         social_policy = agent._social_policy.decide(
             user_text=user_input,
             affect=affect,
@@ -411,6 +460,7 @@ class EmbodiedAgentHook(RuntimeHookBase):
             previous_response_hurt=previous_response_hurt,
             support_styles=learned_styles,
             failed_patterns=learned_failures,
+            llm_act_hint=llm_act_hint,
         )
         agent._provisional_relationship_update(user_text=user_input, social_policy=social_policy)
 
