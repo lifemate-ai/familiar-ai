@@ -57,6 +57,7 @@ from .tools.commitments import (
     format_commitment_line,
     format_commitments_for_context,
 )
+from .tools.delegation import DelegatedTaskRunner, DelegationTool
 from .tools.memory import MemoryTool, ObservationMemory
 from .tools.tom import ToMTool
 from .tools.mobility import MobilityTool
@@ -68,6 +69,7 @@ from familiar_capabilities import (
     CameraCapability,
     CodingCapability,
     CommitmentCapability,
+    DelegationCapability,
     MCPCapability,
     MemoryCapability,
     MobilityCapability,
@@ -507,6 +509,10 @@ class EmbodiedAgent:
         _commitments_dir.mkdir(parents=True, exist_ok=True)
         self._commitment_store = SQLiteCommitmentStore(_commitments_dir / "commitments.db")
         self._commitment_tool = CommitmentTool(self._commitment_store)
+        self._delegation_runner = DelegatedTaskRunner(
+            config=config, commitment_store=self._commitment_store
+        )
+        self._delegation_tool = DelegationTool(self._delegation_runner)
         self._exploration = ExplorationTracker()
         self._scene: SceneTracker | None = None  # initialized after DB ready in _init_tools
 
@@ -864,6 +870,9 @@ class EmbodiedAgent:
         commitment_tool = getattr(self, "_commitment_tool", None)
         if commitment_tool is not None:
             registry.register(CommitmentCapability(commitment_tool))
+        delegation_tool = getattr(self, "_delegation_tool", None)
+        if delegation_tool is not None:
+            registry.register(DelegationCapability(delegation_tool))
         if self._mcp:
             provider = MCPCapability(self._mcp)
             registry.register(provider)
@@ -2200,6 +2209,12 @@ class EmbodiedAgent:
             await asyncio.wait_for(asyncio.to_thread(self._memory.close), timeout=1.0)
         except (asyncio.TimeoutError, Exception):
             pass
+        delegation_runner = getattr(self, "_delegation_runner", None)
+        if delegation_runner is not None:
+            try:
+                await asyncio.wait_for(delegation_runner.shutdown(), timeout=2.0)
+            except (asyncio.TimeoutError, Exception):
+                pass
         for closable in (
             getattr(self, "_person_model", None),
             getattr(self, "_commitment_store", None),

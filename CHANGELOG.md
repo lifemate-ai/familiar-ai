@@ -8,6 +8,7 @@ This project adheres to [Semantic Versioning](https://semver.org/).
 ## [Unreleased]
 
 ### Added
+- Delegated background tasks: `delegate_task` runs a goal on an independent non-embodied task runtime while the conversation continues (max 2 concurrent); completion or failure creates a due follow-up commitment so the proactive-reminder machinery reports back, and `check_delegated_tasks` lists running and recent results
 - Secretary layer: commitments (reminders, appointments, promises, follow-ups) with due times, priorities, and snooze in a dedicated store; add/list/complete/snooze tools; due and upcoming items surface in every turn and a `[Today's agenda]` block opens the day
 - Proactive reminders: due commitments fire self-initiated turns from REPL/TUI/GUI idle loops, independent of `auto_desire` (`FAMILIAR_PROACTIVE_REMINDERS`, default on), quiet-hours aware (urgent-only at night), with escalating backoff capped at 3 reminders
 - Persistent person model: ToM inferences accumulate per person (`person_inferences`) and surface as an accumulated `[Person model]` prompt block with a 7-day staleness cutoff

@@ -9,6 +9,7 @@ the calling convention.
 from .camera import CameraCapability
 from .coding import CodingCapability
 from .commitments import CommitmentCapability
+from .delegation import DelegationCapability
 from .mcp import MCPCapability
 from .memory import MemoryCapability
 from .mobility import MobilityCapability
@@ -19,6 +20,7 @@ __all__ = [
     "CameraCapability",
     "CodingCapability",
     "CommitmentCapability",
+    "DelegationCapability",
     "MCPCapability",
     "MemoryCapability",
     "MobilityCapability",
