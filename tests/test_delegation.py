@@ -249,6 +249,97 @@ async def test_check_tool_empty():
     assert "no delegated tasks" in text.lower()
 
 
+# ── Real _execute_task path: backend faked, task store real ──
+
+
+class _FakeBackend:
+    def __init__(self, *, fail: bool = False) -> None:
+        self._fail = fail
+
+    def make_user_message(self, content):
+        return {"role": "user", "content": content}
+
+    def make_assistant_message(self, result, raw_content=None):
+        return {"role": "assistant", "content": result.text}
+
+    def make_tool_results(self, tool_calls, results):
+        return [{"role": "tool", "content": text} for text, _image in results]
+
+    async def stream_turn(self, **kwargs):
+        from familiar_runtime.models import ModelTurnResult
+
+        if self._fail:
+            raise RuntimeError("model unavailable")
+        return ModelTurnResult(stop_reason="end_turn", text="background task done"), None
+
+    async def complete(self, prompt: str, max_tokens: int) -> str:
+        return ""
+
+
+@pytest.fixture
+def _task_home(tmp_path, monkeypatch):
+    # Path.home() consults HOME on POSIX and USERPROFILE on Windows.
+    monkeypatch.setenv("HOME", str(tmp_path))
+    monkeypatch.setenv("USERPROFILE", str(tmp_path))
+    monkeypatch.setenv("PLATFORM", "cli")
+    return tmp_path
+
+
+@pytest.mark.asyncio
+async def test_execute_task_real_path_succeeds(_task_home, monkeypatch, commitments):
+    from familiar_agent import backend as backend_mod
+    from familiar_agent.config import AgentConfig
+    from familiar_runtime.tasks import SQLiteTaskStore, TaskStatus
+
+    monkeypatch.setattr(backend_mod, "create_backend", lambda config: _FakeBackend())
+    runner = DelegatedTaskRunner(config=AgentConfig(), commitment_store=commitments)
+
+    runner.delegate("summarize the repo")
+    await runner.wait_idle()
+
+    open_items = commitments.list_open()
+    assert len(open_items) == 1
+    assert open_items[0].priority == 1
+    task_id = open_items[0].metadata["task_id"]
+    assert task_id
+
+    store = SQLiteTaskStore(_task_home / ".familiar_ai" / "runtime_tasks.db")
+    try:
+        task = store.get_task(task_id)
+    finally:
+        store.close()
+    assert task is not None
+    assert task.status == TaskStatus.SUCCEEDED
+    assert "background task done" in runner.status_report()
+
+
+@pytest.mark.asyncio
+async def test_execute_task_failure_marks_task_failed(_task_home, monkeypatch, commitments):
+    from familiar_agent import backend as backend_mod
+    from familiar_agent.config import AgentConfig
+    from familiar_runtime.tasks import SQLiteTaskStore, TaskStatus
+
+    monkeypatch.setattr(backend_mod, "create_backend", lambda config: _FakeBackend(fail=True))
+    runner = DelegatedTaskRunner(config=AgentConfig(), commitment_store=commitments)
+
+    runner.delegate("doomed real goal")
+    await runner.wait_idle()
+
+    open_items = commitments.list_open()
+    assert len(open_items) == 1
+    assert open_items[0].priority == 2
+    assert "failed" in open_items[0].summary.lower()
+
+    store = SQLiteTaskStore(_task_home / ".familiar_ai" / "runtime_tasks.db")
+    try:
+        rows = store._conn.execute("SELECT id FROM runtime_tasks").fetchall()
+        task = store.get_task(rows[0]["id"])
+    finally:
+        store.close()
+    assert task is not None
+    assert task.status == TaskStatus.FAILED
+
+
 # ── Agent wiring: registry exposes the delegation tools ──
 
 
