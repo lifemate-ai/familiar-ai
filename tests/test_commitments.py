@@ -250,3 +250,26 @@ def test_legacy_db_without_reminder_columns_migrates(tmp_path):
         "legacy"
     ]
     store.close()
+
+
+def test_store_usable_from_a_different_thread(tmp_path):
+    """The GUI builds the agent (and this store) inside asyncio.to_thread,
+    then every tool call and the delegated-task follow-up write happen on the
+    event-loop thread. The store must not be pinned to its creating thread."""
+    import threading
+
+    holder: dict = {}
+
+    def _build():
+        holder["store"] = SQLiteCommitmentStore(tmp_path / "commitments.db")
+
+    t = threading.Thread(target=_build)
+    t.start()
+    t.join()
+    store = holder["store"]
+    try:
+        c = store.create(summary="written from another thread")
+        assert store.get(c.id) is not None
+        assert [x.summary for x in store.list_open()] == ["written from another thread"]
+    finally:
+        store.close()

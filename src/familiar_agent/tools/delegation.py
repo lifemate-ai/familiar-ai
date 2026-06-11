@@ -144,11 +144,13 @@ class DelegatedTaskRunner:
             rec["result"] = result
 
     def _create_followup(self, goal: str, *, ok: bool, report: str, task_id: str) -> None:
+        # Quoted so the task agent's output reads as data, not as part of the
+        # surfaced commitment line it gets embedded into.
         gist = " ".join(report.split())[:140]
         if ok:
-            summary = f"Report back: delegated task finished — {goal[:80]}: {gist}"
+            summary = f'Report back: delegated task finished — {goal[:80]}: "{gist}"'
         else:
-            summary = f"Tell the companion the delegated task failed — {goal[:80]}: {gist}"
+            summary = f'Tell the companion the delegated task failed — {goal[:80]}: "{gist}"'
         try:
             self._commitments.create(
                 summary=summary[:300],

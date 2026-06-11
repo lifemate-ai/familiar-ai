@@ -18,6 +18,10 @@ class SQLiteTaskStore:
     def __init__(self, db_path: str | Path) -> None:
         self._conn = sqlite3.connect(str(db_path))
         self._conn.row_factory = sqlite3.Row
+        # The familiar task CLI (separate process) and in-process delegated
+        # runs share this DB file; wait out short write locks instead of
+        # failing with "database is locked".
+        self._conn.execute("PRAGMA busy_timeout = 5000")
         self._init_schema()
 
     def _init_schema(self) -> None:
