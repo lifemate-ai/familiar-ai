@@ -212,6 +212,47 @@ async def test_retry_fires_once_then_tier2_replaces(store, tmp_path):
 
 
 @pytest.mark.asyncio
+async def test_low_severity_boundary_also_gets_retry_not_silent_replacement(store, tmp_path):
+    """A confidence-weighted (non-non-negotiable) boundary still earns the
+    in-its-own-words retry rather than being silently replaced by a canned line."""
+    soft_boundary = {
+        "assertion_key": "boundary:no_self_deprecation",
+        "kind": "boundary",
+        "statement": "I do not put myself down as 'just an AI'.",
+        "non_negotiable": False,
+        "confidence": 0.85,
+        "checker_id": "forbidden_phrase",
+        "checker_params": {
+            "phrases": ["just an ai"],
+            "repair_text": "Let me say that again without putting myself down.",
+        },
+    }
+    agent = _make_agent()
+    agent._identity = _identity_core(store, tmp_path, assertions=[soft_boundary])
+    agent._meta_monitor = MetaMonitor()
+    agent.backend.stream_turn = AsyncMock(
+        side_effect=[
+            (_turn("end_turn", text="well, i'm just an ai, but here goes"), None),
+            (_turn("end_turn", text="Here is my honest take."), None),
+        ]
+    )
+    ps = _patch_heavy()
+    for p in ps:
+        p.start()
+    try:
+        result = await agent.run("what do you think?")
+    finally:
+        for p in ps:
+            p.stop()
+
+    # The model rewrote itself; the canned repair_text was NOT used.
+    assert result == "Here is my honest take."
+    injections = [t for t in _user_texts(agent) if t.startswith("[IDENTITY]")]
+    assert len(injections) == 1
+    assert "something you hold" in injections[0]  # softer than "non-negotiable"
+
+
+@pytest.mark.asyncio
 async def test_clean_response_never_retries(store, tmp_path):
     agent = _make_agent()
     agent._identity = _identity_core(store, tmp_path, assertions=[_MEMORY_BOUNDARY])

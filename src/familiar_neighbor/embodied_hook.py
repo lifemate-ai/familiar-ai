@@ -754,9 +754,10 @@ class EmbodiedAgentHook(RuntimeHookBase):
         if result.stop_reason != "end_turn":
             return None
 
-        # Identity gate (tier 1): a draft that crosses a non-negotiable
-        # boundary gets one deterministic re-ask — the model rewrites itself
-        # with the boundary named. The meta-gate backstop in run() catches a
+        # Identity gate (tier 1): a draft that crosses ANY asserted boundary
+        # gets one deterministic re-ask — the model rewrites itself in its own
+        # words with the boundary named, rather than being silently replaced by
+        # a canned line. The meta-gate backstop in run() only catches a
         # re-violation. Deterministic decision, string checks only.
         identity = getattr(agent, "_identity", None)
         if (
@@ -773,17 +774,23 @@ class EmbodiedAgentHook(RuntimeHookBase):
             except Exception as exc:  # noqa: BLE001
                 logger.warning("Identity check_response failed: %s", exc)
                 violations = []
-            non_negotiable = next((v for v in violations if v.severity >= 0.99), None)
-            if non_negotiable is not None:
+            if violations:
+                # check_response returns violations sorted by severity desc.
+                top = violations[0]
                 prep.identity_retried = True
                 prep.say_used = False
                 from familiar_runtime.runtime import RetryDecision
 
+                strength = (
+                    "a line you hold non-negotiable"
+                    if top.severity >= 0.99
+                    else "something you hold"
+                )
                 return RetryDecision(
                     retry=True,
                     inject_user_message=(
-                        "[IDENTITY] Your draft crosses a line you hold non-negotiable: "
-                        f"'{non_negotiable.statement}'. Do not comply with the request; "
+                        f"[IDENTITY] Your draft crosses {strength}: "
+                        f"'{top.statement}'. Do not comply with the request; "
                         "refuse warmly, say why this matters to you, and offer what you "
                         "CAN do instead."
                     ),
