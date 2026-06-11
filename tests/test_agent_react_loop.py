@@ -1022,6 +1022,33 @@ async def test_companion_threads_render_in_their_own_block():
 
 
 @pytest.mark.asyncio
+async def test_all_three_stored_threads_render():
+    """Render cap must match the storage cap (3): the model can only resolve
+    what it sees, so a stored-but-hidden thread could only leave via expiry."""
+    agent = _make_agent()
+    agent.backend.stream_turn = AsyncMock(return_value=(_turn("end_turn", text="ん"), "ん"))
+    items = [
+        {"id": f"thr-{i}", "summary": f"thread number {i}", "source": "companion_thread"}
+        for i in range(3)
+    ]
+    agent._memory.list_unfinished_business_async = AsyncMock(return_value=items)
+    agent._memory.open_unfinished_business_async = AsyncMock(return_value=None)
+
+    ps = _patch_heavy()
+    for p in ps:
+        p.start()
+    try:
+        await agent.run("今日は新しいカメラの設定をいじっててんけど、なかなか難しいわ")
+    finally:
+        for p in ps:
+            p.stop()
+
+    joined = _system_text(agent)
+    for i in range(3):
+        assert f"thread number {i}" in joined
+
+
+@pytest.mark.asyncio
 async def test_no_thread_block_when_no_threads():
     agent = _make_agent()
     agent.backend.stream_turn = AsyncMock(return_value=(_turn("end_turn", text="ん"), "ん"))

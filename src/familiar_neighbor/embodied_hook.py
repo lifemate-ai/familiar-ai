@@ -271,9 +271,12 @@ class EmbodiedAgentHook(RuntimeHookBase):
             # instruction, not the resolve-once-addressed one — render them
             # as a separate block so the model doesn't resolve them right
             # after wishing good luck.
+            # Render cap matches the storage cap (3) — the model can only
+            # resolve what it sees, so a stored-but-hidden thread could only
+            # ever leave via expiry.
             companion_threads = [
                 item for item in unfinished_open if item.get("source") == "companion_thread"
-            ][:2]
+            ][:3]
             other_business = [
                 item for item in unfinished_open if item.get("source") != "companion_thread"
             ][:3]
