@@ -84,6 +84,9 @@ class ReActLoop:
         turn_id: str | None = None,
         context: "TurnContext | None" = None,
         interrupt_source: "InterruptSource | None" = None,
+        on_action: Callable[[str, dict], None] | None = None,
+        on_image: Callable[[str], None] | None = None,
+        on_tool_result: Callable[[str, dict, str], None] | None = None,
     ) -> RunTurnResult:
         from .runtime import RetryDecision  # local import avoids circular import
 
@@ -117,8 +120,18 @@ class ReActLoop:
                 drained = await interrupt_source.drain()
                 if drained:
                     joined = " / ".join(drained)
+                    # A hook may reshape the spliced interrupt line (e.g. add a
+                    # respond-with-say directive); first non-None wins.
+                    formatted: str | None = None
+                    if context is not None:
+                        for hook in self._hooks:
+                            formatted = await hook.format_interrupt_message(context, drained)
+                            if formatted is not None:
+                                break
                     messages.append(
-                        self._backend.make_user_message(f"[User interrupted]: {joined}")
+                        self._backend.make_user_message(
+                            formatted or f"[User interrupted]: {joined}"
+                        )
                     )
                     emit("user", "interrupt", {"count": len(drained), "text": joined})
 
@@ -133,6 +146,13 @@ class ReActLoop:
                 if extra_blocks:
                     rendered = "\n\n".join(block.rendered_text() for block in extra_blocks)
                     iter_system = _with_extra_system(system, rendered)
+                # Hooks may also append explicit user messages (e.g. a say()
+                # reminder that must read as conversational pressure, not as
+                # system framing).
+                for hook in self._hooks:
+                    for user_message in await hook.mid_turn_user_messages(context, iteration):
+                        messages.append(self._backend.make_user_message(user_message))
+                        emit("system", "mid_turn_message", {"text": user_message[:200]})
 
             emit("model", "model_request_start", {"iteration": iteration + 1})
             result, raw_content = await self._backend.stream_turn(
@@ -205,52 +225,54 @@ class ReActLoop:
                         "tool_call",
                         {"name": tool_call.name, "input": tool_call.input},
                     )
+                    if on_action is not None:
+                        on_action(tool_call.name, tool_call.input)
                     timeout = self._tool_timeouts.get(tool_call.name, self._default_tool_timeout)
                     try:
                         tool_result = await asyncio.wait_for(
                             self._tools.call(tool_call.name, tool_call.input),
                             timeout=timeout,
                         )
+                        emit(
+                            "tool",
+                            "tool_result",
+                            {
+                                "name": tool_call.name,
+                                "success": tool_result.success,
+                                "error": tool_result.error,
+                            },
+                        )
                     except asyncio.TimeoutError:
-                        text = f"Tool timeout: {tool_call.name} exceeded {timeout:.1f}s."
-                        collected.append((text, None))
+                        tool_result = ToolExecutionResult(
+                            text=f"Tool timeout: {tool_call.name} exceeded {timeout:.1f}s.",
+                            success=False,
+                            error="timeout",
+                        )
                         emit(
                             "tool",
                             "tool_timeout",
                             {"name": tool_call.name, "timeout": timeout},
                         )
-                        if context is not None and self._hooks:
-                            timeout_result = ToolExecutionResult(
-                                text=text, success=False, error="timeout"
-                            )
-                            for hook in self._hooks:
-                                await hook.after_tool_result(context, tool_call, timeout_result)
-                        continue
                     except Exception as exc:  # noqa: BLE001
-                        text = f"Tool error: {exc}"
-                        collected.append((text, None))
+                        tool_result = ToolExecutionResult(
+                            text=f"Tool error: {exc}", success=False, error=str(exc)
+                        )
                         emit("tool", "tool_error", {"name": tool_call.name, "error": str(exc)})
-                        if context is not None and self._hooks:
-                            error_result = ToolExecutionResult(
-                                text=text, success=False, error=str(exc)
-                            )
-                            for hook in self._hooks:
-                                await hook.after_tool_result(context, tool_call, error_result)
-                        continue
 
-                    collected.append((tool_result.text, tool_result.image_b64))
-                    emit(
-                        "tool",
-                        "tool_result",
-                        {
-                            "name": tool_call.name,
-                            "success": tool_result.success,
-                            "error": tool_result.error,
-                        },
-                    )
+                    # Hooks may replace the result (e.g. splice an adaptive
+                    # replan into the text); the first non-None return wins
+                    # and later hooks observe the replacement.
                     if context is not None:
                         for hook in self._hooks:
-                            await hook.after_tool_result(context, tool_call, tool_result)
+                            replaced = await hook.after_tool_result(context, tool_call, tool_result)
+                            if replaced is not None:
+                                tool_result = replaced
+
+                    collected.append((tool_result.text, tool_result.image_b64))
+                    if tool_result.image_b64 and on_image is not None:
+                        on_image(tool_result.image_b64)
+                    if on_tool_result is not None:
+                        on_tool_result(tool_call.name, tool_call.input, tool_result.text)
 
                 messages.append(self._backend.make_assistant_message(result, raw_content))
                 messages.append(self._backend.make_tool_results(result.tool_calls, collected))

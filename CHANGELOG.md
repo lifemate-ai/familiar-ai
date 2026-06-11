@@ -8,6 +8,7 @@ This project adheres to [Semantic Versioning](https://semver.org/).
 ## [Unreleased]
 
 ### Added
+- Runtime substrate extensions toward hosting the embodied turn loop: `after_tool_result` hooks can replace tool results (adaptive replan), new `mid_turn_user_messages` and `format_interrupt_message` hooks, `run_turn` accepts the cache-preserving `(stable, variable)` system-prompt tuple, and `on_action` / `on_image` / `on_tool_result` observer callbacks thread through the ReAct loop
 - Secretary layer: commitments (reminders, appointments, promises, follow-ups) with due times, priorities, and snooze in a dedicated store; add/list/complete/snooze tools; due and upcoming items surface in every turn and a `[Today's agenda]` block opens the day
 - Proactive reminders: due commitments fire self-initiated turns from REPL/TUI/GUI idle loops, independent of `auto_desire` (`FAMILIAR_PROACTIVE_REMINDERS`, default on), quiet-hours aware (urgent-only at night), with escalating backoff capped at 3 reminders
 - Persistent person model: ToM inferences accumulate per person (`person_inferences`) and surface as an accumulated `[Person model]` prompt block with a 7-day staleness cutoff

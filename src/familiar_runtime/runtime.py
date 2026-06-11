@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import time
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field
 from typing import Any, Protocol
 
@@ -82,6 +82,18 @@ class RuntimeHook(Protocol):
         iteration: int,
     ) -> list[ContextBlock]: ...
 
+    async def mid_turn_user_messages(
+        self,
+        ctx: TurnContext,
+        iteration: int,
+    ) -> list[str]: ...
+
+    async def format_interrupt_message(
+        self,
+        ctx: TurnContext,
+        interrupts: list[str],
+    ) -> str | None: ...
+
     async def after_model_result(
         self,
         ctx: TurnContext,
@@ -93,7 +105,7 @@ class RuntimeHook(Protocol):
         ctx: TurnContext,
         call: ToolCall,
         result: ToolExecutionResult,
-    ) -> None: ...
+    ) -> ToolExecutionResult | None: ...
 
     async def after_turn(self, ctx: TurnContext, final_text: str) -> None: ...
 
@@ -114,6 +126,20 @@ class RuntimeHookBase:
     ) -> list[ContextBlock]:
         return []
 
+    async def mid_turn_user_messages(
+        self,
+        ctx: TurnContext,  # noqa: ARG002
+        iteration: int,  # noqa: ARG002
+    ) -> list[str]:
+        return []
+
+    async def format_interrupt_message(
+        self,
+        ctx: TurnContext,  # noqa: ARG002
+        interrupts: list[str],  # noqa: ARG002
+    ) -> str | None:
+        return None
+
     async def after_model_result(
         self,
         ctx: TurnContext,  # noqa: ARG002
@@ -126,7 +152,7 @@ class RuntimeHookBase:
         ctx: TurnContext,  # noqa: ARG002
         call: ToolCall,  # noqa: ARG002
         result: ToolExecutionResult,  # noqa: ARG002
-    ) -> None:
+    ) -> ToolExecutionResult | None:
         return None
 
     async def after_turn(self, ctx: TurnContext, final_text: str) -> None:  # noqa: ARG002
@@ -157,10 +183,14 @@ class AgentRuntime:
         *,
         profile: str = "task",
         task_id: str | None = None,
-        system_prompt: str = "",
+        system_prompt: str | tuple[str, str] = "",
         messages: list[Any] | None = None,
         max_tokens: int = 4096,
         interrupt_source: InterruptSource | None = None,
+        on_text: Callable[[str], None] | None = None,
+        on_action: Callable[[str, dict], None] | None = None,
+        on_image: Callable[[str], None] | None = None,
+        on_tool_result: Callable[[str, dict, str], None] | None = None,
     ) -> RunTurnResult:
         # ``interrupt_source`` is polled by the ReAct loop between iterations so
         # async user input gets folded into the in-flight turn (see ReActLoop.run).
@@ -173,7 +203,16 @@ class AgentRuntime:
             blocks.extend(await hook.build_context(ctx))
         selected = select_context_blocks(blocks, max_chars=self._max_context_chars)
         context_text = "\n\n".join(block.rendered_text() for block in selected)
-        system = f"{system_prompt}\n\n{context_text}".strip()
+        system: str | tuple[str, str]
+        if isinstance(system_prompt, tuple):
+            # Preserve the (stable, variable) split — the Anthropic adapter's
+            # cache_control on the stable half depends on it. Hook context
+            # joins the variable half.
+            stable, variable = system_prompt
+            merged = f"{variable}\n\n{context_text}".strip() if context_text else variable
+            system = (stable, merged)
+        else:
+            system = f"{system_prompt}\n\n{context_text}".strip()
 
         turn_messages = messages if messages is not None else []
         turn_messages.append(self._backend.make_user_message(user_input))
@@ -197,6 +236,10 @@ class AgentRuntime:
             task_id=task_id,
             context=ctx,
             interrupt_source=interrupt_source,
+            on_text=on_text,
+            on_action=on_action,
+            on_image=on_image,
+            on_tool_result=on_tool_result,
         )
         for hook in self._hooks:
             await hook.after_turn(ctx, result.final_text)

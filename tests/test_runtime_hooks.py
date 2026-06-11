@@ -515,3 +515,235 @@ async def test_runtime_without_hooks_still_runs_react_loop() -> None:
     )
     result = await runtime.run_turn("hi")
     assert result.final_text == "ok"
+
+
+# ---------------------------------------------------------------------------
+# Thin-wrap substrate extensions: result replacement, user-message injection,
+# interrupt formatting, tuple system prompts, and observer callbacks.
+# ---------------------------------------------------------------------------
+
+
+class _ImageTool:
+    def specs(self) -> list[ToolSpec]:
+        return [
+            ToolSpec(
+                name="snap",
+                description="Snap",
+                input_schema={"type": "object", "properties": {}},
+            )
+        ]
+
+    async def call(self, name: str, tool_input: dict[str, Any]) -> ToolExecutionResult:  # noqa: ARG002
+        return ToolExecutionResult(text="a photo", image_b64="IMGB64")
+
+
+class _ReplanHook(RuntimeHookBase):
+    """Mimics TAPE replan: splices a replan note into the tool result."""
+
+    async def after_tool_result(
+        self,
+        ctx: TurnContext,  # noqa: ARG002
+        call: ToolCall,  # noqa: ARG002
+        result: ToolExecutionResult,
+    ) -> ToolExecutionResult | None:
+        return ToolExecutionResult(
+            text=f"{result.text}\n\n[ADAPTIVE REPLAN] new plan",
+            image_b64=result.image_b64,
+            success=result.success,
+            error=result.error,
+        )
+
+
+@pytest.mark.asyncio
+async def test_after_tool_result_replacement_reaches_history() -> None:
+    backend = _ScriptedBackend(
+        [
+            ModelTurnResult(
+                stop_reason="tool_use",
+                text="",
+                tool_calls=[ToolCall(id="tc1", name="echo", input={"text": "hi"})],
+            ),
+            ModelTurnResult(stop_reason="end_turn", text="done"),
+        ]
+    )
+    registry = ToolRegistry()
+    registry.register(_EchoTool())
+    runtime = AgentRuntime(backend=backend, tools=registry, hooks=[_ReplanHook()])
+    messages: list[Any] = []
+    await runtime.run_turn("go", messages=messages)
+    flat: list[Any] = []
+    for m in messages:
+        flat.extend(m if isinstance(m, list) else [m])
+    tool_messages = [m for m in flat if isinstance(m, dict) and m.get("role") == "tool"]
+    assert tool_messages
+    assert "[ADAPTIVE REPLAN] new plan" in tool_messages[0]["content"]
+
+
+class _SayReminderHook(RuntimeHookBase):
+    """Injects a user message before the second model call."""
+
+    async def mid_turn_user_messages(
+        self,
+        ctx: TurnContext,  # noqa: ARG002
+        iteration: int,
+    ) -> list[str]:
+        if iteration == 1:
+            return ["REMINDER: call say() now."]
+        return []
+
+
+@pytest.mark.asyncio
+async def test_mid_turn_user_messages_appended_to_history() -> None:
+    backend = _ScriptedBackend(
+        [
+            ModelTurnResult(
+                stop_reason="tool_use",
+                text="",
+                tool_calls=[ToolCall(id="tc1", name="echo", input={})],
+            ),
+            ModelTurnResult(stop_reason="end_turn", text="done"),
+        ]
+    )
+    registry = ToolRegistry()
+    registry.register(_EchoTool())
+    runtime = AgentRuntime(backend=backend, tools=registry, hooks=[_SayReminderHook()])
+    messages: list[Any] = []
+    await runtime.run_turn("go", messages=messages)
+    user_texts = [
+        m["content"]
+        for m in messages
+        if isinstance(m, dict) and m.get("role") == "user" and isinstance(m.get("content"), str)
+    ]
+    assert "REMINDER: call say() now." in user_texts
+
+
+class _ListInterrupts:
+    def __init__(self, items: list[str]) -> None:
+        self._items = list(items)
+
+    async def drain(self) -> list[str]:
+        items, self._items = self._items, []
+        return items
+
+    def empty(self) -> bool:
+        return not self._items
+
+
+class _InterruptFormatHook(RuntimeHookBase):
+    async def format_interrupt_message(
+        self,
+        ctx: TurnContext,  # noqa: ARG002
+        interrupts: list[str],
+    ) -> str | None:
+        return f"[User interrupted x{len(interrupts)}]: {interrupts[0]}. Respond with say() now."
+
+
+@pytest.mark.asyncio
+async def test_interrupt_format_hook_overrides_default() -> None:
+    backend = _ScriptedBackend([ModelTurnResult(stop_reason="end_turn", text="ok")])
+    runtime = AgentRuntime(backend=backend, tools=ToolRegistry(), hooks=[_InterruptFormatHook()])
+    messages: list[Any] = []
+    await runtime.run_turn(
+        "go", messages=messages, interrupt_source=_ListInterrupts(["まだ起きてる？"])
+    )
+    user_texts = [
+        m["content"]
+        for m in messages
+        if isinstance(m, dict) and m.get("role") == "user" and isinstance(m.get("content"), str)
+    ]
+    assert any(t.startswith("[User interrupted x1]") and "say() now" in t for t in user_texts)
+
+
+@pytest.mark.asyncio
+async def test_interrupt_default_format_without_hook() -> None:
+    backend = _ScriptedBackend([ModelTurnResult(stop_reason="end_turn", text="ok")])
+    runtime = AgentRuntime(backend=backend, tools=ToolRegistry(), hooks=[RuntimeHookBase()])
+    messages: list[Any] = []
+    await runtime.run_turn("go", messages=messages, interrupt_source=_ListInterrupts(["hello"]))
+    user_texts = [
+        m["content"]
+        for m in messages
+        if isinstance(m, dict) and m.get("role") == "user" and isinstance(m.get("content"), str)
+    ]
+    assert any(t.startswith("[User interrupted]:") for t in user_texts)
+
+
+class _SystemRecordingBackend(_ScriptedBackend):
+    def __init__(self, turns: list[ModelTurnResult]) -> None:
+        super().__init__(turns)
+        self.systems: list[Any] = []
+
+    async def stream_turn(self, **kwargs: Any) -> tuple[ModelTurnResult, Any]:
+        self.systems.append(kwargs.get("system"))
+        return await super().stream_turn(**kwargs)
+
+
+@pytest.mark.asyncio
+async def test_run_turn_accepts_tuple_system_prompt() -> None:
+    """The (stable, variable) split must survive run_turn so the Anthropic
+    adapter's cache_control on the stable half stays effective."""
+    backend = _SystemRecordingBackend([ModelTurnResult(stop_reason="end_turn", text="ok")])
+    hook = _RecordingHook("ctx")
+    runtime = AgentRuntime(backend=backend, tools=ToolRegistry(), hooks=[hook])
+    await runtime.run_turn("go", system_prompt=("STABLE-CORE", "variable bits"))
+    system = backend.systems[0]
+    assert isinstance(system, tuple)
+    stable, variable = system
+    assert stable == "STABLE-CORE"
+    assert "variable bits" in variable
+    assert "[ctx] context for go" in variable  # build_context lands in the variable half
+    assert "STABLE-CORE" not in variable
+
+
+@pytest.mark.asyncio
+async def test_observer_callbacks_fire() -> None:
+    backend = _ScriptedBackend(
+        [
+            ModelTurnResult(
+                stop_reason="tool_use",
+                text="",
+                tool_calls=[ToolCall(id="tc1", name="snap", input={"x": 1})],
+            ),
+            ModelTurnResult(stop_reason="end_turn", text="done"),
+        ]
+    )
+    registry = ToolRegistry()
+    registry.register(_ImageTool())
+    runtime = AgentRuntime(backend=backend, tools=registry)
+    actions: list[tuple[str, dict]] = []
+    images: list[str] = []
+    tool_results: list[tuple[str, dict, str]] = []
+    await runtime.run_turn(
+        "go",
+        on_action=lambda name, tool_input: actions.append((name, tool_input)),
+        on_image=images.append,
+        on_tool_result=lambda name, tool_input, text: tool_results.append((name, tool_input, text)),
+    )
+    assert actions == [("snap", {"x": 1})]
+    assert images == ["IMGB64"]
+    assert tool_results == [("snap", {"x": 1}, "a photo")]
+
+
+@pytest.mark.asyncio
+async def test_on_tool_result_fires_on_tool_error() -> None:
+    backend = _ScriptedBackend(
+        [
+            ModelTurnResult(
+                stop_reason="tool_use",
+                text="",
+                tool_calls=[ToolCall(id="tc1", name="boom", input={})],
+            ),
+            ModelTurnResult(stop_reason="end_turn", text="done"),
+        ]
+    )
+    registry = ToolRegistry()
+    registry.register(_ExplodingTool())
+    runtime = AgentRuntime(backend=backend, tools=registry)
+    tool_results: list[tuple[str, dict, str]] = []
+    await runtime.run_turn(
+        "go",
+        on_tool_result=lambda name, tool_input, text: tool_results.append((name, tool_input, text)),
+    )
+    assert len(tool_results) == 1
+    assert tool_results[0][0] == "boom"
+    assert "Tool error" in tool_results[0][2]
