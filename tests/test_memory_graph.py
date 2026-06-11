@@ -52,3 +52,26 @@ def test_conflicting_semantic_facts_create_revisions(tmp_path: Path) -> None:
     assert revisions[0]["previous_text"] == "Coffee is the favorite"
     assert revisions[0]["new_text"] == "Tea is the favorite"
     mem.close()
+
+
+def test_link_memories_accepts_surfaced_8char_prefixes(tmp_path: Path) -> None:
+    """remember/recall surface ids truncated to 8 chars; linking with those
+    prefixes must create a REAL link (regression: dangling links were silently
+    inserted for unknown ids)."""
+    mem = _memory(tmp_path)
+    first_id, ok1 = mem.save_with_id("青いカメラが届いた", kind="observation")
+    second_id, ok2 = mem.save_with_id("カメラの設定を終えた", kind="observation")
+    assert ok1 and ok2
+
+    assert mem.link_memories(first_id[:8], second_id[:8], link_type="leads_to") is True
+    linked = mem.get_linked_memories(first_id)
+    assert any(item.get("id") == second_id for item in linked)
+    mem.close()
+
+
+def test_link_memories_rejects_unknown_target(tmp_path: Path) -> None:
+    mem = _memory(tmp_path)
+    first_id, _ = mem.save_with_id("孤立した記憶", kind="observation")
+    assert mem.link_memories(first_id, "deadbeef") is False
+    assert mem.get_linked_memories(first_id) == []
+    mem.close()
