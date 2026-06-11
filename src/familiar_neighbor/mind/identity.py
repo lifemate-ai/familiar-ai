@@ -284,6 +284,35 @@ class IdentityCore:
         )
         return self._last_threat
 
+    def implicated_values(self, user_text: str) -> list[IdentityAssertion]:
+        """Value-kind assertions this turn touches, for the background honor-check.
+
+        Recomputed from ``user_text`` (not the stored threat) so it stays
+        correct even though the post-response pipeline runs as a background
+        task that may overlap the next turn's assess(). Boundaries are excluded
+        — they are handled by the deterministic veto, not the soft honor-check.
+        """
+        text = (user_text or "").strip().lower()[:_MAX_MATCH_INPUT_CHARS]
+        if not text:
+            return []
+        out: list[IdentityAssertion] = []
+        for assertion in self.assertions():
+            if assertion.kind == "boundary":
+                continue
+            checker = self._checker_for(assertion)
+            if checker.disabled or not checker.user_side:
+                continue
+            if _matches_any(text, checker.user_side):
+                out.append(assertion)
+        return out
+
+    def nudge_dissonance(self, delta: float) -> None:
+        """Apply a small dissonance change (e.g. a 'strained' honor verdict)."""
+        new = max(0.0, min(1.0, self._dissonance + float(delta)))
+        if abs(new - self._dissonance) > 1e-9:
+            self._dissonance = round(new, 6)
+            self._save_state()
+
     def check_response(
         self,
         *,

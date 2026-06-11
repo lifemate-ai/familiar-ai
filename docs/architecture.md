@@ -117,6 +117,22 @@ JSONL append-only logging with replay support remains available.
   reminder machinery delivers the report even after the companion stepped away
 - `check_delegated_tasks` lists running and recent results
 
+**Identity as load-bearing state** — `mind/identity.py` + `identity_assertions`:
+- Values, boundaries, and self-commitments are typed, persisted assertions;
+  checkers are code (`agreement_with_request` / `forbidden_phrase` /
+  `keyword_pair` / `topic_relevance`), persona patterns are seed/row data
+- `assess()` feeds an `identity_dissonance` affect dimension; the identity
+  coalition goes urgent only when something held is at stake
+- Two-tier veto on the final reply: an in-loop `[IDENTITY]` retry (the model
+  refuses in its own words), then a meta-gate `repair_text` backstop
+- Violations boost the boost-only `identity_coherence` drive → a self-initiated
+  reflection turn → `resolve_reflection()` relieves the dissonance
+- `identity_commit` / `identity_review` tools let the agent self-author values
+  (never non-negotiable, never a hard-veto checker); a background honor-check
+  nudges value conviction with evidence
+- Seeded from `~/.familiar_ai/identity_seed.json` (insert-if-missing); dormant
+  and byte-stable when nothing is held
+
 ### Layer E: Expression → `agent.py` ReAct loop + `tools/tts.py`
 
 **ReAct loop** — Up to 50 iterations per turn:

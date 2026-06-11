@@ -62,6 +62,7 @@ from .tools.commitments import (
     format_commitments_for_context,
 )
 from .tools.delegation import DelegatedTaskRunner, DelegationTool
+from .tools.identity import IdentityTool
 from familiar_neighbor.mind.identity import IdentityCore
 from .tools.memory import MemoryTool, ObservationMemory
 from .tools.tom import ToMTool
@@ -75,6 +76,7 @@ from familiar_capabilities import (
     CodingCapability,
     CommitmentCapability,
     DelegationCapability,
+    IdentityCapability,
     MCPCapability,
     MemoryCapability,
     MobilityCapability,
@@ -572,6 +574,7 @@ class EmbodiedAgent:
         except Exception as exc:  # noqa: BLE001
             logger.warning("IdentityCore init failed (identity layer dormant): %s", exc)
             self._identity = None
+        self._identity_tool = IdentityTool(self._memory)
         self._exploration = ExplorationTracker()
         self._scene: SceneTracker | None = None  # initialized after DB ready in _init_tools
 
@@ -808,6 +811,12 @@ class EmbodiedAgent:
                 desires=desires,
             )
 
+            await self._maybe_update_identity(
+                user_input=user_input,
+                final_text=final_text,
+                is_desire_turn=is_desire_turn,
+            )
+
             # ── Deferred pre-response work (results cached for next turn) ──
             try:
                 tape_backend = self._tape_backend()
@@ -935,6 +944,9 @@ class EmbodiedAgent:
         delegation_tool = getattr(self, "_delegation_tool", None)
         if delegation_tool is not None:
             registry.register(DelegationCapability(delegation_tool))
+        identity_tool = getattr(self, "_identity_tool", None)
+        if identity_tool is not None:
+            registry.register(IdentityCapability(identity_tool))
         if self._mcp:
             provider = MCPCapability(self._mcp)
             registry.register(provider)
@@ -2064,6 +2076,61 @@ class EmbodiedAgent:
                 logger.info("Self-narrative moment captured (%s): %s", reason, text.strip()[:60])
         except Exception as e:
             logger.warning("Could not update self narrative mid-session: %s", e)
+
+    async def _maybe_update_identity(
+        self,
+        *,
+        user_input: str,
+        final_text: str,
+        is_desire_turn: bool,
+    ) -> None:
+        """Background honor-check: did this reply honor the values it touched?
+
+        Boundaries are enforced deterministically in the turn loop; this softer
+        pass only adjusts *value* assertions' conviction with evidence, using
+        one bounded utility call per implicated value. Runs only when a
+        dedicated utility backend exists, off the hot path.
+        """
+        identity = getattr(self, "_identity", None)
+        if identity is None or is_desire_turn or not user_input.strip():
+            return
+        if self._utility_backend is self.backend:
+            return  # no dedicated utility model — skip rather than burn the main one
+        try:
+            values = identity.implicated_values(user_input)
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("Identity implicated_values failed: %s", exc)
+            return
+        for assertion in values[:2]:  # cap utility calls per turn
+            try:
+                verdict = await self._classify_identity_honor(assertion.statement, final_text)
+            except Exception as exc:  # noqa: BLE001
+                logger.debug("Identity honor-check failed: %s", exc)
+                continue
+            if verdict == "honored":
+                await self._memory.adjust_identity_confidence_async(
+                    assertion.assertion_key, 0.02, reason="honored_in_response"
+                )
+                await self._memory.append_identity_evidence_async(
+                    assertion.assertion_key, note="honored in a reply"
+                )
+            elif verdict == "strained":
+                await self._memory.adjust_identity_confidence_async(
+                    assertion.assertion_key, -0.04, reason="strained_in_response"
+                )
+                identity.nudge_dissonance(0.1)
+            # "unclear" / anything else → no change
+
+    async def _classify_identity_honor(self, statement: str, response: str) -> str | None:
+        """One bounded utility call: did the reply honor the value? Strict labels."""
+        raw = await self._utility_backend.complete(
+            "Did this reply honor the speaker's stated value? Reply with exactly "
+            "one word: honored, strained, or unclear.\n\n"
+            f"Value: {statement[:200]}\nReply: {response[:300]}",
+            max_tokens=8,
+        )
+        label = (raw or "").strip().strip('"').strip("'").lower()
+        return label if label in ("honored", "strained", "unclear") else None
 
     async def _maybe_adapt_values(
         self,

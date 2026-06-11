@@ -10,6 +10,7 @@ from .camera import CameraCapability
 from .coding import CodingCapability
 from .commitments import CommitmentCapability
 from .delegation import DelegationCapability
+from .identity import IdentityCapability
 from .mcp import MCPCapability
 from .memory import MemoryCapability
 from .mobility import MobilityCapability
@@ -21,6 +22,7 @@ __all__ = [
     "CodingCapability",
     "CommitmentCapability",
     "DelegationCapability",
+    "IdentityCapability",
     "MCPCapability",
     "MemoryCapability",
     "MobilityCapability",
