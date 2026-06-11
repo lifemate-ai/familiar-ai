@@ -710,6 +710,9 @@ class EmbodiedAgent:
                     )
                     logger.info("Curiosity persisted: %s", curiosity)
 
+            if user_input and not is_desire_turn:
+                await self._capture_companion_thread(user_input, desires)
+
             pred_signal = self._prediction.last_signal()
             concerns = getattr(self, "_concerns", None)
             if concerns is not None:
@@ -2079,6 +2082,64 @@ class EmbodiedAgent:
         except Exception as e:
             logger.warning("Curiosity extraction failed: %s", e)
         return None
+
+    async def extract_companion_thread(self, user_input: str) -> str | None:
+        """Ask the LLM whether the companion mentioned something to follow up on.
+
+        "I have a presentation tomorrow" should resurface later as "how did it
+        go?" — the thread is an event or situation in THEIR life, not a request
+        to the agent (that is the commitments domain).
+        """
+        if not user_input or not user_input.strip():
+            return None
+        try:
+            none_word = _t("curiosity_none")
+            text = await self._utility_backend.complete(
+                "Read the companion's message. If it mentions a concrete upcoming "
+                "event or an ongoing situation in THEIR life that a caring friend "
+                "would ask about later (a presentation tomorrow, feeling unwell, "
+                "a job interview, a trip), describe it in one short sentence in "
+                f"{_t('summary_lang')}. Only their life events qualify — not "
+                "requests to you, not questions, not small talk. If there is "
+                f'nothing to follow up on, reply with just "{none_word}".'
+                f"\n\nMessage: {user_input[:400]}",
+                max_tokens=60,
+            )
+            text = text.strip()
+            if not text or none_word in text or len(text) > 140:
+                return None
+            return text
+        except Exception as e:
+            logger.debug("Companion thread extraction failed: %s", e)
+        return None
+
+    async def _capture_companion_thread(
+        self, user_input: str, desires: DesireSystem | None
+    ) -> None:
+        """Persist a follow-up-worthy thread as unfinished business.
+
+        Source "companion_thread" reuses the existing surfacing + resolve loop:
+        the hook renders open threads with a follow-up instruction and the
+        model resolves them once the outcome is known.  Exact-duplicate
+        summaries are skipped and at most 3 threads stay open at a time.
+        """
+        try:
+            await self._memory.expire_stale_companion_threads_async(max_age_days=14.0)
+            thread = await self.extract_companion_thread(user_input)
+            if not thread:
+                return
+            open_items = await self._memory.list_unfinished_business_async(limit=20)
+            if any(item.get("summary") == thread for item in open_items):
+                return
+            open_threads = [item for item in open_items if item.get("source") == "companion_thread"]
+            if len(open_threads) >= 3:
+                return
+            await self._memory.open_unfinished_business_async(thread, source="companion_thread")
+            if desires is not None:
+                desires.boost("worry_companion", 0.1)
+            logger.info("Companion thread captured: %s", thread)
+        except Exception as exc:  # noqa: BLE001
+            logger.debug("Companion thread capture failed: %s", exc)
 
     def _should_compact(self, threshold_tokens: int = 60_000) -> bool:
         """Return True when context is large enough to warrant compaction.

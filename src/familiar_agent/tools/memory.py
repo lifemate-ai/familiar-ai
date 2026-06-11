@@ -1582,6 +1582,11 @@ class ObservationMemory:
     async def resolve_unfinished_business_async(self, business_id: str) -> bool:
         return await asyncio.to_thread(self.resolve_unfinished_business, business_id)
 
+    async def expire_stale_companion_threads_async(self, *, max_age_days: float = 14.0) -> int:
+        return await asyncio.to_thread(
+            self.expire_stale_companion_threads, max_age_days=max_age_days
+        )
+
     # ── Day summary support ────────────────────────────────────────
 
     def recall_day_summaries(self, n: int = 5) -> list[dict]:
@@ -1960,6 +1965,28 @@ class ObservationMemory:
         except Exception as e:
             logger.warning("resolve_unfinished_business failed: %s", e)
             return False
+
+    def expire_stale_companion_threads(self, *, max_age_days: float = 14.0) -> int:
+        """Expire open companion threads that nobody followed up on.
+
+        A thread like "presentation tomorrow" loses its value after a couple
+        of weeks; expiring keeps the surfaced list fresh without requiring the
+        model to resolve it.  Other sources (deferral, agent) are untouched.
+        """
+        cutoff = (datetime.now() - timedelta(days=max_age_days)).isoformat()
+        try:
+            with self._db_lock:
+                db = self._ensure_connected()
+                updated = db.execute(
+                    "UPDATE unfinished_business SET status = 'expired', resolved_at = ? "
+                    "WHERE source = 'companion_thread' AND status = 'open' AND created_at < ?",
+                    (self._now_iso(), cutoff),
+                )
+                db.commit()
+            return updated.rowcount
+        except Exception as e:
+            logger.warning("expire_stale_companion_threads failed: %s", e)
+            return 0
 
     def recall_divergent(
         self,

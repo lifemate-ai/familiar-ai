@@ -8,6 +8,7 @@ This project adheres to [Semantic Versioning](https://semver.org/).
 ## [Unreleased]
 
 ### Added
+- Companion-thread follow-up: after each conversational turn the agent extracts follow-up-worthy events from the companion's life ("presentation tomorrow") and stores them as unfinished business (source `companion_thread`); open threads surface with a dedicated ask-how-it-went instruction, are capped at 3, dedup against open items, and expire after 14 days
 - Secretary layer: commitments (reminders, appointments, promises, follow-ups) with due times, priorities, and snooze in a dedicated store; add/list/complete/snooze tools; due and upcoming items surface in every turn and a `[Today's agenda]` block opens the day
 - Proactive reminders: due commitments fire self-initiated turns from REPL/TUI/GUI idle loops, independent of `auto_desire` (`FAMILIAR_PROACTIVE_REMINDERS`, default on), quiet-hours aware (urgent-only at night), with escalating backoff capped at 3 reminders
 - Persistent person model: ToM inferences accumulate per person (`person_inferences`) and surface as an accumulated `[Person model]` prompt block with a 7-day staleness cutoff
