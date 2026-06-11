@@ -974,3 +974,151 @@ async def test_deferral_dedup_sees_beyond_surfaced_top3():
             p.stop()
 
     open_mock.assert_not_awaited()
+
+
+# ---------------------------------------------------------------------------
+# Tests: companion-thread surfacing ("presentation tomorrow" -> follow up later)
+# ---------------------------------------------------------------------------
+
+
+def _system_text(agent) -> str:
+    system = agent.backend.stream_turn.await_args.kwargs.get("system")
+    if system is None:
+        system = agent.backend.stream_turn.await_args.args[0]
+    return "\n".join(system) if isinstance(system, tuple) else str(system)
+
+
+@pytest.mark.asyncio
+async def test_companion_threads_render_in_their_own_block():
+    """Threads get a follow-up instruction distinct from plain unfinished
+    business — otherwise the model resolves "presentation tomorrow" right
+    after wishing good luck, killing the next-day follow-up."""
+    agent = _make_agent()
+    agent.backend.stream_turn = AsyncMock(return_value=(_turn("end_turn", text="ん"), "ん"))
+    items = [
+        {"id": "biz-1234567", "summary": "deferred topic: 旅行の話", "source": "deferral"},
+        {"id": "thr-1234567", "summary": "presentation tomorrow", "source": "companion_thread"},
+    ]
+    agent._memory.list_unfinished_business_async = AsyncMock(return_value=items)
+    agent._memory.open_unfinished_business_async = AsyncMock(return_value=None)
+
+    ps = _patch_heavy()
+    for p in ps:
+        p.start()
+    try:
+        await agent.run("今日は新しいカメラの設定をいじっててんけど、なかなか難しいわ")
+    finally:
+        for p in ps:
+            p.stop()
+
+    joined = _system_text(agent)
+    assert "[Companion's life threads" in joined
+    assert "presentation tomorrow" in joined
+    assert "[Open unfinished business" in joined
+    assert "旅行の話" in joined
+    # The thread must NOT sit under the resolve-once-addressed header
+    business_block = joined.split("[Companion's life threads")[0]
+    assert "presentation tomorrow" not in business_block.split("[Open unfinished business")[-1]
+
+
+@pytest.mark.asyncio
+async def test_all_three_stored_threads_render():
+    """Render cap must match the storage cap (3): the model can only resolve
+    what it sees, so a stored-but-hidden thread could only leave via expiry."""
+    agent = _make_agent()
+    agent.backend.stream_turn = AsyncMock(return_value=(_turn("end_turn", text="ん"), "ん"))
+    items = [
+        {"id": f"thr-{i}", "summary": f"thread number {i}", "source": "companion_thread"}
+        for i in range(3)
+    ]
+    agent._memory.list_unfinished_business_async = AsyncMock(return_value=items)
+    agent._memory.open_unfinished_business_async = AsyncMock(return_value=None)
+
+    ps = _patch_heavy()
+    for p in ps:
+        p.start()
+    try:
+        await agent.run("今日は新しいカメラの設定をいじっててんけど、なかなか難しいわ")
+    finally:
+        for p in ps:
+            p.stop()
+
+    joined = _system_text(agent)
+    for i in range(3):
+        assert f"thread number {i}" in joined
+
+
+@pytest.mark.asyncio
+async def test_no_thread_block_when_no_threads():
+    agent = _make_agent()
+    agent.backend.stream_turn = AsyncMock(return_value=(_turn("end_turn", text="ん"), "ん"))
+    items = [{"id": "biz-1", "summary": "deferred topic: 旅行の話", "source": "deferral"}]
+    agent._memory.list_unfinished_business_async = AsyncMock(return_value=items)
+    agent._memory.open_unfinished_business_async = AsyncMock(return_value=None)
+
+    ps = _patch_heavy()
+    for p in ps:
+        p.start()
+    try:
+        await agent.run("今日は新しいカメラの設定をいじっててんけど、なかなか難しいわ")
+    finally:
+        for p in ps:
+            p.stop()
+
+    assert "[Companion's life threads" not in _system_text(agent)
+
+
+@pytest.mark.asyncio
+async def test_pipeline_captures_companion_thread_on_conversational_turn():
+    from familiar_agent.agent import EmbodiedAgent
+
+    agent = _make_agent()
+    agent._concerns = MagicMock()
+    agent._infer_emotion = AsyncMock(return_value="neutral")
+    agent._summarize_exchange = AsyncMock(return_value="summary")
+    agent._update_self_model = AsyncMock()
+    agent._maybe_update_self_narrative = AsyncMock()
+    agent._maybe_adapt_values = AsyncMock()
+    agent._capture_companion_thread = AsyncMock()
+
+    await EmbodiedAgent._run_post_response_pipeline(
+        agent,
+        user_input="明日大事なプレゼンあるねん",
+        final_text="うまくいくとええな。",
+        camera_used=False,
+        observation_action_name=None,
+        observation_action_input=None,
+        companion_mood="engaged",
+        is_desire_turn=False,
+        desires=None,
+    )
+
+    agent._capture_companion_thread.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_pipeline_skips_thread_capture_on_desire_turn():
+    from familiar_agent.agent import EmbodiedAgent
+
+    agent = _make_agent()
+    agent._concerns = MagicMock()
+    agent._infer_emotion = AsyncMock(return_value="neutral")
+    agent._summarize_exchange = AsyncMock(return_value="summary")
+    agent._update_self_model = AsyncMock()
+    agent._maybe_update_self_narrative = AsyncMock()
+    agent._maybe_adapt_values = AsyncMock()
+    agent._capture_companion_thread = AsyncMock()
+
+    await EmbodiedAgent._run_post_response_pipeline(
+        agent,
+        user_input="",
+        final_text="窓の外、晴れてるなあ。",
+        camera_used=False,
+        observation_action_name=None,
+        observation_action_input=None,
+        companion_mood="absent",
+        is_desire_turn=True,
+        desires=None,
+    )
+
+    agent._capture_companion_thread.assert_not_awaited()

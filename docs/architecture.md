@@ -109,6 +109,14 @@ JSONL append-only logging with replay support remains available.
 - Quiet hours pass urgent-only; escalating backoff goes quiet after 3 reminders
 - Passive surface every turn + `[Today's agenda]` on the first turn of the day
 
+**Delegated background tasks** — `tools/delegation.py`:
+- `delegate_task` spawns an independent non-embodied task-mode `AgentRuntime`
+  (same construction as `familiar task`, minus MCP) in a background asyncio task
+- Conversation continues unblocked; at most 2 delegated tasks run at once
+- Completion/failure creates a *due* follow-up commitment, so the proactive
+  reminder machinery delivers the report even after the companion stepped away
+- `check_delegated_tasks` lists running and recent results
+
 ### Layer E: Expression → `agent.py` ReAct loop + `tools/tts.py`
 
 **ReAct loop** — Up to 50 iterations per turn:

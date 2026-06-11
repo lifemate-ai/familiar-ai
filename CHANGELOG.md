@@ -57,6 +57,7 @@ This project adheres to [Semantic Versioning](https://semver.org/).
 - Embodied tool routing now goes through the generic ToolRegistry while preserving existing camera, voice, memory, coding, and MCP behavior
 
 ### Fixed
+- Commitment store no longer pins its SQLite connection to the creating thread: in the GUI the agent (and store) are built inside `asyncio.to_thread`, so every commitment write from the event-loop thread (add/complete/snooze tools, reminder bookkeeping, delegated-task follow-ups) raised `ProgrammingError` and was silently swallowed
 - Kansai past-tense "〜やった" (e.g. 「散々やった」) no longer classifies as delight; only exclamatory forms (やったー/やった！/やったぜ) celebrate
 - `scripts/new_migration.sh` now accepts Windows-style `--dir` paths in Git Bash so cross-platform CI migration tests pass on `windows-latest`
 - The app no longer exits before opening setup when `API_KEY` is missing; GUI users are routed into first-run setup and non-GUI users get a clear fallback path

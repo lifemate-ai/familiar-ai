@@ -254,6 +254,8 @@ class EmbodiedAgentHook(RuntimeHookBase):
         interoception_signal, interoception_pressure = agent._collect_interoception()
         prediction_signal = agent._prediction.last_signal()
         unfinished_business: list[dict] = []
+        companion_threads: list[dict] = []
+        other_business: list[dict] = []
         if not candidate_brief_turn:
             list_unfinished_business = getattr(
                 agent._memory, "list_unfinished_business_async", None
@@ -265,7 +267,20 @@ class EmbodiedAgentHook(RuntimeHookBase):
                 limit=20,
                 fallback=[],
             )
-            unfinished_business = unfinished_open[:3]
+            # Companion threads ("presentation tomorrow") need a follow-up
+            # instruction, not the resolve-once-addressed one — render them
+            # as a separate block so the model doesn't resolve them right
+            # after wishing good luck.
+            # Render cap matches the storage cap (3) — the model can only
+            # resolve what it sees, so a stored-but-hidden thread could only
+            # ever leave via expiry.
+            companion_threads = [
+                item for item in unfinished_open if item.get("source") == "companion_thread"
+            ][:3]
+            other_business = [
+                item for item in unfinished_open if item.get("source") != "companion_thread"
+            ][:3]
+            unfinished_business = other_business + companion_threads
             # ── Deferred-topic capture ──
             # "後で話すわ" must not be lost: record it as unfinished business so
             # it stays surfaced until the model resolves it.
@@ -478,14 +493,26 @@ class EmbodiedAgentHook(RuntimeHookBase):
                     + "[Continuation]\n"
                     + heartbeat_ctx
                 )
-            if unfinished_business:
+            if other_business:
                 continuity_ctx = (
                     continuity_ctx
                     + ("\n\n" if continuity_ctx else "")
                     + "[Open unfinished business — resolve_unfinished_business(id) once addressed]\n"
                     + "\n".join(
                         f"- [{str(item.get('id', ''))[:8]}] {item['summary'][:160]}"
-                        for item in unfinished_business[:3]
+                        for item in other_business
+                    )
+                )
+            if companion_threads:
+                continuity_ctx = (
+                    continuity_ctx
+                    + ("\n\n" if continuity_ctx else "")
+                    + "[Companion's life threads — they mentioned these; when enough time "
+                    "has passed, ask how it went. Call resolve_unfinished_business(id) "
+                    "only once you learn the outcome]\n"
+                    + "\n".join(
+                        f"- [{str(item.get('id', ''))[:8]}] {item['summary'][:160]}"
+                        for item in companion_threads
                     )
                 )
             # First turn already carries [Today's agenda] in morning_ctx; skip the

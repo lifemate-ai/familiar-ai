@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import json
 import sqlite3
+import threading
 import time
 import uuid
 from pathlib import Path
@@ -34,8 +35,14 @@ class SQLiteCommitmentStore:
     """Persist commitments in a dedicated SQLite database."""
 
     def __init__(self, db_path: str | Path) -> None:
-        self._conn = sqlite3.connect(str(db_path))
+        # The GUI constructs the owning agent inside asyncio.to_thread while
+        # tool calls and delegated-task follow-ups write from the event-loop
+        # thread — so the connection must not be pinned to its creating
+        # thread. All access is serialized through self._lock instead.
+        self._conn = sqlite3.connect(str(db_path), check_same_thread=False)
         self._conn.row_factory = sqlite3.Row
+        self._conn.execute("PRAGMA busy_timeout = 5000")
+        self._lock = threading.Lock()
         self._init_schema()
 
     def _init_schema(self) -> None:
@@ -111,6 +118,10 @@ class SQLiteCommitmentStore:
         return commitment
 
     def save(self, commitment: Commitment) -> None:
+        with self._lock:
+            self._save_locked(commitment)
+
+    def _save_locked(self, commitment: Commitment) -> None:
         self._conn.execute(
             """
             INSERT OR REPLACE INTO runtime_commitments (
@@ -175,31 +186,34 @@ class SQLiteCommitmentStore:
 
     def mark_reminded(self, commitment_ids: list[str], *, at: float) -> None:
         """Record that a proactive reminder fired for these commitments."""
-        for commitment_id in commitment_ids:
-            self._conn.execute(
-                """
-                UPDATE runtime_commitments
-                SET last_reminded_at = ?, reminder_count = reminder_count + 1, updated_at = ?
-                WHERE id = ?
-                """,
-                (at, at, commitment_id),
-            )
-        self._conn.commit()
+        with self._lock:
+            for commitment_id in commitment_ids:
+                self._conn.execute(
+                    """
+                    UPDATE runtime_commitments
+                    SET last_reminded_at = ?, reminder_count = reminder_count + 1, updated_at = ?
+                    WHERE id = ?
+                    """,
+                    (at, at, commitment_id),
+                )
+            self._conn.commit()
 
     # ── reads ──
 
     def get(self, commitment_id: str) -> Commitment | None:
-        row = self._conn.execute(
-            "SELECT * FROM runtime_commitments WHERE id = ?",
-            (commitment_id,),
-        ).fetchone()
+        with self._lock:
+            row = self._conn.execute(
+                "SELECT * FROM runtime_commitments WHERE id = ?",
+                (commitment_id,),
+            ).fetchone()
         return self._from_row(row) if row else None
 
     def _active(self) -> list[Commitment]:
-        rows = self._conn.execute(
-            "SELECT * FROM runtime_commitments WHERE status IN (?, ?)",
-            (CommitmentStatus.OPEN.value, CommitmentStatus.SNOOZED.value),
-        ).fetchall()
+        with self._lock:
+            rows = self._conn.execute(
+                "SELECT * FROM runtime_commitments WHERE status IN (?, ?)",
+                (CommitmentStatus.OPEN.value, CommitmentStatus.SNOOZED.value),
+            ).fetchall()
         return [self._from_row(row) for row in rows]
 
     def list_open(self) -> list[Commitment]:
@@ -244,4 +258,5 @@ class SQLiteCommitmentStore:
         )
 
     def close(self) -> None:
-        self._conn.close()
+        with self._lock:
+            self._conn.close()
