@@ -55,6 +55,7 @@ This project adheres to [Semantic Versioning](https://semver.org/).
 - Agent replies no longer wait on post-response memory/self-model updates, and TAPE planning is skipped when no separate utility backend is configured
 - System prompts now surface at most one active concern and one recent misaligned intention trace, while post-response updates carry those states forward without adding hot-path LLM calls
 - Embodied tool routing now goes through the generic ToolRegistry while preserving existing camera, voice, memory, coding, and MCP behavior
+- `EmbodiedAgent.run()` is now a thin wrapper around the substrate `ReActLoop`: TAPE replan, coherence retry, interrupt drain, and say() reminders ride `EmbodiedAgentHook` lifecycle methods; finalisation and the forced final response stay in the wrapper, and the public `run()` signature is unchanged
 
 ### Fixed
 - Commitment store no longer pins its SQLite connection to the creating thread: in the GUI the agent (and store) are built inside `asyncio.to_thread`, so every commitment write from the event-loop thread (add/complete/snooze tools, reminder bookkeeping, delegated-task follow-ups) raised `ProgrammingError` and was silently swallowed

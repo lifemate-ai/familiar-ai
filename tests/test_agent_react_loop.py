@@ -1122,3 +1122,162 @@ async def test_pipeline_skips_thread_capture_on_desire_turn():
     )
 
     agent._capture_companion_thread.assert_not_awaited()
+
+
+# ---------------------------------------------------------------------------
+# Tests: thin-wrap migration — the four inline loop behaviours now ride the
+# substrate ReActLoop via EmbodiedAgentHook lifecycle methods.
+# ---------------------------------------------------------------------------
+
+
+def _user_texts(agent) -> list[str]:
+    return [
+        m["content"]
+        for m in agent.messages
+        if isinstance(m, dict) and m.get("role") == "user" and isinstance(m.get("content"), str)
+    ]
+
+
+@pytest.mark.asyncio
+async def test_say_reminder_injected_after_two_silent_tools():
+    """Two non-say tool iterations without say() must inject the reminder."""
+    agent = _make_agent(with_camera=True)
+    tc1 = ToolCall(id="t1", name="see", input={})
+    tc2 = ToolCall(id="t2", name="look", input={"direction": "left"})
+    agent.backend.stream_turn = AsyncMock(
+        side_effect=[
+            (_turn("tool_use", tool_calls=[tc1]), None),
+            (_turn("tool_use", tool_calls=[tc2]), None),
+            (_turn("end_turn", text="見えたで"), "見えたで"),
+        ]
+    )
+
+    ps = _patch_heavy()
+    for p in ps:
+        p.start()
+    try:
+        result = await agent.run("外どうなってる？")
+    finally:
+        for p in ps:
+            p.stop()
+
+    assert result == "見えたで"
+    reminders = [t for t in _user_texts(agent) if t.startswith("REMINDER: Writing text is silent")]
+    assert reminders
+
+
+@pytest.mark.asyncio
+async def test_interrupt_queue_drained_with_embodied_format():
+    """Queued interrupts surface with the [User interrupted xN] say() directive."""
+    agent = _make_agent()
+    tc = ToolCall(id="t1", name="remember", input={"content": "x"})
+    agent.backend.stream_turn = AsyncMock(
+        side_effect=[
+            (_turn("tool_use", tool_calls=[tc]), None),
+            (_turn("end_turn", text="ん"), "ん"),
+        ]
+    )
+    queue = asyncio.Queue()
+    queue.put_nowait("なあ、聞いてる？")
+
+    ps = _patch_heavy()
+    for p in ps:
+        p.start()
+    try:
+        await agent.run("覚えといて", interrupt_queue=queue)
+    finally:
+        for p in ps:
+            p.stop()
+
+    interrupted = [t for t in _user_texts(agent) if t.startswith("[User interrupted x1]")]
+    assert interrupted
+    assert "なあ、聞いてる？" in interrupted[0]
+    assert "say() now" in interrupted[0]
+
+
+@pytest.mark.asyncio
+async def test_interrupt_not_drained_before_first_model_call():
+    """An input queued before the turn starts must not be folded into iteration 0."""
+    agent = _make_agent()
+    agent.backend.stream_turn = AsyncMock(return_value=(_turn("end_turn", text="ん"), "ん"))
+    queue = asyncio.Queue()
+    queue.put_nowait("これは次のターンの入力")
+
+    ps = _patch_heavy()
+    for p in ps:
+        p.start()
+    try:
+        await agent.run("おーい", interrupt_queue=queue)
+    finally:
+        for p in ps:
+            p.stop()
+
+    assert not [t for t in _user_texts(agent) if t.startswith("[User interrupted")]
+    assert not queue.empty()  # left for the next turn
+
+
+@pytest.mark.asyncio
+async def test_tape_replan_spliced_into_tool_result():
+    """A blocked plan splices [ADAPTIVE REPLAN] into the tool result text."""
+    agent = _make_agent()
+    tc = ToolCall(id="t1", name="remember", input={"content": "x"})
+    agent.backend.stream_turn = AsyncMock(
+        side_effect=[
+            (_turn("tool_use", tool_calls=[tc]), None),
+            (_turn("end_turn", text="ん"), "ん"),
+        ]
+    )
+
+    patches = dict(_HEAVY_PATCHES)
+    patches["familiar_agent.agent.check_plan_blocked"] = AsyncMock(return_value=True)
+    patches["familiar_agent.agent.generate_replan"] = AsyncMock(return_value="try the camera")
+    ps = [patch(t, n) for t, n in patches.items()]
+    for p in ps:
+        p.start()
+    try:
+        # prepare_turn computes plan/tape lazily; force the prep fields instead
+        real_prepare = agent._hook.prepare_turn
+
+        async def _prepare_with_plan(**kwargs):
+            prep = await real_prepare(**kwargs)
+            prep.tape_backend = object()
+            prep.plan_ctx = "PLAN: inspect the room"
+            return prep
+
+        agent._hook.prepare_turn = _prepare_with_plan
+        await agent.run("部屋見といて")
+    finally:
+        for p in ps:
+            p.stop()
+
+    collected = agent.backend.make_tool_results.call_args.args[1]
+    assert "[ADAPTIVE REPLAN] try the camera" in collected[0][0]
+
+
+@pytest.mark.asyncio
+async def test_coherence_retry_reruns_loop_once(monkeypatch):
+    """A coherence violation rejects the reply, injects SELF-CHECK, and retries."""
+    agent = _make_agent()
+    agent.backend.stream_turn = AsyncMock(
+        side_effect=[
+            (_turn("end_turn", text="矛盾した返事"), "矛盾した返事"),
+            (_turn("end_turn", text="直した返事"), "直した返事"),
+        ]
+    )
+    monkeypatch.setenv("FAMILIAR_COHERENCE_CHECK", "1")
+    agent._check_response_coherence = AsyncMock(side_effect=["contradicts earlier turn", None])
+
+    ps = _patch_heavy()
+    for p in ps:
+        p.start()
+    try:
+        result = await agent.run("どう思う？")
+    finally:
+        for p in ps:
+            p.stop()
+
+    assert result == "直した返事"
+    self_checks = [t for t in _user_texts(agent) if t.startswith("[SELF-CHECK]")]
+    assert self_checks
+    assert "contradicts earlier turn" in self_checks[0]
+    assert agent._coherence_retried is False  # reset after a clean finalisation

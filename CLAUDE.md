@@ -93,14 +93,20 @@ prompt is `str | tuple[str, str]`, where the tuple is `(stable, variable)` — t
 Anthropic adapter's `cache_control` depends on this shape. Use `_with_extra_system`
 to append to the variable half.
 
-**Important caveat:** `EmbodiedAgent.run()` in `familiar_agent/agent.py` (~2400 lines)
-still runs its **own** ReAct loop and has not yet been routed through
-`AgentRuntime.run_turn`. `EmbodiedAgentHook` already structurally implements
-`RuntimeHook` but currently drives the agent via `prepare_turn` /
-`commit_after_end_turn`. Routing `EmbodiedAgent.run()` through the substrate is the
-known next step — it is **high-risk** (touches the TAPE replan / coherence retry /
-interrupt drain / say-reminder loop internals and ~23 `test_agent_react_loop.py`
-tests) and should not be attempted without explicit confirmation.
+**Thin-wrap (landed):** `EmbodiedAgent.run()` now drives the substrate
+`ReActLoop` directly. The four historical inline behaviours ride
+`EmbodiedAgentHook` lifecycle methods — coherence retry (`after_model_result` →
+`RetryDecision`), TAPE replan (`after_tool_result` result replacement), say()
+reminders (`mid_turn_user_messages`), and the embodied interrupt line
+(`format_interrupt_message`) — with the `PreparedTurn` carried in
+`ctx.metadata["prep"]`. Two adapters in `agent.py` bridge the seams:
+`_TurnToolAdapter` (per-turn tool defs + `_execute_tool` routing, so MCP
+late-start and the `_tool_timeout_seconds` patch seam stay intact) and
+`_InterruptQueueSource` (armed only after the first model call so pre-turn
+input is not double-included). Finalisation (meta-gate repair, continuation
+status, auto-say, `commit_after_end_turn`) and the forced final response on
+max-iterations remain in `run()`. The `run()` public signature is unchanged
+and must stay that way.
 
 ### Turn flow (conceptual)
 

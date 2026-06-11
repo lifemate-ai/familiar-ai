@@ -7,19 +7,21 @@ snapshot building) and the post-end-turn commit (mental-state bus append,
 post-response pipeline kick) so the ReAct loop body in ``agent.py`` reads
 as a thin model/tool dispatcher around the prepared state.
 
-``EmbodiedAgentHook`` subclasses :class:`RuntimeHookBase`, so it satisfies
-the ``RuntimeHook`` interface (inheriting safe no-op lifecycle methods) while
-still holding a back-reference to the ``EmbodiedAgent`` instance for its
-``prepare_turn`` / ``commit_after_end_turn`` flow.  The substrate now honours
-``mid_turn_inject`` / ``RetryDecision`` / ``InterruptSource`` (wired in
-``ReActLoop``); routing ``EmbodiedAgent.run`` through ``AgentRuntime.run_turn``
-end-to-end remains a later migration.
+``EmbodiedAgentHook`` subclasses :class:`RuntimeHookBase` and is a live
+``RuntimeHook``: ``EmbodiedAgent.run()`` now drives the substrate
+``ReActLoop`` directly, with the four historical inline behaviours carried by
+lifecycle methods here — coherence retry (``after_model_result`` →
+``RetryDecision``), TAPE replan (``after_tool_result`` result replacement),
+say() reminders (``mid_turn_user_messages``), and the embodied interrupt line
+(``format_interrupt_message``). ``prepare_turn`` / ``commit_after_end_turn``
+remain the pre-loop and post-end_turn bookends called by the wrapper.
 """
 
 from __future__ import annotations
 
 import asyncio
 import logging
+import os
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -79,6 +81,9 @@ def _should_auto_tom(
 
 if TYPE_CHECKING:
     from familiar_agent.agent import EmbodiedAgent
+    from familiar_runtime.models import ModelTurnResult, ToolCall
+    from familiar_runtime.runtime import RetryDecision, TurnContext
+    from familiar_runtime.tools.base import ToolExecutionResult
 
 
 logger = logging.getLogger(__name__)
@@ -152,11 +157,10 @@ class EmbodiedAgentHook(RuntimeHookBase):
     a constructor parameter.  The agent itself stays the single owner of
     long-lived state; the hook only encapsulates the per-turn flow.
 
-    Subclassing :class:`RuntimeHookBase` makes it a structural ``RuntimeHook``
-    (inheriting no-op ``before_turn`` / ``build_context`` / ``mid_turn_inject`` /
-    ``after_model_result`` / ``after_tool_result`` / ``after_turn`` defaults);
-    the embodied flow currently drives the loop via ``prepare_turn`` /
-    ``commit_after_end_turn`` rather than those lifecycle hooks.
+    Subclassing :class:`RuntimeHookBase` makes it a structural ``RuntimeHook``;
+    ``after_model_result`` / ``after_tool_result`` / ``mid_turn_user_messages`` /
+    ``format_interrupt_message`` below carry the embodied loop behaviours, and
+    ``prepare_turn`` / ``commit_after_end_turn`` bookend the substrate loop.
     """
 
     def __init__(self, agent: "EmbodiedAgent") -> None:
@@ -630,4 +634,176 @@ class EmbodiedAgentHook(RuntimeHookBase):
                 desires=desires,
             ),
             name="post-response-pipeline",
+        )
+
+    # ── ReActLoop lifecycle (thin-wrap migration) ─────────────────
+    #
+    # These methods carry the four inline behaviours of the historical
+    # EmbodiedAgent.run() loop body. They all read the PreparedTurn stored
+    # in ``ctx.metadata["prep"]`` by the wrapper and no-op when it is absent
+    # (e.g. when the hook ever runs under a foreign runtime).
+
+    @staticmethod
+    def _prep_from(ctx: "TurnContext") -> PreparedTurn | None:
+        prep = ctx.metadata.get("prep")
+        return prep if isinstance(prep, PreparedTurn) else None
+
+    async def after_model_result(
+        self,
+        ctx: "TurnContext",
+        result: "ModelTurnResult",
+    ) -> "ModelTurnResult | RetryDecision | None":
+        """Per-iteration accounting, metacognition, and the coherence gate."""
+        prep = self._prep_from(ctx)
+        if prep is None:
+            return None
+        agent = self._agent
+
+        agent._last_context_tokens = result.input_tokens
+        agent._session_input_tokens += result.input_tokens
+        agent._session_output_tokens += result.output_tokens
+
+        # HOT layer: record this step metacognitively
+        focus = agent._attention_schema.current_focus()
+        if focus is not None:
+            action = result.stop_reason
+            if result.stop_reason == "tool_use" and result.tool_calls:
+                action = result.tool_calls[0].name
+            confidence = min(1.0, result.output_tokens / max(1, agent.config.max_tokens))
+            agent._meta_monitor.record_step(focus, action=action, confidence=confidence)
+
+        if result.stop_reason != "end_turn":
+            return None
+
+        # Coherence gate: ask the utility backend whether the response contains
+        # a logical error. Only fires once per turn to avoid infinite loops.
+        coherence_enabled = os.environ.get("FAMILIAR_COHERENCE_CHECK", "").strip() in (
+            "1",
+            "true",
+            "yes",
+        )
+        if not coherence_enabled or getattr(agent, "_coherence_retried", False):
+            return None
+        violation = await agent._check_response_coherence(result.text or "")
+        if not violation:
+            return None
+        agent._coherence_retried = True
+        prep.say_used = False
+        from familiar_runtime.runtime import RetryDecision
+
+        return RetryDecision(
+            retry=True,
+            inject_user_message=(
+                f"[SELF-CHECK] Your previous response has a problem: "
+                f"{violation}. Please correct it and respond again."
+            ),
+        )
+
+    async def after_tool_result(
+        self,
+        ctx: "TurnContext",
+        call: "ToolCall",
+        result: "ToolExecutionResult",
+    ) -> "ToolExecutionResult | None":
+        """Observation tracking, say/failure streaks, and TAPE replan."""
+        prep = self._prep_from(ctx)
+        if prep is None:
+            return None
+        agent = self._agent
+
+        if call.name == "see":
+            prep.camera_used = True
+            if prep.pending_view_action_name is not None:
+                prep.observation_action_name = prep.pending_view_action_name
+                prep.observation_action_input = dict(prep.pending_view_action_input or {})
+            else:
+                prep.observation_action_name = "see"
+                prep.observation_action_input = dict(call.input)
+            prep.pending_view_action_name = None
+            prep.pending_view_action_input = None
+        elif call.name in {"look", "walk"}:
+            prep.pending_view_action_name = call.name
+            prep.pending_view_action_input = dict(call.input)
+        if call.name == "say":
+            prep.say_used = True
+            prep.non_say_streak = 0
+        else:
+            prep.non_say_streak += 1
+
+        if result.success:
+            agent._last_tool_error = None
+            agent._tool_failure_streak = 0
+        else:
+            # Preserve the historical shape: timeouts store the full message,
+            # exceptions store just the error string.
+            agent._last_tool_error = result.text if result.error == "timeout" else result.error
+            agent._tool_failure_streak += 1
+
+        if prep.tape_backend and prep.plan_ctx:
+            # Late import so test patches on familiar_agent.agent.* keep working.
+            from familiar_agent import agent as agent_module
+
+            if await agent_module.check_plan_blocked(
+                prep.tape_backend, prep.plan_ctx, call.name, call.input, result.text
+            ):
+                logger.info("TAPE: plan blocked after %s, replanning...", call.name)
+                replan = await agent_module.generate_replan(
+                    prep.tape_backend, prep.plan_ctx, call.name, call.input, result.text
+                )
+                if replan:
+                    logger.info("TAPE replan: %s", replan[:80])
+                    from familiar_runtime.tools.base import ToolExecutionResult as _ToolResult
+
+                    return _ToolResult(
+                        text=f"{result.text}\n\n[ADAPTIVE REPLAN] {replan}",
+                        image_b64=result.image_b64,
+                        success=result.success,
+                        error=result.error,
+                    )
+        return None
+
+    async def mid_turn_user_messages(
+        self,
+        ctx: "TurnContext",
+        iteration: int,
+    ) -> list[str]:
+        """say() reminders between iterations, mirroring the historical loop."""
+        prep = self._prep_from(ctx)
+        if prep is None:
+            return []
+        if iteration == 0:
+            # Arm the interrupt source only after the first model call so an
+            # input queued before the turn does not get double-included.
+            source = ctx.metadata.get("interrupt_source")
+            arm = getattr(source, "arm", None)
+            if callable(arm):
+                arm()
+            return []
+        if prep.non_say_streak >= 2 and not prep.say_used:
+            prep.non_say_streak = 0
+            return [
+                "REMINDER: Writing text is silent. You MUST call say() to be heard. "
+                "Call say() NOW. Keep it to 1-2 sentences."
+            ]
+        if prep.say_used and prep.non_say_streak >= 2:
+            prep.non_say_streak = 0
+            return ["You already spoke. Stop exploring and end your turn now."]
+        return []
+
+    async def format_interrupt_message(
+        self,
+        ctx: "TurnContext",
+        interrupts: list[str],
+    ) -> str | None:
+        """Reproduce the embodied interrupt line and reset the say streak."""
+        prep = self._prep_from(ctx)
+        if prep is not None:
+            prep.non_say_streak = 0
+        head = " / ".join(interrupts[:3])
+        if len(interrupts) > 3:
+            head += f" (+{len(interrupts) - 3} more)"
+        logger.debug("Consumed %d queued interrupts", len(interrupts))
+        return (
+            f"[User interrupted x{len(interrupts)}]: {head}. "
+            "Respond to this directly with say() now."
         )

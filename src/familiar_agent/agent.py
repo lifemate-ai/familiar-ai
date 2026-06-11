@@ -11,7 +11,7 @@ import time
 from collections.abc import Callable, Coroutine, Mapping
 from datetime import datetime
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 from ._runtime_helpers import (
     MAX_ITERATIONS,
@@ -49,7 +49,10 @@ from .prediction import PredictionEngine
 from .social_policy import SocialPolicyDecision, SocialPolicyEngine
 from .workspace import GlobalWorkspace
 from .memory_worker import MemoryJobWorker
-from .tape import check_plan_blocked, generate_plan, generate_replan
+
+# check_plan_blocked / generate_replan are referenced via this module's
+# namespace by EmbodiedAgentHook.after_tool_result (and patched here by tests).
+from .tape import check_plan_blocked, generate_plan, generate_replan  # noqa: F401
 from .tools.camera import CameraTool
 from .tools.coding import CodingTool
 from .tools.commitments import (
@@ -80,6 +83,10 @@ from familiar_neighbor.embodied_hook import EmbodiedAgentHook
 from familiar_neighbor.mind.person_model import PersonModelTracker
 from familiar_neighbor.prompts import assemble_neighbor_system_prompt
 from familiar_runtime.commitments import SQLiteCommitmentStore
+from familiar_runtime.models.base import ModelBackend as RuntimeModelBackend
+from familiar_runtime.react_loop import ReActLoop
+from familiar_runtime.runtime import TurnContext
+from familiar_runtime.tools.base import ToolExecutionResult
 from familiar_runtime.tools.registry import ToolRegistry
 
 logger = logging.getLogger(__name__)
@@ -469,6 +476,51 @@ def _react_to_scene_events(events: list[dict], desires: DesireSystem | None) -> 
                 desires.boost("greet_companion", 0.6)
             elif event_type == "disappeared":
                 desires.boost("worry_companion", 0.2)
+
+
+class _TurnToolAdapter:
+    """Present the agent's per-turn tool surface to the substrate ReActLoop.
+
+    ``tool_defs()`` returns the (possibly brief-turn-restricted) defs prepared
+    for this turn, and ``call()`` routes through ``EmbodiedAgent._execute_tool``
+    so MCP late-start and registry rebuild behaviour stay intact. Timeouts are
+    applied by the loop itself, mirroring the historical inline handling.
+    """
+
+    def __init__(self, agent: "EmbodiedAgent", tool_defs: list[dict]) -> None:
+        self._agent = agent
+        self._defs = tool_defs
+
+    def tool_defs(self) -> list[dict]:
+        return self._defs
+
+    async def call(self, name: str, tool_input: dict) -> ToolExecutionResult:
+        logger.info("Tool call: %s(%s)", name, tool_input)
+        text, image = await self._agent._execute_tool(name, tool_input)
+        logger.info("Tool result: %s", text[:100])
+        return ToolExecutionResult(text=text, image_b64=image)
+
+
+class _InterruptQueueSource:
+    """Adapt the UI's asyncio interrupt queue to the runtime InterruptSource.
+
+    Stays disarmed until the hook arms it after the first model call, so an
+    input queued before the turn started is not double-included.
+    """
+
+    def __init__(self, agent: "EmbodiedAgent", queue: Any) -> None:
+        self._agent = agent
+        self._queue = queue
+        self._armed = False
+
+    def arm(self) -> None:
+        self._armed = True
+
+    def empty(self) -> bool:
+        return not self._armed or self._queue.empty()
+
+    async def drain(self) -> list[str]:
+        return self._agent._drain_interrupt_queue(self._queue)
 
 
 class EmbodiedAgent:
@@ -2301,14 +2353,14 @@ class EmbodiedAgent:
         """Run one conversation turn with the agent loop.
 
         inner_voice: agent's own desire/impulse (injected into system prompt, NOT a user message).
+
+        The deterministic pre-loop pipeline lives in
+        ``EmbodiedAgentHook.prepare_turn``; the loop body is the substrate
+        ``ReActLoop`` with the embodied behaviours (TAPE replan, coherence
+        retry, interrupt drain, say reminders) supplied by the hook's
+        lifecycle methods; finalisation (meta-gate repair, continuation
+        status, auto-say, commit) stays here.
         """
-        # The deterministic pre-loop pipeline (late-init, phase callback,
-        # morning reconstruction, memory recall, appraisal, social policy,
-        # desire regulation, plan / workspace context, mental snapshot)
-        # lives in ``EmbodiedAgentHook.prepare_turn``.  See PR3 of the
-        # runtime reorg.  The hook mutates this agent's state in place and
-        # appends the user message to ``self.messages`` before returning;
-        # the loop below stays focused on model/tool dispatch.
         prep = await self._hook.prepare_turn(
             user_input=user_input,
             on_phase=on_phase,
@@ -2317,222 +2369,106 @@ class EmbodiedAgent:
         )
 
         try:
-            for i in range(prep.turn_max_iterations):
-                logger.debug("Agent iteration %d", i + 1)
+            interrupt_source = (
+                _InterruptQueueSource(self, interrupt_queue)
+                if interrupt_queue is not None
+                else None
+            )
+            ctx = TurnContext(user_input=user_input, profile="neighbor")
+            ctx.metadata["prep"] = prep
+            ctx.metadata["interrupt_source"] = interrupt_source
 
-                result, raw_content = await self.backend.stream_turn(
-                    system=self._system_prompt(
-                        prep.feelings_ctx,
-                        prep.morning_ctx,
-                        inner_voice=prep.inner_voice,
-                        plan_ctx=prep.plan_ctx,
-                        companion_mood=prep.companion_mood,
-                        continuity_ctx=prep.continuity_ctx,
-                        workspace_ctx=prep.workspace_ctx,
-                        mental_ctx=prep.mental_ctx,
-                    ),
-                    messages=self.messages,
-                    tools=prep.turn_tools,
-                    max_tokens=prep.turn_max_tokens,
-                    on_text=on_text,
+            # Timeouts go through _tool_timeout_seconds so the historical
+            # per-tool seam (and its test patches) stays authoritative —
+            # resolved for every tool on this turn's surface, not just the
+            # static override table.
+            turn_tool_names = {str(tool_def.get("name", "")) for tool_def in prep.turn_tools} | set(
+                _TOOL_TIMEOUTS
+            )
+            loop = ReActLoop(
+                backend=cast("RuntimeModelBackend", self.backend),
+                tools=cast(ToolRegistry, _TurnToolAdapter(self, prep.turn_tools)),
+                max_iterations=prep.turn_max_iterations,
+                default_tool_timeout=self._tool_timeout_seconds(""),
+                tool_timeouts={
+                    name: self._tool_timeout_seconds(name) for name in turn_tool_names if name
+                },
+                hooks=[self._hook],
+            )
+            run_result = await loop.run(
+                system=self._system_prompt(
+                    prep.feelings_ctx,
+                    prep.morning_ctx,
+                    inner_voice=prep.inner_voice,
+                    plan_ctx=prep.plan_ctx,
+                    companion_mood=prep.companion_mood,
+                    continuity_ctx=prep.continuity_ctx,
+                    workspace_ctx=prep.workspace_ctx,
+                    mental_ctx=prep.mental_ctx,
+                ),
+                messages=self.messages,
+                max_tokens=prep.turn_max_tokens,
+                on_text=on_text,
+                context=ctx,
+                interrupt_source=interrupt_source,
+                on_action=on_action,
+                on_image=on_image,
+                on_tool_result=on_tool_result,
+            )
+
+            if run_result.stop_reason == "end_turn":
+                final_text = run_result.final_text
+
+                gate_method = getattr(self._meta_monitor, "gate_response", None)
+                gate: MetaGateDecision | None = None
+                if callable(gate_method):
+                    maybe_gate = gate_method(
+                        user_text=user_input,
+                        candidate_response=final_text,
+                        social_policy=prep.social_policy,
+                        last_error=self._last_tool_error,
+                    )
+                    if isinstance(maybe_gate, MetaGateDecision):
+                        gate = maybe_gate
+                if gate is not None and gate.needs_repair and gate.repaired_response:
+                    final_text = gate.repaired_response
+
+                continuation_status = "DONE"
+                status_match = re.search(
+                    r"(?:^|\n)(DONE|CONTINUE:[^\n]+|DEFER:[^\n]+)\s*$", final_text
                 )
-                self._last_context_tokens = result.input_tokens
-                self._session_input_tokens += result.input_tokens
-                self._session_output_tokens += result.output_tokens
+                if status_match:
+                    continuation_status = status_match.group(1)
+                    final_text = final_text[: status_match.start(1)].rstrip() or "(no response)"
+                self._heartbeat.apply_status(continuation_status)
 
-                # HOT layer: record this step metacognitively
-                _focus = self._attention_schema.current_focus()
-                if _focus is not None:
-                    _action = result.stop_reason
-                    if result.stop_reason == "tool_use" and result.tool_calls:
-                        _action = result.tool_calls[0].name
-                    _conf = min(1.0, result.output_tokens / max(1, self.config.max_tokens))
-                    self._meta_monitor.record_step(_focus, action=_action, confidence=_conf)
+                self._coherence_retried = False
 
-                if result.stop_reason == "end_turn":
-                    self.messages.append(self.backend.make_assistant_message(result, raw_content))
-                    final_text = result.text or "(no response)"
+                # Auto-say: if the model wrote text but never called say(), speak it aloud.
+                _auto_say_enabled = getattr(self.config, "auto_say", False)
+                if (
+                    _auto_say_enabled
+                    and self._tts
+                    and not prep.say_used
+                    and final_text
+                    and final_text != "(no response)"
+                ):
+                    if on_action:
+                        on_action("say", {"text": final_text})
+                    await self._tts.call("say", {"text": final_text})
 
-                    gate_method = getattr(self._meta_monitor, "gate_response", None)
-                    gate: MetaGateDecision | None = None
-                    if callable(gate_method):
-                        maybe_gate = gate_method(
-                            user_text=user_input,
-                            candidate_response=final_text,
-                            social_policy=prep.social_policy,
-                            last_error=self._last_tool_error,
-                        )
-                        if isinstance(maybe_gate, MetaGateDecision):
-                            gate = maybe_gate
-                    if gate is not None and gate.needs_repair and gate.repaired_response:
-                        final_text = gate.repaired_response
+                await self._hook.commit_after_end_turn(
+                    prep=prep,
+                    user_input=user_input,
+                    final_text=final_text,
+                    is_desire_turn=prep.is_desire_turn,
+                    desires=desires,
+                )
 
-                    continuation_status = "DONE"
-                    status_match = re.search(
-                        r"(?:^|\n)(DONE|CONTINUE:[^\n]+|DEFER:[^\n]+)\s*$", final_text
-                    )
-                    if status_match:
-                        continuation_status = status_match.group(1)
-                        final_text = final_text[: status_match.start(1)].rstrip() or "(no response)"
-                    self._heartbeat.apply_status(continuation_status)
+                return final_text
 
-                    # Coherence gate: ask utility backend whether the response contains
-                    # a logical error. Only fires once to avoid infinite loops.
-                    _coherence_enabled = os.environ.get("FAMILIAR_COHERENCE_CHECK", "").strip() in (
-                        "1",
-                        "true",
-                        "yes",
-                    )
-                    if _coherence_enabled and not getattr(self, "_coherence_retried", False):
-                        violation = await self._check_response_coherence(final_text)
-                        if violation:
-                            self._coherence_retried = True
-                            self.messages.append(
-                                self.backend.make_user_message(
-                                    f"[SELF-CHECK] Your previous response has a problem: "
-                                    f"{violation}. Please correct it and respond again."
-                                )
-                            )
-                            prep.say_used = False
-                            continue
-
-                    self._coherence_retried = False
-
-                    # Auto-say: if the model wrote text but never called say(), speak it aloud.
-                    _auto_say_enabled = getattr(self.config, "auto_say", False)
-                    if (
-                        _auto_say_enabled
-                        and self._tts
-                        and not prep.say_used
-                        and final_text
-                        and final_text != "(no response)"
-                    ):
-                        if on_action:
-                            on_action("say", {"text": final_text})
-                        await self._tts.call("say", {"text": final_text})
-
-                    await self._hook.commit_after_end_turn(
-                        prep=prep,
-                        user_input=user_input,
-                        final_text=final_text,
-                        is_desire_turn=prep.is_desire_turn,
-                        desires=desires,
-                    )
-
-                    return final_text
-
-                if result.stop_reason == "tool_use":
-                    collected: list[tuple[str, str | None]] = []
-                    for tc in result.tool_calls:
-                        if tc.name == "see":
-                            prep.camera_used = True
-                            if prep.pending_view_action_name is not None:
-                                prep.observation_action_name = prep.pending_view_action_name
-                                prep.observation_action_input = dict(
-                                    prep.pending_view_action_input or {}
-                                )
-                            else:
-                                prep.observation_action_name = "see"
-                                prep.observation_action_input = dict(tc.input)
-                            prep.pending_view_action_name = None
-                            prep.pending_view_action_input = None
-                        elif tc.name in {"look", "walk"}:
-                            prep.pending_view_action_name = tc.name
-                            prep.pending_view_action_input = dict(tc.input)
-                        if tc.name == "say":
-                            prep.say_used = True
-                            prep.non_say_streak = 0
-                        else:
-                            prep.non_say_streak += 1
-                        logger.info("Tool call: %s(%s)", tc.name, tc.input)
-                        if on_action:
-                            on_action(tc.name, tc.input)
-
-                        timeout_s = self._tool_timeout_seconds(tc.name)
-                        try:
-                            text, image = await asyncio.wait_for(
-                                self._execute_tool(tc.name, tc.input),
-                                timeout=timeout_s,
-                            )
-                            self._last_tool_error = None
-                            self._tool_failure_streak = 0
-                        except asyncio.TimeoutError:
-                            logger.warning("Tool %s timed out after %.1fs", tc.name, timeout_s)
-                            text, image = (
-                                f"Tool timeout: {tc.name} exceeded {timeout_s:.1f}s.",
-                                None,
-                            )
-                            self._last_tool_error = text
-                            self._tool_failure_streak += 1
-                        except Exception as e:
-                            logger.warning("Tool %s failed: %s", tc.name, e)
-                            text, image = f"Tool error: {e}", None
-                            self._last_tool_error = str(e)
-                            self._tool_failure_streak += 1
-
-                        if (
-                            prep.tape_backend
-                            and prep.plan_ctx
-                            and await check_plan_blocked(
-                                prep.tape_backend, prep.plan_ctx, tc.name, tc.input, text
-                            )
-                        ):
-                            logger.info("TAPE: plan blocked after %s, replanning...", tc.name)
-                            replan = await generate_replan(
-                                prep.tape_backend, prep.plan_ctx, tc.name, tc.input, text
-                            )
-                            if replan:
-                                text = f"{text}\n\n[ADAPTIVE REPLAN] {replan}"
-                                logger.info("TAPE replan: %s", replan[:80])
-
-                        logger.info("Tool result: %s", text[:100])
-                        if image and on_image is not None:
-                            on_image(image)
-                        if on_tool_result is not None:
-                            on_tool_result(tc.name, tc.input, text)
-                        collected.append((text, image))
-
-                    self.messages.append(self.backend.make_assistant_message(result, raw_content))
-                    tool_msgs = self.backend.make_tool_results(result.tool_calls, collected)
-                    self.messages.append(tool_msgs)
-
-                    if interrupt_queue is not None and not interrupt_queue.empty():
-                        interrupts = self._drain_interrupt_queue(interrupt_queue)
-                        if interrupts:
-                            head = " / ".join(interrupts[:3])
-                            if len(interrupts) > 3:
-                                head += f" (+{len(interrupts) - 3} more)"
-                            logger.debug("Consumed %d queued interrupts", len(interrupts))
-                            self.messages.append(
-                                self.backend.make_user_message(
-                                    f"[User interrupted x{len(interrupts)}]: {head}. "
-                                    "Respond to this directly with say() now."
-                                )
-                            )
-                            prep.non_say_streak = 0
-
-                    elif prep.non_say_streak >= 2 and not prep.say_used:
-                        self.messages.append(
-                            self.backend.make_user_message(
-                                "REMINDER: Writing text is silent. You MUST call say() to be heard. "
-                                "Call say() NOW. Keep it to 1-2 sentences."
-                            )
-                        )
-                        prep.non_say_streak = 0
-
-                    elif prep.say_used and prep.non_say_streak >= 2:
-                        self.messages.append(
-                            self.backend.make_user_message(
-                                "You already spoke. Stop exploring and end your turn now."
-                            )
-                        )
-                        prep.non_say_streak = 0
-
-                    continue
-
-                logger.warning("Unexpected stop_reason: %s", result.stop_reason)
-                break
-
+            # max_iterations (or an unexpected stop reason): force a final,
+            # tool-free response so the turn always ends with words.
             logger.warning(
                 "Reached max iterations (%d). Forcing final response.",
                 prep.turn_max_iterations,
