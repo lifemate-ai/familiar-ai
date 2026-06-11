@@ -8,6 +8,7 @@ import math
 import os
 import re
 import time
+from collections import deque
 from collections.abc import Callable, Coroutine, Mapping
 from datetime import datetime
 from pathlib import Path
@@ -50,6 +51,13 @@ from .prediction import PredictionEngine
 from .social_policy import SocialPolicyDecision, SocialPolicyEngine
 from .workspace import GlobalWorkspace
 from .memory_worker import MemoryJobWorker
+from .inner_loop import (
+    CompeteResult,
+    InnerLoop,
+    InnerLoopConfig,
+    InnerThought,
+    TrainOfThought,
+)
 
 # check_plan_blocked / generate_replan are referenced via this module's
 # namespace by EmbodiedAgentHook.after_tool_result (and patched here by tests).
@@ -575,6 +583,16 @@ class EmbodiedAgent:
             logger.warning("IdentityCore init failed (identity layer dormant): %s", exc)
             self._identity = None
         self._identity_tool = IdentityTool(self._memory)
+        # Phase 2 inner loop (off by default). Constructed always so close() can
+        # stop it unconditionally; the tick is a no-op stub until PR2 wires the
+        # real cycle, and it is never started unless config.inner_loop is set.
+        self._turn_active = False
+        self._inner_monologue: deque[InnerThought] = deque(maxlen=8)
+        self._train_of_thought = TrainOfThought()
+        self._inner_loop = InnerLoop(
+            self._inner_loop_tick,
+            InnerLoopConfig(interval_sec=config.inner_loop_interval),
+        )
         self._exploration = ExplorationTracker()
         self._scene: SceneTracker | None = None  # initialized after DB ready in _init_tools
 
@@ -1447,20 +1465,27 @@ class EmbodiedAgent:
             ),
         )
 
-    async def _gather_workspace_context(
+    async def _inner_loop_tick(self) -> None:
+        """One idle workspace cycle. No-op stub until PR2 wires the real cycle."""
+        return None
+
+    async def _compete_once(
         self,
+        *,
+        cheap: bool = False,
         desires: DesireSystem | None = None,
         extra_coalitions: list | None = None,
-    ) -> str:
-        """Run one Global Workspace competition cycle and return the broadcast context.
+    ) -> CompeteResult:
+        """Gather coalitions and run one ignition competition.
 
-        Gathers coalitions from all available processors in parallel, runs the
-        ignition competition, and returns the winning coalition's context_block
-        plus a compact peripheral-awareness summary of non-winners.
-
-        Returns empty string if nothing reaches ignition threshold.
+        Returns the structured outcome (winner / others / all coalitions) so
+        callers can either render the broadcast string (the turn path) or act
+        on the winner object (the inner loop). When ``cheap=True`` the two
+        embedding-backed sources are skipped — the async memory recall and the
+        DMN mind-wander fallback — leaving only the in-memory sync providers, so
+        a cheap cycle costs zero LLM/embedding calls.
         """
-        # Sync coalitions (wrap in to_thread to avoid blocking)
+        # Sync coalitions (wrap in to_thread to avoid blocking) — all in-memory.
         sync_tasks = [
             asyncio.to_thread(self._exploration.as_coalition),
             asyncio.to_thread(self._self_narrative.as_coalition),
@@ -1477,10 +1502,8 @@ class EmbodiedAgent:
         if identity is not None:
             sync_tasks.append(asyncio.to_thread(identity.as_coalition))
 
-        # Async coalitions
-        async_tasks = [
-            self._memory.as_coalition_async(),
-        ]
+        # Async coalitions (embedding-backed) — skipped on the cheap cycle.
+        async_tasks = [] if cheap else [self._memory.as_coalition_async()]
 
         results = await asyncio.gather(*sync_tasks, *async_tasks, return_exceptions=True)
 
@@ -1497,23 +1520,42 @@ class EmbodiedAgent:
                 coalitions.append(coalition)
 
         if not coalitions:
-            return ""
+            return CompeteResult(winner=None, others=[], coalitions=[])
 
         winner = self._workspace.compete(coalitions)
-        if winner is None:
+        if winner is None and not cheap:
             logger.debug("GlobalWorkspace: nothing reached ignition threshold — activating DMN")
-            # Default Mode Network: mind-wander when workspace is idle
+            # Default Mode Network: mind-wander when workspace is idle.
             dmn_coalition = await self._dmn.wander()
-            if dmn_coalition is None:
-                return ""
-            winner = dmn_coalition
-            coalitions.append(dmn_coalition)
+            if dmn_coalition is not None:
+                winner = dmn_coalition
+                coalitions.append(dmn_coalition)
 
         others = [c for c in coalitions if c is not winner]
-        # Update attention schema with this turn's winner (AST)
-        self._attention_schema.update_focus(winner)
-        await self._workspace.notify_listeners(winner)
-        return self._workspace.broadcast(winner, others)
+        return CompeteResult(winner=winner, others=others, coalitions=coalitions)
+
+    async def _gather_workspace_context(
+        self,
+        desires: DesireSystem | None = None,
+        extra_coalitions: list | None = None,
+    ) -> str:
+        """Run one Global Workspace competition cycle and return the broadcast context.
+
+        Gathers coalitions from all available processors in parallel, runs the
+        ignition competition, and returns the winning coalition's context_block
+        plus a compact peripheral-awareness summary of non-winners.
+
+        Returns empty string if nothing reaches ignition threshold.
+        """
+        result = await self._compete_once(
+            cheap=False, desires=desires, extra_coalitions=extra_coalitions
+        )
+        if result.winner is None:
+            return ""
+        # Update attention schema with this turn's winner (AST).
+        self._attention_schema.update_focus(result.winner)
+        await self._workspace.notify_listeners(result.winner)
+        return self._workspace.broadcast(result.winner, result.others)
 
     @staticmethod
     def _select_context_blocks(
@@ -2393,6 +2435,12 @@ class EmbodiedAgent:
         if memory_worker:
             try:
                 await asyncio.wait_for(memory_worker.stop(), timeout=1.5)
+            except (asyncio.TimeoutError, Exception):
+                pass
+        inner_loop = getattr(self, "_inner_loop", None)
+        if inner_loop is not None:
+            try:
+                await asyncio.wait_for(inner_loop.stop(), timeout=1.5)
             except (asyncio.TimeoutError, Exception):
                 pass
         if self._mcp:
