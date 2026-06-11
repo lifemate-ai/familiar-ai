@@ -80,6 +80,55 @@ async def test_commit_cannot_create_non_negotiable_or_checker(store):
 
 
 @pytest.mark.asyncio
+async def test_commit_key_collision_cannot_escalate_or_defang_seed(store):
+    """A non-seed upsert landing on an existing key must not touch the
+    enforcement-critical fields — no escalation, no silent checker disable."""
+    # Seed a value carrying a checker, then have the agent commit a statement
+    # whose slug collides with it.
+    store.upsert_identity_assertion(
+        assertion_key="value:i_value_honesty",
+        kind="value",
+        statement="I value honesty.",
+        non_negotiable=False,
+        confidence=0.8,
+        checker_id="topic_relevance",
+        checker_params={"patterns": ["honest"]},
+        source="seed",
+    )
+    tool = IdentityTool(store)
+    # _slugify("I value honesty.") → "i_value_honesty" → key "value:i_value_honesty"
+    await tool.call("identity_commit", {"statement": "I value honesty."})
+    row = next(
+        r for r in store.list_identity_assertions() if r["assertion_key"] == "value:i_value_honesty"
+    )
+    assert row["checker_id"] == "topic_relevance"  # seed checker preserved
+    assert row["checker_params"] == {"patterns": ["honest"]}
+    assert row["non_negotiable"] is False
+    assert row["confidence"] == pytest.approx(0.8)  # MAX-merge keeps the higher seed value
+
+    # And a seeded non-negotiable boundary can never be escalated/duplicated:
+    store.upsert_identity_assertion(
+        assertion_key="boundary:never_x",
+        kind="boundary",
+        statement="I never do X.",
+        non_negotiable=True,
+        confidence=0.95,
+        checker_id="forbidden_phrase",
+        checker_params={"phrases": ["x"]},
+        source="seed",
+    )
+    # The tool can only ever write value:/self_commitment: keys, never boundary:.
+    await tool.call("identity_commit", {"statement": "I never do X."})
+    keys = {r["assertion_key"] for r in store.list_identity_assertions()}
+    assert "value:i_never_do_x" in keys  # the agent row is separate
+    boundary = next(
+        r for r in store.list_identity_assertions() if r["assertion_key"] == "boundary:never_x"
+    )
+    assert boundary["non_negotiable"] is True
+    assert boundary["checker_id"] == "forbidden_phrase"
+
+
+@pytest.mark.asyncio
 async def test_commit_empty_statement_errors(store):
     tool = IdentityTool(store)
     text, _ = await tool.call("identity_commit", {"statement": "   "})
@@ -236,6 +285,25 @@ async def test_honor_check_strained_lowers_confidence_and_nudges(store):
     )
     assert store.list_identity_assertions()[0]["confidence"] < 0.6
     agent._identity.nudge_dissonance.assert_called_once()
+
+
+@pytest.mark.asyncio
+async def test_honor_check_repeated_strained_clamps_at_zero(store):
+    store.upsert_identity_assertion(
+        assertion_key="value:honesty",
+        kind="value",
+        statement="I value honesty.",
+        confidence=0.1,
+        source="seed",
+    )
+    backend = SimpleNamespace(complete=AsyncMock(return_value="strained"))
+    agent = _honor_agent(store, verdict_backend=backend)
+    agent._identity.implicated_values = MagicMock(
+        return_value=[SimpleNamespace(assertion_key="value:honesty", statement="I value honesty.")]
+    )
+    for _ in range(5):  # 5 × -0.04 would underflow past 0 without the clamp
+        await agent._maybe_update_identity(user_input="x", final_text="y", is_desire_turn=False)
+    assert store.list_identity_assertions()[0]["confidence"] == pytest.approx(0.0)
 
 
 @pytest.mark.asyncio

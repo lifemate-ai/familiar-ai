@@ -2045,6 +2045,14 @@ class ObservationMemory:
 
         Updates never downgrade confidence (MAX-merge, like behavior policies)
         and write a revision row when the statement or confidence changes.
+
+        Enforcement-critical fields (``kind`` / ``non_negotiable`` /
+        ``checker_id`` / ``checker_params``) are only writable on update by a
+        ``source="seed"`` caller. A non-seed upsert (the agent's
+        self-authorship tool) landing on an existing key updates only the
+        statement and confidence, so it can never escalate a row into a hard
+        veto nor silently disable a seeded checker — a prompt-injection guard
+        at the store layer, independent of the tool's own guards.
         """
         now_iso = self._now_iso()
         confidence = max(0.0, min(1.0, float(confidence)))
@@ -2060,24 +2068,35 @@ class ObservationMemory:
                     prev_text = str(existing["statement"])
                     prev_conf = float(existing["confidence"])
                     new_conf = max(prev_conf, confidence)
-                    db.execute(
-                        "UPDATE identity_assertions "
-                        "SET kind = ?, statement = ?, non_negotiable = ?, "
-                        "confidence = MAX(confidence, ?), checker_id = ?, "
-                        "checker_params_json = ?, last_seen_at = ?, updated_at = ? "
-                        "WHERE assertion_key = ?",
-                        (
-                            kind,
-                            statement,
-                            int(non_negotiable),
-                            confidence,
-                            checker_id,
-                            params_json,
-                            now_iso,
-                            now_iso,
-                            assertion_key,
-                        ),
-                    )
+                    if source == "seed":
+                        db.execute(
+                            "UPDATE identity_assertions "
+                            "SET kind = ?, statement = ?, non_negotiable = ?, "
+                            "confidence = MAX(confidence, ?), checker_id = ?, "
+                            "checker_params_json = ?, last_seen_at = ?, updated_at = ? "
+                            "WHERE assertion_key = ?",
+                            (
+                                kind,
+                                statement,
+                                int(non_negotiable),
+                                confidence,
+                                checker_id,
+                                params_json,
+                                now_iso,
+                                now_iso,
+                                assertion_key,
+                            ),
+                        )
+                    else:
+                        # Non-seed: touch only statement + confidence; leave
+                        # kind / non_negotiable / checker_* exactly as seeded.
+                        db.execute(
+                            "UPDATE identity_assertions "
+                            "SET statement = ?, confidence = MAX(confidence, ?), "
+                            "last_seen_at = ?, updated_at = ? "
+                            "WHERE assertion_key = ?",
+                            (statement, confidence, now_iso, now_iso, assertion_key),
+                        )
                     if prev_text != statement or abs(new_conf - prev_conf) > 1e-6:
                         self._insert_revision_locked(
                             db,
