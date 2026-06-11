@@ -157,19 +157,57 @@ Invariants to preserve when touching these loops:
   acts surface the relational memory and soften; explicit advice requests force
   ToM on with gentler delivery. Defaults keep historical decisions byte-stable.
 
+### Identity layer: values, boundaries, and self-commitments
+
+`familiar_neighbor/mind/identity.py`'s `IdentityCore` makes identity
+**load-bearing state**, not prompt text. Assertions (`identity_assertions`
+table, migration 011) carry a `kind` (value / boundary / self_commitment), a
+first-person `statement`, `non_negotiable`, `confidence`, and a `checker_id`.
+
+- **Checkers are code, persona patterns are data.** A fixed library
+  (`agreement_with_request` / `forbidden_phrase` / `keyword_pair` /
+  `topic_relevance`) is keyed by `checker_id`; per-assertion regex patterns
+  live in `checker_params` (seed/row data), never in engine code. Patterns are
+  length-capped and adjacent-quantifier-rejected at compile time (ReDoS guard);
+  a bad pattern disables that row, never crashes.
+- **The loop** (all in `embodied_hook` + `agent.py`, getattr-guarded so a
+  missing/empty `IdentityCore` is byte-stable): `assess()` in `prepare_turn`
+  feeds `AppraisalContext.identity_threat` → `AffectiveState.identity_dissonance`
+  and the `MentalStateSnapshot.identity` reading; `as_coalition()` competes in
+  the workspace (urgent only when something held is at stake). A boundary
+  violation in the **final-reply channel** gets a two-tier veto: an in-loop
+  `[IDENTITY]` `RetryDecision` re-ask (model refuses in its own words), then a
+  `gate_response` `repair_text` backstop. Violations boost the boost-only
+  `identity_coherence` drive → a self-initiated reflection turn →
+  `resolve_reflection()` relieves the dissonance. Like the coherence gate, this
+  guards `end_turn` text, not text already spoken via the `say` tool mid-turn.
+- **Self-authorship**: `identity_commit` / `identity_review` tools let the agent
+  name its own values. Agent-authored rows can **never** be non-negotiable or
+  carry a hard-veto checker — enforced at both the tool and the store layer
+  (`upsert_identity_assertion` only lets a `source="seed"` caller write the
+  enforcement-critical fields on update). A background honor-check
+  (`_maybe_update_identity`) nudges *value* conviction with revision-audited
+  evidence.
+- **Seeding**: persona content loads from `~/.familiar_ai/identity_seed.json`
+  (insert-if-missing by key; `FAMILIAR_AI_IDENTITY_SEED` override;
+  `identity.sample.json` is the shipped template). The generic repo carries no
+  persona strings — identity lives in the seed/config, not the code.
+
 ## Persistence
 
 Primary stores under `~/.familiar_ai/`:
 
 - `observations.db` — observations, embeddings, semantic facts, behavior policies,
   revisions, episodes + membership, memory activation, unfinished business,
-  relationship state, memory graph, person inferences
+  relationship state, memory graph, person inferences, identity assertions
 - `commitments.db` — secretary commitments (self-init schema, outside the
   `migration/` runner)
 - `mental_state.jsonl` — append-only mental-state snapshots
 - `heartbeat_state.json` — continuation / carryover status
 - `desires.json` — drive levels
 - `self_state.json` — latent bodily carryover
+- `identity_state.json` — identity dissonance ledger (decay + reflection relief)
+- `identity_seed.json` — persona identity seed (operator-supplied; insert-if-missing)
 - `relationship.json` — legacy; imported once if present, then SQLite is authoritative
 
 **Every schema change must add a timestamped migration under `migration/`**
