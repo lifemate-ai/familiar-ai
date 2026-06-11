@@ -690,13 +690,21 @@ class SocialPolicyEngine:
         # ADR 0004 conflict arbitration: when the inversion-risk groups
         # co-match, branch order used to pick the winner; a valid hint from
         # the LLM arbitrates instead. Relationship state (a hurt previous
-        # response) still outranks the hint.
+        # response) still outranks the hint, and so do the deterministic
+        # delight guards — the hint arbitrates *order*, never a negation
+        # veto or the valence gate (うれしくない must never celebrate).
         if (
             llm_act_hint in _CONFLICT_HINT_ACTS
             and not previous_response_hurt
             and len(assess_classification(text).conflict_groups) >= 2
         ):
-            return _act(cast(str, llm_act_hint))
+            delight_vetoed = llm_act_hint == "delight_share" and (
+                _NEGATED_POSITIVE_RE.search(text.lower()) is not None
+                or _DELIGHT_VETO_JA_RE.search(text) is not None
+                or affect.valence < -0.1
+            )
+            if not delight_vetoed:
+                return _act(cast(str, llm_act_hint))
 
         if previous_response_hurt or _matches(text, _REPAIR_PATTERNS):
             return _act("repair_attempt")

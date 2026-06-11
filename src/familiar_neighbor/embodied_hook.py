@@ -88,6 +88,9 @@ if TYPE_CHECKING:
     from familiar_runtime.tools.base import ToolExecutionResult
 
 
+logger = logging.getLogger(__name__)
+
+
 # ADR 0004: only substantive turns are worth a fallback classification call.
 _ACT_FALLBACK_MIN_CHARS = 12
 _ACT_FALLBACK_TIMEOUT_S = 2.0
@@ -120,9 +123,6 @@ async def _classify_speech_act_llm(
         return None
     act = raw.strip().strip('"').strip("'").lower()
     return act if act in SPEECH_ACT_VOCABULARY else None
-
-
-logger = logging.getLogger(__name__)
 
 
 @dataclass(slots=True)

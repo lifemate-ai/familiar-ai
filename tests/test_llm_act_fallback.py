@@ -152,6 +152,26 @@ def test_previous_response_hurt_beats_conflict_hint():
     assert hinted.primary_act == "repair_attempt"
 
 
+def test_delight_hint_cannot_override_negation_veto():
+    """The hint arbitrates branch order, never the deterministic guards —
+    a negated positive must not celebrate, whatever the LLM says."""
+    text = "うれしくない、最悪や。ほんま今日はついてへんわ"
+    hinted = _decide(text, hint="delight_share")
+    assert hinted.primary_act != "delight_share"
+
+
+def test_delight_hint_blocked_by_negative_valence():
+    text = "最悪や、最高の誕生日になるはずやったのに"
+    hinted = _decide(text, hint="delight_share", affect=_affect(valence=-0.6))
+    assert hinted.primary_act != "delight_share"
+
+
+def test_correction_is_neither_fallthrough_nor_conflict():
+    a = assess_classification("いや、そうじゃなくて")
+    assert not a.is_pattern_fallthrough
+    assert a.conflict_groups == ()
+
+
 def test_no_hint_is_byte_stable():
     """Default-None hint must leave historical decisions untouched."""
     for text in ("おはよう", "むかつくわ、ほんまに最悪な一日や", "明日どうしたらええと思う？"):

@@ -40,12 +40,17 @@ fallback** via the existing utility backend for exactly two situations:
 1. **Fallthrough** — when no pattern matches and the turn lands in the
    `attuned`/`bid_for_connection` fallback *and* the utterance is substantive
    (length above a threshold, not a desire turn), ask the utility backend to
-   pick the speech act from the fixed 17-act vocabulary (single completion,
-   ~50 output tokens, strict JSON, 2s timeout, fallback to `attuned` on any
-   failure).
+   pick the speech act from the fixed 15-act vocabulary
+   (`SPEECH_ACT_VOCABULARY`; `silence_or_low_presence` and the dynamic
+   trailing default are excluded). Single completion, one bare label,
+   `max_tokens=12`, 2s timeout; any failure or out-of-vocabulary answer
+   leaves the regex verdict untouched.
 2. **Conflict** — when two or more of {delight, venting/grief, repair,
    boundary} pattern groups match the same utterance (the mixed-sentiment /
    inversion-risk zone), let the LLM arbitrate instead of branch order.
+   The hint arbitrates *order only*: a hurt previous response and the
+   deterministic delight guards (negation vetoes, valence gate) still
+   outrank it — うれしくない must never celebrate, whatever the LLM says.
 
 The deterministic layer remains authoritative for everything else, so
 existing tests and latency characteristics are unchanged for the common case.
