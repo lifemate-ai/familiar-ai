@@ -1587,6 +1587,31 @@ class ObservationMemory:
             self.expire_stale_companion_threads, max_age_days=max_age_days
         )
 
+    async def list_identity_assertions_async(self, *, kind: str | None = None) -> list[dict]:
+        return await asyncio.to_thread(self.list_identity_assertions, kind=kind)
+
+    async def adjust_identity_confidence_async(
+        self,
+        assertion_key: str,
+        delta: float,
+        *,
+        reason: str = "identity_update",
+    ) -> float | None:
+        return await asyncio.to_thread(
+            self.adjust_identity_confidence, assertion_key, delta, reason=reason
+        )
+
+    async def append_identity_evidence_async(
+        self,
+        assertion_key: str,
+        *,
+        note: str,
+        memory_id: str | None = None,
+    ) -> bool:
+        return await asyncio.to_thread(
+            self.append_identity_evidence, assertion_key, note=note, memory_id=memory_id
+        )
+
     # ── Day summary support ────────────────────────────────────────
 
     def recall_day_summaries(self, n: int = 5) -> list[dict]:
@@ -1964,6 +1989,212 @@ class ObservationMemory:
             return updated.rowcount == 1
         except Exception as e:
             logger.warning("resolve_unfinished_business failed: %s", e)
+            return False
+
+    # ── Identity assertions (load-bearing values / boundaries / commitments) ──
+
+    def list_identity_assertions(self, *, kind: str | None = None) -> list[dict]:
+        try:
+            with self._db_lock:
+                db = self._ensure_connected()
+                if kind is not None:
+                    rows = db.execute(
+                        "SELECT * FROM identity_assertions WHERE kind = ? "
+                        "ORDER BY non_negotiable DESC, confidence DESC",
+                        (kind,),
+                    ).fetchall()
+                else:
+                    rows = db.execute(
+                        "SELECT * FROM identity_assertions "
+                        "ORDER BY non_negotiable DESC, confidence DESC"
+                    ).fetchall()
+            return [
+                {
+                    "assertion_key": r["assertion_key"],
+                    "kind": r["kind"],
+                    "statement": r["statement"],
+                    "non_negotiable": bool(r["non_negotiable"]),
+                    "confidence": float(r["confidence"]),
+                    "checker_id": r["checker_id"],
+                    "checker_params": json.loads(r["checker_params_json"] or "{}"),
+                    "source": r["source"],
+                    "evidence": json.loads(r["evidence_json"] or "[]"),
+                    "violation_count": int(r["violation_count"]),
+                    "last_violated_at": r["last_violated_at"],
+                    "updated_at": r["updated_at"],
+                }
+                for r in rows
+            ]
+        except Exception as e:
+            logger.warning("list_identity_assertions failed: %s", e)
+            return []
+
+    def upsert_identity_assertion(
+        self,
+        *,
+        assertion_key: str,
+        kind: str,
+        statement: str,
+        non_negotiable: bool = False,
+        confidence: float = 0.6,
+        checker_id: str = "",
+        checker_params: dict[str, Any] | None = None,
+        source: str = "seed",
+    ) -> bool:
+        """Insert or update an assertion. Returns True when a new row was created.
+
+        Updates never downgrade confidence (MAX-merge, like behavior policies)
+        and write a revision row when the statement or confidence changes.
+        """
+        now_iso = self._now_iso()
+        confidence = max(0.0, min(1.0, float(confidence)))
+        params_json = json.dumps(checker_params or {}, ensure_ascii=False, sort_keys=True)
+        try:
+            with self._db_lock:
+                db = self._ensure_connected()
+                existing = db.execute(
+                    "SELECT statement, confidence FROM identity_assertions WHERE assertion_key = ?",
+                    (assertion_key,),
+                ).fetchone()
+                if existing:
+                    prev_text = str(existing["statement"])
+                    prev_conf = float(existing["confidence"])
+                    new_conf = max(prev_conf, confidence)
+                    db.execute(
+                        "UPDATE identity_assertions "
+                        "SET kind = ?, statement = ?, non_negotiable = ?, "
+                        "confidence = MAX(confidence, ?), checker_id = ?, "
+                        "checker_params_json = ?, last_seen_at = ?, updated_at = ? "
+                        "WHERE assertion_key = ?",
+                        (
+                            kind,
+                            statement,
+                            int(non_negotiable),
+                            confidence,
+                            checker_id,
+                            params_json,
+                            now_iso,
+                            now_iso,
+                            assertion_key,
+                        ),
+                    )
+                    if prev_text != statement or abs(new_conf - prev_conf) > 1e-6:
+                        self._insert_revision_locked(
+                            db,
+                            entity_type="identity_assertion",
+                            entity_key=assertion_key,
+                            previous_text=prev_text,
+                            new_text=statement,
+                            previous_confidence=prev_conf,
+                            new_confidence=new_conf,
+                            source_memory_id=None,
+                            reason="identity_upsert",
+                        )
+                    db.commit()
+                    return False
+                db.execute(
+                    "INSERT INTO identity_assertions "
+                    "(id, assertion_key, kind, statement, non_negotiable, confidence, "
+                    "checker_id, checker_params_json, source, evidence_json, "
+                    "violation_count, last_violated_at, last_seen_at, created_at, updated_at) "
+                    "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, '[]', 0, NULL, ?, ?, ?)",
+                    (
+                        str(uuid.uuid4()),
+                        assertion_key,
+                        kind,
+                        statement,
+                        int(non_negotiable),
+                        confidence,
+                        checker_id,
+                        params_json,
+                        source,
+                        now_iso,
+                        now_iso,
+                        now_iso,
+                    ),
+                )
+                db.commit()
+            return True
+        except Exception as e:
+            logger.warning("upsert_identity_assertion failed: %s", e)
+            return False
+
+    def adjust_identity_confidence(
+        self,
+        assertion_key: str,
+        delta: float,
+        *,
+        reason: str = "identity_update",
+    ) -> float | None:
+        try:
+            with self._db_lock:
+                db = self._ensure_connected()
+                new_conf = self._adjust_projection_confidence_locked(
+                    db,
+                    table="identity_assertions",
+                    key_column="assertion_key",
+                    text_column="statement",
+                    entity_type="identity_assertion",
+                    entity_key=assertion_key,
+                    delta=delta,
+                    reason=reason,
+                )
+                db.commit()
+            return new_conf
+        except Exception as e:
+            logger.warning("adjust_identity_confidence failed: %s", e)
+            return None
+
+    def append_identity_evidence(
+        self,
+        assertion_key: str,
+        *,
+        note: str,
+        memory_id: str | None = None,
+        max_items: int = 20,
+    ) -> bool:
+        try:
+            with self._db_lock:
+                db = self._ensure_connected()
+                row = db.execute(
+                    "SELECT evidence_json FROM identity_assertions WHERE assertion_key = ?",
+                    (assertion_key,),
+                ).fetchone()
+                if row is None:
+                    return False
+                evidence = json.loads(row["evidence_json"] or "[]")
+                evidence.append({"note": note[:200], "memory_id": memory_id, "ts": self._now_iso()})
+                evidence = evidence[-max_items:]
+                db.execute(
+                    "UPDATE identity_assertions SET evidence_json = ?, updated_at = ? "
+                    "WHERE assertion_key = ?",
+                    (
+                        json.dumps(evidence, ensure_ascii=False),
+                        self._now_iso(),
+                        assertion_key,
+                    ),
+                )
+                db.commit()
+            return True
+        except Exception as e:
+            logger.warning("append_identity_evidence failed: %s", e)
+            return False
+
+    def record_identity_violation(self, assertion_key: str) -> bool:
+        try:
+            with self._db_lock:
+                db = self._ensure_connected()
+                updated = db.execute(
+                    "UPDATE identity_assertions "
+                    "SET violation_count = violation_count + 1, "
+                    "last_violated_at = ?, updated_at = ? "
+                    "WHERE assertion_key = ?",
+                    (self._now_iso(), self._now_iso(), assertion_key),
+                )
+                db.commit()
+            return updated.rowcount == 1
+        except Exception as e:
+            logger.warning("record_identity_violation failed: %s", e)
             return False
 
     def expire_stale_companion_threads(self, *, max_age_days: float = 14.0) -> int:
