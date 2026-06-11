@@ -30,6 +30,7 @@ from .interoception import (
 )
 from .mental_state import (
     DriveVector,
+    IdentityState,
     MentalStateBus,
     MentalStateSnapshot,
     SocialState,
@@ -61,6 +62,7 @@ from .tools.commitments import (
     format_commitments_for_context,
 )
 from .tools.delegation import DelegatedTaskRunner, DelegationTool
+from familiar_neighbor.mind.identity import IdentityCore
 from .tools.memory import MemoryTool, ObservationMemory
 from .tools.tom import ToMTool
 from .tools.mobility import MobilityTool
@@ -565,6 +567,11 @@ class EmbodiedAgent:
             config=config, commitment_store=self._commitment_store
         )
         self._delegation_tool = DelegationTool(self._delegation_runner)
+        try:
+            self._identity: IdentityCore | None = IdentityCore(self._memory)
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("IdentityCore init failed (identity layer dormant): %s", exc)
+            self._identity = None
         self._exploration = ExplorationTracker()
         self._scene: SceneTracker | None = None  # initialized after DB ready in _init_tools
 
@@ -1421,6 +1428,11 @@ class EmbodiedAgent:
             ),
             working_memory=working_items,
             continuity_note=continuity_note,
+            identity=(
+                identity.state_for_snapshot()
+                if (identity := getattr(self, "_identity", None)) is not None
+                else IdentityState()
+            ),
         )
 
     async def _gather_workspace_context(
@@ -1449,6 +1461,9 @@ class EmbodiedAgent:
             sync_tasks.append(asyncio.to_thread(self._scene.as_coalition))
         if desires is not None:
             sync_tasks.append(asyncio.to_thread(desires.as_coalition))
+        identity = getattr(self, "_identity", None)
+        if identity is not None:
+            sync_tasks.append(asyncio.to_thread(identity.as_coalition))
 
         # Async coalitions
         async_tasks = [
@@ -2419,6 +2434,20 @@ class EmbodiedAgent:
             if run_result.stop_reason == "end_turn":
                 final_text = run_result.final_text
 
+                # Identity backstop (tier 2): the in-loop retry is the primary
+                # defence; compute remaining violations once and let the
+                # meta-gate replace a still-violating reply outright.
+                identity = getattr(self, "_identity", None)
+                identity_violations: list[Any] = []
+                if identity is not None and final_text and final_text != "(no response)":
+                    try:
+                        identity_violations = identity.check_response(
+                            user_text=user_input,
+                            candidate_response=final_text,
+                        )
+                    except Exception as exc:  # noqa: BLE001
+                        logger.warning("Identity response check failed: %s", exc)
+
                 gate_method = getattr(self._meta_monitor, "gate_response", None)
                 gate: MetaGateDecision | None = None
                 if callable(gate_method):
@@ -2427,11 +2456,34 @@ class EmbodiedAgent:
                         candidate_response=final_text,
                         social_policy=prep.social_policy,
                         last_error=self._last_tool_error,
+                        identity_violations=identity_violations or None,
                     )
                     if isinstance(maybe_gate, MetaGateDecision):
                         gate = maybe_gate
                 if gate is not None and gate.needs_repair and gate.repaired_response:
                     final_text = gate.repaired_response
+
+                # A violation — even a repaired one — leaves dissonance behind
+                # and raises the drive to reflect on it later.
+                if identity is not None and identity_violations:
+                    top = identity_violations[0]
+                    try:
+                        identity.record_violation(top, turn_index=self._turn_count)
+                    except Exception as exc:  # noqa: BLE001
+                        logger.warning("Identity violation record failed: %s", exc)
+                    if desires is not None:
+                        desires.boost("identity_coherence", 0.3 + 0.4 * top.severity)
+                    concerns = getattr(self, "_concerns", None)
+                    if concerns is not None:
+                        try:
+                            concerns.activate(
+                                f"Something I hold was strained: {top.statement[:80]}",
+                                category="identity",
+                                intensity=0.4 + 0.5 * top.severity,
+                                turn_index=self._turn_count,
+                            )
+                        except Exception:  # noqa: BLE001
+                            pass
 
                 continuation_status = "DONE"
                 status_match = re.search(

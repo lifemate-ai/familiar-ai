@@ -33,6 +33,7 @@ DEFAULT_DESIRES = {
     "repair": 0.0,
     "play": 0.0,
     "self_protect": 0.0,
+    "identity_coherence": 0.0,  # boost-only: rises when something held is violated
 }
 
 # How fast each desire grows per second of inactivity
@@ -256,6 +257,14 @@ class DesireSystem:
                 ("protect",),
                 30,
             ),
+            "identity_coherence": DriveSpec(
+                "identity_coherence",
+                0.0,
+                "Internal impulse: something clashed with what I hold non-negotiable. "
+                "Sit with it, name what was threatened, and state where I actually stand.",
+                ("reflect", "identity"),
+                120,
+            ),
         }
 
     def _load_external_drive_specs(self) -> dict[str, DriveSpec]:
@@ -441,7 +450,7 @@ class DesireSystem:
                     return 0.0
         bonus = (
             self._unfinished_business_bonus
-            if name in {"repair", "consolidate", "reflect", "self_protect"}
+            if name in {"repair", "consolidate", "reflect", "self_protect", "identity_coherence"}
             else 0.0
         )
         return min(1.5, level * affordance * permission * energy + bonus)
@@ -487,6 +496,7 @@ class DesireSystem:
         urgency_map = {
             "worry_companion": 0.9,
             "repair": 0.9,
+            "identity_coherence": 0.8,
             "self_protect": 0.8,
             "care": 0.7,
             "greet_companion": 0.7,

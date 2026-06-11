@@ -72,6 +72,10 @@ class AffectiveState:
     tenderness: float = 0.0
     frustration: float = 0.0
     loneliness: float = 0.0
+    # Identity dissonance is deliberately kept out of threat/arousal so the
+    # historical affect surface stays byte-stable when no identity is held;
+    # its behavioural effect flows via the identity coalition + drive instead.
+    identity_dissonance: float = 0.0
     summary: str = ""
 
     def sanitized(self) -> "AffectiveState":
@@ -85,6 +89,7 @@ class AffectiveState:
             tenderness=_clamp01(self.tenderness),
             frustration=_clamp01(self.frustration),
             loneliness=_clamp01(self.loneliness),
+            identity_dissonance=_clamp01(self.identity_dissonance),
             summary=self.summary[:240],
         )
 
@@ -104,6 +109,8 @@ class AffectiveState:
             labels.append("pulled-toward-connection")
         if self.uncertainty > 0.6:
             labels.append("uncertain")
+        if self.identity_dissonance > 0.55:
+            labels.append("identity-strained")
         if not labels:
             labels.append("even")
         return ", ".join(dict.fromkeys(labels))
@@ -217,6 +224,25 @@ class WorkingMemoryItem:
 
 
 @dataclass(slots=True)
+class IdentityState:
+    """Per-turn identity reading carried on the snapshot (default = dormant)."""
+
+    dissonance: float = 0.0
+    threat_level: float = 0.0
+    threat_summary: str = ""
+
+    def sanitized(self) -> "IdentityState":
+        return IdentityState(
+            dissonance=_clamp01(self.dissonance),
+            threat_level=_clamp01(self.threat_level),
+            threat_summary=self.threat_summary[:160],
+        )
+
+    def is_default(self) -> bool:
+        return self.dissonance == 0.0 and self.threat_level == 0.0 and not self.threat_summary
+
+
+@dataclass(slots=True)
 class MentalStateSnapshot:
     turn_index: int
     created_at: str
@@ -226,6 +252,7 @@ class MentalStateSnapshot:
     drives: DriveVector
     working_memory: list[WorkingMemoryItem] = field(default_factory=list)
     continuity_note: str = ""
+    identity: IdentityState = field(default_factory=IdentityState)
 
     def sanitized(self) -> "MentalStateSnapshot":
         return MentalStateSnapshot(
@@ -237,10 +264,17 @@ class MentalStateSnapshot:
             drives=self.drives.sanitized(),
             working_memory=[item.sanitized() for item in self.working_memory[:6]],
             continuity_note=self.continuity_note[:240],
+            identity=self.identity.sanitized(),
         )
 
     def to_json_dict(self) -> dict[str, Any]:
         data = asdict(self.sanitized())
+        # Keep mental_state.jsonl byte-identical while the identity layer is
+        # dormant: default readings carry no information, so drop the keys.
+        if data.get("affect", {}).get("identity_dissonance") == 0.0:
+            data["affect"].pop("identity_dissonance", None)
+        if self.identity.sanitized().is_default():
+            data.pop("identity", None)
         return data
 
     @classmethod
@@ -256,6 +290,7 @@ class MentalStateSnapshot:
                 WorkingMemoryItem(**dict(item)) for item in list(data.get("working_memory", []))
             ],
             continuity_note=str(data.get("continuity_note", "")),
+            identity=IdentityState(**dict(data.get("identity", {}))),
         )
 
     def prompt_summary(self) -> str:
@@ -271,6 +306,12 @@ class MentalStateSnapshot:
             parts.append(f"- working-memory: {wm}")
         if self.continuity_note:
             parts.append(f"- continuity: {self.continuity_note[:160]}")
+        identity = self.identity.sanitized()
+        if not identity.is_default():
+            line = f"- identity: dissonance {identity.dissonance:.2f}"
+            if identity.threat_summary:
+                line += f" — at stake: {identity.threat_summary}"
+            parts.append(line)
         return "\n".join(parts)
 
 

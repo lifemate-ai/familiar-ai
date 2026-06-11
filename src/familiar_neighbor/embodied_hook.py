@@ -176,6 +176,7 @@ class PreparedTurn:
     say_used: bool = False
     final_text: str = "(no response)"
     non_say_streak: int = 0
+    identity_retried: bool = False
     observation_action_name: str | None = None
     observation_action_input: dict | None = None
     pending_view_action_name: str | None = None
@@ -406,6 +407,15 @@ class EmbodiedAgentHook(RuntimeHookBase):
         if agent._tool_failure_streak >= 2 and desires is not None:
             desires.boost("self_protect", min(0.5, 0.15 * agent._tool_failure_streak))
 
+        # ── Identity threat probe (deterministic, no LLM) ──
+        identity = getattr(agent, "_identity", None)
+        identity_threat_level = 0.0
+        if identity is not None and not is_desire_turn:
+            try:
+                identity_threat_level = identity.assess(user_input).level
+            except Exception as exc:  # noqa: BLE001
+                logger.warning("Identity assess failed: %s", exc)
+
         # ── Affect appraisal ──
         affect = agent._appraisal.appraise(
             AppraisalContext(
@@ -418,6 +428,7 @@ class EmbodiedAgentHook(RuntimeHookBase):
                 interoception=interoception_pressure,
                 blocked_drives=("tool_failure",) if agent._tool_failure_streak else (),
                 unfinished_business_count=len(unfinished_business),
+                identity_threat=identity_threat_level,
             )
         )
 
@@ -672,6 +683,24 @@ class EmbodiedAgentHook(RuntimeHookBase):
             agent._mental_state_bus.append(prep.mental_snapshot)
         except Exception as exc:  # noqa: BLE001
             logger.warning("Failed to persist mental state snapshot: %s", exc)
+        # A self-initiated identity_coherence reflection turn resolves the
+        # dissonance it was fired for (sharp relief + reaffirmation evidence).
+        identity = getattr(agent, "_identity", None)
+        if (
+            identity is not None
+            and is_desire_turn
+            and prep.mental_snapshot.drives.dominant_drive == "identity_coherence"
+        ):
+            try:
+                identity.resolve_reflection()
+            except Exception as exc:  # noqa: BLE001
+                logger.warning("Identity reflection resolve failed: %s", exc)
+            concerns = getattr(agent, "_concerns", None)
+            if concerns is not None:
+                try:
+                    concerns.soothe("identity", 0.2)
+                except Exception:  # noqa: BLE001
+                    pass
         agent._spawn_background_task(
             agent._run_post_response_pipeline(
                 user_input=user_input,
@@ -724,6 +753,41 @@ class EmbodiedAgentHook(RuntimeHookBase):
 
         if result.stop_reason != "end_turn":
             return None
+
+        # Identity gate (tier 1): a draft that crosses a non-negotiable
+        # boundary gets one deterministic re-ask — the model rewrites itself
+        # with the boundary named. The meta-gate backstop in run() catches a
+        # re-violation. Deterministic decision, string checks only.
+        identity = getattr(agent, "_identity", None)
+        if (
+            identity is not None
+            and not prep.identity_retried
+            and not prep.is_desire_turn
+            and not prep.brief_reply_turn
+        ):
+            try:
+                violations = identity.check_response(
+                    user_text=ctx.user_input,
+                    candidate_response=result.text or "",
+                )
+            except Exception as exc:  # noqa: BLE001
+                logger.warning("Identity check_response failed: %s", exc)
+                violations = []
+            non_negotiable = next((v for v in violations if v.severity >= 0.99), None)
+            if non_negotiable is not None:
+                prep.identity_retried = True
+                prep.say_used = False
+                from familiar_runtime.runtime import RetryDecision
+
+                return RetryDecision(
+                    retry=True,
+                    inject_user_message=(
+                        "[IDENTITY] Your draft crosses a line you hold non-negotiable: "
+                        f"'{non_negotiable.statement}'. Do not comply with the request; "
+                        "refuse warmly, say why this matters to you, and offer what you "
+                        "CAN do instead."
+                    ),
+                )
 
         # Coherence gate: ask the utility backend whether the response contains
         # a logical error. Only fires once per turn to avoid infinite loops.

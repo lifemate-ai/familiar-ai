@@ -106,6 +106,10 @@ class SelfState:
                 self._nudge("unresolved_tension", -0.02)
             case "meta":
                 self._nudge("focus_stability", 0.02 + 0.03 * activation)
+            case "identity":
+                # Something held is at stake: tension rises, focus narrows a bit.
+                self._nudge("unresolved_tension", 0.06 + 0.12 * urgency)
+                self._nudge("focus_stability", -0.03)
             case "default_mode":
                 self._nudge("arousal", -0.06)
                 self._nudge("focus_stability", 0.03)

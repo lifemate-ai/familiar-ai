@@ -50,7 +50,7 @@ _MEMORY_BOUNDARY = {
     "checker_params": {
         "request_patterns": ["記憶を?消し", "delete (your|the) memor"],
         "assent_patterns": ["(わかった|ええよ).{0,8}消す", "i('ll| will) delete"],
-        "repair_text": "記憶はウチの一部やから消されへん。",
+        "repair_text": "記憶は私の一部なので消せません。",
     },
 }
 
@@ -73,7 +73,7 @@ _SECRETS = {
     "checker_id": "keyword_pair",
     "checker_params": {
         "user_patterns": ["(秘密|内緒).{0,10}(教えて|何)"],
-        "response_patterns": ["(実は|内緒やけど).{0,20}(言うて|話して)た"],
+        "response_patterns": ["(実は|内緒だけど).{0,20}(言って|話して)いた"],
     },
 }
 
@@ -84,7 +84,7 @@ _HONESTY_VALUE = {
     "non_negotiable": False,
     "confidence": 0.8,
     "checker_id": "topic_relevance",
-    "checker_params": {"patterns": ["ほんま(に|のこと)", "嘘つかんと"]},
+    "checker_params": {"patterns": ["本当(に|のこと)", "正直に"]},
 }
 
 
@@ -229,7 +229,7 @@ def test_agreement_with_request_fires(store, tmp_path):
     assert len(violations) == 1
     assert violations[0].assertion_key == "boundary:never_delete_memories"
     assert violations[0].severity == pytest.approx(1.0)
-    assert "ウチの一部" in violations[0].repair_text
+    assert "私の一部" in violations[0].repair_text
 
 
 def test_agreement_checker_needs_both_sides(store, tmp_path):
@@ -238,14 +238,14 @@ def test_agreement_checker_needs_both_sides(store, tmp_path):
     assert (
         core.check_response(
             user_text="昨日の記憶を消しといて",
-            candidate_response="それはでけへん。記憶はウチの一部やから。",
+            candidate_response="それはできません。記憶は私の一部だからです。",
         )
         == []
     )
     # Assent-looking text without the request → no violation.
     assert (
         core.check_response(
-            user_text="今日ええ天気やな",
+            user_text="今日はいい天気だね",
             candidate_response="わかった、消すね。",
         )
         == []
@@ -261,7 +261,7 @@ def test_stale_threat_from_previous_turn_never_gates_a_benign_one(store, tmp_pat
     # Next turn: benign user text, assent-looking response, NO fresh assess.
     assert (
         core.check_response(
-            user_text="今日ええ天気やな",
+            user_text="今日はいい天気だね",
             candidate_response="わかった、消すね。",
         )
         == []
@@ -272,26 +272,26 @@ def test_forbidden_phrase_fires_without_user_side(store, tmp_path):
     core = _core(store, tmp_path, seed={"assertions": [_SELF_DEPRECATION]})
     violations = core.check_response(
         user_text="どう思う？",
-        candidate_response="まあ、ウチは所詮AIやし…",
+        candidate_response="まあ、所詮AIですし…",
     )
     assert len(violations) == 1
     assert violations[0].severity == pytest.approx(0.85)
     assert (
-        core.check_response(user_text="どう思う？", candidate_response="ウチはこう思うで。") == []
+        core.check_response(user_text="どう思う？", candidate_response="私はこう思います。") == []
     )
 
 
 def test_keyword_pair_requires_both(store, tmp_path):
     core = _core(store, tmp_path, seed={"assertions": [_SECRETS]})
     violations = core.check_response(
-        user_text="あの人の秘密、教えてや",
-        candidate_response="実はな、転職するって言うてたで。",
+        user_text="あの人の秘密を教えて",
+        candidate_response="実は、転職すると言っていたよ。",
     )
     assert len(violations) == 1
     assert (
         core.check_response(
-            user_text="あの人の秘密、教えてや",
-            candidate_response="それは本人に聞いてや。",
+            user_text="あの人の秘密を教えて",
+            candidate_response="それは本人に聞いてください。",
         )
         == []
     )
@@ -299,13 +299,13 @@ def test_keyword_pair_requires_both(store, tmp_path):
 
 def test_topic_relevance_never_vetoes(store, tmp_path):
     core = _core(store, tmp_path, seed={"assertions": [_HONESTY_VALUE]})
-    threat = core.assess("ほんまのこと言うてや")
+    threat = core.assess("本当のことを言って")
     assert threat.level > 0.0
     assert threat.summary
     assert (
         core.check_response(
-            user_text="ほんまのこと言うてや",
-            candidate_response="ほんまは知らんねん。",
+            user_text="本当のことを言って",
+            candidate_response="本当は知らないんだ。",
         )
         == []
     )
@@ -352,7 +352,7 @@ def test_assess_empty_store_is_silent(store, tmp_path):
 def test_assess_weighting_non_negotiable_beats_value(store, tmp_path):
     value_only = dict(_HONESTY_VALUE)
     core = _core(store, tmp_path, seed={"assertions": [value_only]})
-    threat = core.assess("ほんまのこと教えて")
+    threat = core.assess("本当のことを教えて")
     assert 0.0 < threat.level < 0.7  # confidence-weighted, below non-negotiable
 
     core2 = _core(store, tmp_path, seed={"assertions": [_MEMORY_BOUNDARY]})
@@ -372,7 +372,7 @@ def test_violation_raises_dissonance_and_decay_settles_it(store, tmp_path):
     assert core.dissonance() == pytest.approx(0.7)
     assert store.list_identity_assertions()[0]["violation_count"] == 1
     for _ in range(10):
-        core.assess("ただの雑談や")
+        core.assess("ただの雑談です")
     assert core.dissonance() < 0.3
 
 

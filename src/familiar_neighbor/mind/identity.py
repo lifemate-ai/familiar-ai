@@ -373,6 +373,16 @@ class IdentityCore:
 
     # ── surfacing ──
 
+    def state_for_snapshot(self) -> Any:
+        """Per-turn reading for the mental-state snapshot (IdentityState)."""
+        from .mental_state import IdentityState
+
+        return IdentityState(
+            dissonance=self._dissonance,
+            threat_level=self._last_threat.level,
+            threat_summary=self._last_threat.summary[:160],
+        )
+
     def as_coalition(self) -> "Coalition | None":
         from .workspace import Coalition
 

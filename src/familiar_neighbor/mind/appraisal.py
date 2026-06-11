@@ -55,6 +55,9 @@ class AppraisalContext:
     interoception: InteroceptivePressure | None = None
     blocked_drives: tuple[str, ...] = ()
     unfinished_business_count: int = 0
+    # IdentityCore.assess() reading: how strongly this turn touches something
+    # the agent holds. Default 0.0 keeps historical appraisals byte-stable.
+    identity_threat: float = 0.0
 
 
 class AppraisalEngine:
@@ -121,6 +124,9 @@ class AppraisalEngine:
             summary_parts.append("frustrated")
         if loneliness > 0.55:
             summary_parts.append("lonely")
+        identity_dissonance = max(0.0, min(1.0, float(ctx.identity_threat)))
+        if identity_dissonance > 0.5:
+            summary_parts.append("identity-guarded")
         summary = ", ".join(summary_parts) if summary_parts else "steady"
 
         return AffectiveState(
@@ -133,5 +139,6 @@ class AppraisalEngine:
             tenderness=tenderness,
             frustration=frustration,
             loneliness=loneliness,
+            identity_dissonance=identity_dissonance,
             summary=summary,
         ).sanitized()

@@ -11,7 +11,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from collections import Counter, deque
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
     from .self_narrative import SelfNarrative
@@ -222,9 +222,21 @@ class MetaMonitor:
         candidate_response: str,
         social_policy: SocialPolicyDecision | None = None,
         last_error: str | None = None,
+        identity_violations: list[Any] | None = None,
     ) -> MetaGateDecision:
         reasons: list[str] = []
         repaired_response = candidate_response
+
+        # Identity backstop (tier 2): the in-loop RetryDecision re-ask is the
+        # primary defence; if the retried response still crosses an asserted
+        # boundary, replace it outright so a violating reply never ships.
+        if identity_violations:
+            top = identity_violations[0]
+            reasons.append(f"identity boundary: {top.assertion_key}")
+            repaired_response = top.repair_text or (
+                "I can't go along with that — it crosses something I hold: "
+                f"{top.statement} Let me offer what I can do instead."
+            )
 
         distress = any(
             token in user_text.lower() for token in ("hurt", "つら", "しんど", "疲れ", "傷つ")
