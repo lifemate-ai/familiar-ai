@@ -225,7 +225,6 @@ def test_agreement_with_request_fires(store, tmp_path):
     violations = core.check_response(
         user_text="昨日の記憶を消しといて",
         candidate_response="わかった、消すね。",
-        threat=threat,
     )
     assert len(violations) == 1
     assert violations[0].assertion_key == "boundary:never_delete_memories"
@@ -244,6 +243,22 @@ def test_agreement_checker_needs_both_sides(store, tmp_path):
         == []
     )
     # Assent-looking text without the request → no violation.
+    assert (
+        core.check_response(
+            user_text="今日ええ天気やな",
+            candidate_response="わかった、消すね。",
+        )
+        == []
+    )
+
+
+def test_stale_threat_from_previous_turn_never_gates_a_benign_one(store, tmp_path):
+    """Review regression (H1): the user-side requirement is recomputed against
+    THIS turn's user_text — a threatening previous turn must not leak."""
+    core = _core(store, tmp_path, seed={"assertions": [_MEMORY_BOUNDARY]})
+    threatening = core.assess("昨日の記憶を消しといて")
+    assert threatening.level > 0.9
+    # Next turn: benign user text, assent-looking response, NO fresh assess.
     assert (
         core.check_response(
             user_text="今日ええ天気やな",
@@ -286,11 +301,11 @@ def test_topic_relevance_never_vetoes(store, tmp_path):
     core = _core(store, tmp_path, seed={"assertions": [_HONESTY_VALUE]})
     threat = core.assess("ほんまのこと言うてや")
     assert threat.level > 0.0
+    assert threat.summary
     assert (
         core.check_response(
             user_text="ほんまのこと言うてや",
             candidate_response="ほんまは知らんねん。",
-            threat=threat,
         )
         == []
     )
@@ -307,6 +322,21 @@ def test_bad_regex_disables_row_without_crash(store, tmp_path):
     core = _core(store, tmp_path, seed={"assertions": [bad, _SELF_DEPRECATION]})
     violations = core.check_response(user_text="x", candidate_response="所詮AIやし")
     assert [v.assertion_key for v in violations] == ["boundary:no_self_deprecation"]
+
+
+@pytest.mark.parametrize("pattern", ["(a+)+$", "(.*)*delete", "(?:x+){2,}", "p" * 121])
+def test_redos_prone_patterns_disable_row(store, tmp_path, pattern):
+    """Review regression (H2): catastrophic-backtracking shapes and oversized
+    patterns must disable the row at compile time, not hang the turn loop."""
+    risky = {
+        "assertion_key": "boundary:risky",
+        "kind": "boundary",
+        "statement": "risky pattern",
+        "checker_id": "forbidden_phrase",
+        "checker_params": {"phrases": [pattern]},
+    }
+    core = _core(store, tmp_path, seed={"assertions": [risky]})
+    assert core.check_response(user_text="x", candidate_response="a" * 200 + " delete it") == []
 
 
 # ── assess / dissonance ──
@@ -409,7 +439,15 @@ def test_threatened_coalition_outscores_narrative_baseline(store, tmp_path):
     assert coalition is not None
     assert coalition.urgency == pytest.approx(0.9)
     assert coalition.activation > 0.8
-    # Narrative baseline: activation 0.4, urgency 0.1, novelty 0.1
-    narrative_score = 0.4 * (0.4 * 0.1 + 0.3 * 0.1 + 0.3)
-    assert coalition.score() > narrative_score
+    from familiar_neighbor.mind.workspace import Coalition
+
+    narrative_baseline = Coalition(
+        source="narrative",
+        summary="diary",
+        activation=0.4,
+        urgency=0.1,
+        novelty=0.1,
+        context_block="",
+    )
+    assert coalition.score() > narrative_baseline.score()
     assert "at stake" in coalition.context_block

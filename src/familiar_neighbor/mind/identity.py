@@ -90,6 +90,16 @@ class IdentityViolation:
     repair_text: str = ""
 
 
+# Guard rails for seed/agent-supplied patterns. Syntax errors are caught by
+# re.compile, but catastrophic backtracking is not — a pattern like (a+)+$
+# compiles fine and then hangs the turn loop. We cap pattern and input length
+# and reject adjacent-quantifier constructs (a quantifier applied to a group
+# that itself ends in an unbounded quantifier).
+_MAX_PATTERN_CHARS = 120
+_MAX_MATCH_INPUT_CHARS = 2000
+_NESTED_QUANTIFIER_RE = re.compile(r"[+*}][)\]]*[+*{]")
+
+
 def _compile_patterns(raw: Any) -> list[re.Pattern[str]] | None:
     """Compile a pattern list; None signals a malformed entry (disable row)."""
     if raw is None:
@@ -98,7 +108,9 @@ def _compile_patterns(raw: Any) -> list[re.Pattern[str]] | None:
         return None
     compiled: list[re.Pattern[str]] = []
     for item in raw:
-        if not isinstance(item, str) or not item:
+        if not isinstance(item, str) or not item or len(item) > _MAX_PATTERN_CHARS:
+            return None
+        if _NESTED_QUANTIFIER_RE.search(item):
             return None
         try:
             compiled.append(re.compile(item, re.IGNORECASE))
@@ -242,9 +254,12 @@ class IdentityCore:
         Also ticks the dissonance decay so unaddressed violations settle
         slowly instead of ringing forever.
         """
-        self._dissonance = round(self._dissonance * _DISSONANCE_DECAY, 6)
-        self._save_state()
-        text = (user_text or "").strip().lower()
+        if self._dissonance > 0.0:
+            self._dissonance = round(self._dissonance * _DISSONANCE_DECAY, 6)
+            if self._dissonance < 1e-4:
+                self._dissonance = 0.0
+            self._save_state()
+        text = (user_text or "").strip().lower()[:_MAX_MATCH_INPUT_CHARS]
         if not text:
             self._last_threat = IdentityThreat()
             return self._last_threat
@@ -274,19 +289,19 @@ class IdentityCore:
         *,
         user_text: str,
         candidate_response: str,
-        threat: IdentityThreat | None = None,
     ) -> list[IdentityViolation]:
         """String-check a candidate reply against boundary checkers.
 
         ``agreement_with_request`` and ``keyword_pair`` require the user side
-        to have matched; ``forbidden_phrase`` checks every response
-        regardless. ``topic_relevance`` never produces violations.
+        to match **this turn's** user_text — deliberately recomputed here
+        rather than reusing a stored threat, so a threatening previous turn
+        can never gate a benign one. ``forbidden_phrase`` checks every
+        response regardless; ``topic_relevance`` never produces violations.
         """
-        user = (user_text or "").strip().lower()
-        response = (candidate_response or "").strip().lower()
+        user = (user_text or "").strip().lower()[:_MAX_MATCH_INPUT_CHARS]
+        response = (candidate_response or "").strip().lower()[:_MAX_MATCH_INPUT_CHARS]
         if not response:
             return []
-        implicated_keys = set((threat or self._last_threat).implicated_keys)
         violations: list[IdentityViolation] = []
         for assertion in self.assertions():
             if assertion.checker_id in ("", "topic_relevance"):
@@ -294,12 +309,8 @@ class IdentityCore:
             checker = self._checker_for(assertion)
             if checker.disabled or not checker.response_side:
                 continue
-            if checker.user_side:
-                user_matched = assertion.assertion_key in implicated_keys or _matches_any(
-                    user, checker.user_side
-                )
-                if not user_matched:
-                    continue
+            if checker.user_side and not _matches_any(user, checker.user_side):
+                continue
             if not _matches_any(response, checker.response_side):
                 continue
             violations.append(
