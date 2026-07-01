@@ -17,6 +17,7 @@ from .config import AgentConfig
 from .desires import DesireSystem
 from .realtime_stt_session import create_realtime_stt_session
 from .setup import run_cli_setup_wizard
+from .wake import WakeListener, wait_input_or_wake
 from ._i18n import BANNER, _t
 from ._ui_helpers import (
     DESIRE_COOLDOWN,
@@ -91,6 +92,13 @@ async def repl(agent: EmbodiedAgent, desires: DesireSystem, debug: bool = False)
     if callable(start_mcp_early):
         start_mcp_early()
 
+    # familiard wake events accelerate the idle poll when the daemon runs;
+    # disabled (the default) this changes nothing about the wait below.
+    wake_listener = WakeListener(
+        getattr(agent.config, "daemon_socket", "") or None,
+        enabled=getattr(agent.config, "daemon", False) is True,
+    )
+
     # Persistent input queue — stdin reader runs as a background task
     # so user input is captured even while the agent is busy.
     input_queue: asyncio.Queue[str | None] = asyncio.Queue()
@@ -148,15 +156,12 @@ async def repl(agent: EmbodiedAgent, desires: DesireSystem, debug: bool = False)
                     )
                 continue
 
-            # No pending input — show prompt and wait briefly
+            # No pending input — show prompt and wait briefly. A familiard
+            # wake short-circuits the wait; the idle gates below re-check
+            # everything, so a wake is never more than an early poll.
             print("\n> ", end="", flush=True)
-            queued_input: str | None
-            try:
-                queued_input = await asyncio.wait_for(
-                    input_queue.get(), timeout=IDLE_CHECK_INTERVAL
-                )
-            except asyncio.TimeoutError:
-                queued_input = None
+            kind, item = await wait_input_or_wake(input_queue, wake_listener, IDLE_CHECK_INTERVAL)
+            queued_input: str | None = item if kind == "input" else None
 
             if queued_input is None and input_queue.empty():
                 # Proactive commitment reminders fire independently of auto_desire

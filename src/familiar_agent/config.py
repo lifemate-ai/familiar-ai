@@ -231,6 +231,12 @@ class AgentConfig:
     inner_loop_interval: float = field(
         default_factory=lambda: float(os.environ.get("FAMILIAR_INNER_LOOP_INTERVAL", "20") or "20")
     )
+    # Body daemon (familiard): FAMILIAR_DAEMON=1 makes the UIs listen for wake
+    # events from a running `familiard` process (socket override:
+    # FAMILIAR_DAEMON_SOCKET) and auto-adopts its interoception payload.
+    # Default OFF; without the daemon everything degrades to the 10s idle poll.
+    daemon: bool = field(default_factory=lambda: _bool_env("FAMILIAR_DAEMON", default=False))
+    daemon_socket: str = field(default_factory=lambda: os.environ.get("FAMILIAR_DAEMON_SOCKET", ""))
 
     max_tokens: int = 4096
     camera: CameraConfig = field(default_factory=CameraConfig)

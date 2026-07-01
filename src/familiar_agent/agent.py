@@ -1388,6 +1388,13 @@ class EmbodiedAgent:
 
     def _collect_interoception(self):
         mcp_path = os.environ.get("FAMILIAR_INTEROCEPTION_MCP_PATH", "").strip()
+        if not mcp_path and getattr(self.config, "daemon", False) is True:
+            # familiard writes its body payload to a well-known path; adopt it
+            # automatically when the daemon is enabled and has produced one.
+            # (`is True` keeps MagicMock configs in tests from flipping this.)
+            candidate = Path.home() / ".familiar_ai" / "interoception.json"
+            if candidate.exists():
+                mcp_path = str(candidate)
         if mcp_path:
             max_staleness = int(
                 os.environ.get("FAMILIAR_INTEROCEPTION_MCP_MAX_STALENESS", "45").strip() or "45"

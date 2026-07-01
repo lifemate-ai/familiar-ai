@@ -108,12 +108,28 @@ status, auto-say, `commit_after_end_turn`) and the forced final response on
 max-iterations remain in `run()`. The `run()` public signature is unchanged
 and must stay that way.
 
-**Inner loop (scaffolding, dark by default).** `familiar_agent/inner_loop.py`
-drives a sub-verbal idle workspace between turns; gated by `FAMILIAR_INNER_LOOP`
+**Inner loop (live, dark by default).** `familiar_agent/inner_loop.py` drives a
+sub-verbal idle workspace between turns; gated by `FAMILIAR_INNER_LOOP`
 (default OFF, interval `FAMILIAR_INNER_LOOP_INTERVAL`). `agent._compete_once(cheap=...)`
 is the shared workspace-cycle seam — `cheap=True` skips embedding-backed sources
 (memory recall + DMN wander) for zero-LLM idle cycles; `_gather_workspace_context`
-is now a thin wrapper over it.
+is a thin wrapper over it. The tick feeds `TrainOfThought`; a sustained salient
+focus escalates by **boosting a drive** (`_INNER_SOURCE_TO_DRIVE`, streak+salience
+gate, per-source cooldown) consumed by the UI-owned idle chain — the tick never
+calls `run()` (no turn lock exists; single-flight is UI-owned). `bind_desires()`
+late-binds the UI's DesireSystem; the loop lazy-starts in `prepare_turn`.
+
+**Body daemon (familiard, separate process, dark by default).**
+`familiar_agent/familiard.py` (`uv run familiard`) owns interoception sampling
+(payload consumed via the existing `MCPInteroceptionProvider` path), wake
+scheduling (due commitments / desire pressure / schedule bands → Unix-socket
+wake events), and offline self-state decay (only while no cortex is connected).
+**Read-only toward cortex state**: never writes `desires.json`, opens
+`commitments.db` in SQLite read-only URI mode, never opens `observations.db`.
+Cortex side: `familiar_agent/wake.py` (`WakeListener`, `wait_input_or_wake`) —
+gated by `FAMILIAR_DAEMON` (default OFF); a wake only accelerates the idle poll,
+every behavioral gate re-checks in the cortex. Daemon config:
+`~/.familiar_ai/familiard.conf` + `FAMILIARD_*` env.
 
 ### Turn flow (conceptual)
 

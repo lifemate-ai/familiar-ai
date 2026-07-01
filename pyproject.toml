@@ -43,6 +43,7 @@ all = [
 [project.scripts]
 familiar = "familiar_agent.main:main"
 familiar-discover-cameras = "familiar_agent.camera_discovery:main"
+familiard = "familiar_agent.familiard:main"
 
 [build-system]
 requires = ["hatchling"]

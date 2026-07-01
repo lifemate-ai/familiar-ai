@@ -232,6 +232,33 @@ MODEL=llm -m gemma3 {}        # llm CLI (https://llm.datasette.io) — {} = prom
 
 ---
 
+## Body daemon (familiard)
+
+familiar-ai can run with an always-on body: `familiard` is a small separate
+process that keeps living while the app is closed.
+
+```bash
+uv run familiard        # start the body daemon
+FAMILIAR_DAEMON=1 ./run.sh   # the app now feels it and wakes on its nudges
+```
+
+What it owns (zero LLM calls, a few hertz):
+
+- **Interoception** — samples CPU / memory / time of day into a body signal the
+  agent feels each turn (energy, cognitive load, stress)
+- **Wake events** — due commitments, rising desires, and schedule-band pulses
+  nudge the app instantly instead of waiting for its next idle poll; every
+  behavioral gate stays in the app, so a wake is never more than an early poll
+- **Offline affect decay** — feelings settle toward baseline on wall-clock time
+  while the app is closed, instead of freezing mid-emotion
+
+Configuration lives in `~/.familiar_ai/familiard.conf` (`key = value` lines,
+`FAMILIARD_*` env overrides), e.g. `active_bands = 07:00-09:00,18:00-24:00`.
+Without the daemon (the default), nothing changes — the app keeps its plain
+idle polling.
+
+---
+
 ## MCP Servers
 
 familiar-ai can connect to any [MCP (Model Context Protocol)](https://modelcontextprotocol.io) server. This lets you plug in external memory, filesystem access, web search, or any other tool.

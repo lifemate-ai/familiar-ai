@@ -251,6 +251,9 @@ class FamiliarApp(App):
         self._log_system(_t("startup", log_path=str(self._log_path)))
         self.set_interval(IDLE_CHECK_INTERVAL, self._reminder_tick)
         self.set_interval(IDLE_CHECK_INTERVAL, self._desire_tick)
+        # familiard wake events accelerate the idle ticks when the daemon runs.
+        if getattr(self.agent.config, "daemon", False) is True:
+            self.run_worker(self._wake_listener_loop(), exclusive=False)
         # Start the MCP handshake now so tools are ready by the first turn (#188).
         start_mcp_early = getattr(self.agent, "start_mcp_early", None)
         if callable(start_mcp_early):
@@ -552,6 +555,29 @@ class FamiliarApp(App):
             return
         self._last_interaction = time.time()
         await self._run_agent("", inner_voice=commitment_reminder_prompt(reminders))
+
+    async def _wake_listener_loop(self) -> None:
+        """Consume familiard wake events; each one is just an early idle tick.
+
+        The tick methods re-check every gate themselves (agent running,
+        pending input, cooldowns, quiet hours), so a wake can never bypass
+        the idle precedence contract — it only removes poll latency.
+        """
+        from .wake import WakeListener
+
+        listener = WakeListener(
+            getattr(self.agent.config, "daemon_socket", "") or None,
+            enabled=True,  # the caller gates on config.daemon
+        )
+        try:
+            while not self._closing:
+                event = await listener.wait(60.0)
+                if event is None or self._closing:
+                    continue
+                await self._reminder_tick()
+                await self._desire_tick()
+        finally:
+            listener.close()
 
     async def _desire_tick(self) -> None:
         """Check desires and fire autonomous actions when idle."""

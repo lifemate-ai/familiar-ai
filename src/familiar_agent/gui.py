@@ -1521,10 +1521,23 @@ class FamiliarWindow(QMainWindow):
 
     async def _process_queue(self) -> None:
         """Dequeue user messages and run the agent; fire desires when idle."""
+        from .wake import WakeListener, wait_input_or_wake
+
+        window_config = getattr(self, "_config", None)
+        wake_listener = WakeListener(
+            getattr(window_config, "daemon_socket", "") or None,
+            enabled=getattr(window_config, "daemon", False) is True,
+        )
         last_interaction = time.time()
         while True:
             try:
-                text = await asyncio.wait_for(self._input_queue.get(), timeout=IDLE_CHECK_INTERVAL)
+                kind, text = await wait_input_or_wake(
+                    self._input_queue, wake_listener, IDLE_CHECK_INTERVAL
+                )
+                if kind != "input":
+                    # A familiard wake takes the same path as the poll timeout:
+                    # it is only an early poll — every idle gate re-checks below.
+                    raise asyncio.TimeoutError
             except asyncio.TimeoutError:
                 now = time.time()
                 if self._closing:
