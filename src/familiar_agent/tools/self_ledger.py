@@ -178,7 +178,7 @@ class SelfLedgerTool:
             previous = getattr(meta, "previous_session_summary", None)
             if callable(previous):
                 carried = previous()
-                if carried:
+                if isinstance(carried, str) and carried:
                     lines.append(f"From my previous session: {carried}")
 
         narrative = getattr(self._agent, "_self_narrative", None)

@@ -257,6 +257,15 @@ Configuration lives in `~/.familiar_ai/familiard.conf` (`key = value` lines,
 Without the daemon (the default), nothing changes — the app keeps its plain
 idle polling.
 
+A **Rust port** with the identical contract (same config, same socket, same
+payload) lives in [`familiard-rs/`](./familiard-rs) — a single ~2 MB static
+binary that never shares the Python GIL:
+
+```bash
+cd familiard-rs && cargo build --release
+./target/release/familiard
+```
+
 ---
 
 ## MCP Servers

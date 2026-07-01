@@ -847,9 +847,10 @@ async def test_post_response_pipeline_updates_self_continuity_state():
 
 
 @pytest.mark.asyncio
-async def test_flagged_turn_runs_auto_tom_and_injects_result():
-    """A venting turn (should_use_tom=True) runs ToM deterministically and the
-    result reaches the system prompt via mental_ctx."""
+async def test_flagged_turn_runs_auto_tom_off_critical_path():
+    """A venting turn (should_use_tom=True) still runs ToM deterministically —
+    but as a BACKGROUND task (roadmap PR7): it must not block the turn, and its
+    value persists via the person model rather than this turn's prompt."""
     agent = _make_agent()
     agent.backend.stream_turn = AsyncMock(return_value=(_turn("end_turn", text="うん"), "うん"))
 
@@ -862,16 +863,20 @@ async def test_flagged_turn_runs_auto_tom_and_injects_result():
         p.start()
     try:
         await agent.run("むかつくわ、ほんまに最悪な一日や")
+        await agent._drain_background_tasks()
     finally:
         for p in ps:
             p.stop()
 
     auto_tom.assert_awaited_once()
+    # Cooldown bookkeeping advances at trigger time.
+    assert agent._last_auto_tom_turn == agent._turn_count
+    # Off the critical path: nothing ToM-shaped is injected into THIS prompt.
     system = agent.backend.stream_turn.await_args.kwargs.get("system")
     if system is None:
         system = agent.backend.stream_turn.await_args.args[0]
     joined = "\n".join(system) if isinstance(system, tuple) else str(system)
-    assert "TOM-SENTINEL-XYZ" in joined
+    assert "TOM-SENTINEL-XYZ" not in joined
 
 
 @pytest.mark.asyncio

@@ -1270,7 +1270,8 @@ class EmbodiedAgent:
         previous = getattr(meta, "previous_session_summary", None)
         if callable(previous):
             carried = previous()
-            if carried:
+            # Strict str check: mocked monitors in tests return truthy mocks.
+            if isinstance(carried, str) and carried:
                 lines.append(f"[Last session's metacognitive thread]\n{carried}")
         recall = getattr(getattr(self, "_memory", None), "recall_interpretation_shifts", None)
         if callable(recall):
@@ -1278,7 +1279,7 @@ class EmbodiedAgent:
                 shifts = recall(n=3)
             except Exception:  # noqa: BLE001
                 shifts = []
-            if shifts:
+            if isinstance(shifts, list) and shifts:
                 shift_lines = ["[Interpretation shifts — corrections that must not regress]"]
                 shift_lines.extend(
                     f'- {s["entity_key"]}: now read as "{s["new_text"][:120]}"' for s in shifts
@@ -1500,8 +1501,6 @@ class EmbodiedAgent:
         if tom_tool is None:
             return ""
         try:
-            # 12s default is deliberately tighter than _TOOL_TIMEOUTS["tom"] (20s):
-            # this runs serially before the main loop, so it caps time-to-first-token.
             text, _image = await asyncio.wait_for(
                 tom_tool.call("tom", {"situation": user_input[:500]}),
                 timeout=timeout,
@@ -1511,6 +1510,16 @@ class EmbodiedAgent:
             return ""
         text = str(text).strip()
         return text[:1200] if text else ""
+
+    async def _run_auto_tom_background(self, user_input: str) -> None:
+        """Background wrapper for the deterministic ToM run (roadmap PR7).
+
+        Off the critical path the run can afford the tool's full budget; the
+        text result is discarded here — the value is the structured inference
+        the ToM tool writes into the person model as a side effect, which the
+        [Person model] block surfaces from the next turn on.
+        """
+        await self._run_auto_tom(user_input, timeout=20.0)
 
     def _person_model_context(self) -> str:
         """Surface the accumulated ToM model of the companion, if any."""

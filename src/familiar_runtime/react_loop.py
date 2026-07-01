@@ -217,7 +217,12 @@ class ReActLoop:
                 )
 
             if result.stop_reason == "tool_use":
-                collected: list[tuple[str, str | None]] = []
+                # Announce every call first (order preserved), then execute
+                # them CONCURRENTLY — a multi-tool iteration costs the slowest
+                # tool, not the sum. Result events, hook replacement and
+                # message assembly stay sequential in the model's order, so
+                # every order-dependent semantic (replan splicing, streak
+                # bookkeeping, tool_results layout) is unchanged.
                 for tool_call in result.tool_calls:
                     all_tool_calls.append(tool_call)
                     emit(
@@ -227,12 +232,62 @@ class ReActLoop:
                     )
                     if on_action is not None:
                         on_action(tool_call.name, tool_call.input)
+
+                async def _execute(tool_call: ToolCall) -> tuple[str, ToolExecutionResult]:
+                    """Run one tool; classify the outcome for exact event parity."""
                     timeout = self._tool_timeouts.get(tool_call.name, self._default_tool_timeout)
                     try:
-                        tool_result = await asyncio.wait_for(
-                            self._tools.call(tool_call.name, tool_call.input),
-                            timeout=timeout,
+                        return (
+                            "ok",
+                            await asyncio.wait_for(
+                                self._tools.call(tool_call.name, tool_call.input),
+                                timeout=timeout,
+                            ),
                         )
+                    except asyncio.TimeoutError:
+                        return (
+                            "timeout",
+                            ToolExecutionResult(
+                                text=f"Tool timeout: {tool_call.name} exceeded {timeout:.1f}s.",
+                                success=False,
+                                error="timeout",
+                            ),
+                        )
+                    except Exception as exc:  # noqa: BLE001
+                        return (
+                            "exception",
+                            ToolExecutionResult(
+                                text=f"Tool error: {exc}", success=False, error=str(exc)
+                            ),
+                        )
+
+                if len(result.tool_calls) == 1:
+                    executed = [await _execute(result.tool_calls[0])]
+                else:
+                    executed = list(
+                        await asyncio.gather(*(_execute(tc) for tc in result.tool_calls))
+                    )
+
+                collected: list[tuple[str, str | None]] = []
+                for tool_call, (exec_outcome, tool_result) in zip(result.tool_calls, executed):
+                    if exec_outcome == "timeout":
+                        emit(
+                            "tool",
+                            "tool_timeout",
+                            {
+                                "name": tool_call.name,
+                                "timeout": self._tool_timeouts.get(
+                                    tool_call.name, self._default_tool_timeout
+                                ),
+                            },
+                        )
+                    elif exec_outcome == "exception":
+                        emit(
+                            "tool",
+                            "tool_error",
+                            {"name": tool_call.name, "error": tool_result.error},
+                        )
+                    else:
                         emit(
                             "tool",
                             "tool_result",
@@ -242,22 +297,6 @@ class ReActLoop:
                                 "error": tool_result.error,
                             },
                         )
-                    except asyncio.TimeoutError:
-                        tool_result = ToolExecutionResult(
-                            text=f"Tool timeout: {tool_call.name} exceeded {timeout:.1f}s.",
-                            success=False,
-                            error="timeout",
-                        )
-                        emit(
-                            "tool",
-                            "tool_timeout",
-                            {"name": tool_call.name, "timeout": timeout},
-                        )
-                    except Exception as exc:  # noqa: BLE001
-                        tool_result = ToolExecutionResult(
-                            text=f"Tool error: {exc}", success=False, error=str(exc)
-                        )
-                        emit("tool", "tool_error", {"name": tool_call.name, "error": str(exc)})
 
                     # Hooks may replace the result (e.g. splice an adaptive
                     # replan into the text); the first non-None return wins

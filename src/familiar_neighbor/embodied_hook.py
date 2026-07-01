@@ -583,7 +583,11 @@ class EmbodiedAgentHook(RuntimeHookBase):
         # ── Deterministic perspective-taking ──
         # should_use_tom used to be advisory only; now the inference actually
         # runs (and accumulates into the person model) on flagged turns.
-        auto_tom_ctx = ""
+        # Latency (roadmap PR7): the run is a BACKGROUND task — it used to sit
+        # serially before the first token, adding up to 12 s of TTFT. Its
+        # structured inference persists into the person model, which the
+        # [Person model] block surfaces from the next turn on; this turn's
+        # softness/validation gates come from social policy, as they always did.
         last_auto_tom_turn = getattr(agent, "_last_auto_tom_turn", None)
         if _should_auto_tom(
             social_policy,
@@ -597,12 +601,9 @@ class EmbodiedAgentHook(RuntimeHookBase):
         ):
             agent._last_auto_tom_turn = agent._turn_count
             agent._last_auto_tom_act = social_policy.primary_act
-            auto_tom_ctx = await agent._run_auto_tom(user_input)
-            if auto_tom_ctx:
-                auto_tom_ctx = (
-                    "[Perspective-taking already done this turn — do not call the "
-                    "tom tool again]\n" + auto_tom_ctx
-                )
+            agent._spawn_background_task(
+                agent._run_auto_tom_background(user_input), name="auto-tom"
+            )
 
         # ── Append user message to history ──
         agent.messages.append(agent.backend.make_user_message(user_input_with_ctx))
@@ -699,7 +700,6 @@ class EmbodiedAgentHook(RuntimeHookBase):
                     agent._mental_state_bus.summarize_recent_for_prompt(2),
                     mental_snapshot.prompt_summary(),
                     agent._format_social_policy_prompt(social_policy),
-                    auto_tom_ctx,
                 )
                 if part
             )
