@@ -71,6 +71,7 @@ from .tools.commitments import (
 )
 from .tools.delegation import DelegatedTaskRunner, DelegationTool
 from .tools.identity import IdentityTool
+from .tools.self_ledger import SelfLedgerTool
 from familiar_neighbor.mind.identity import IdentityCore
 from .tools.memory import MemoryTool, ObservationMemory
 from .tools.tom import ToMTool
@@ -88,6 +89,7 @@ from familiar_capabilities import (
     MCPCapability,
     MemoryCapability,
     MobilityCapability,
+    SelfLedgerCapability,
     ToMCapability,
     VoiceCapability,
 )
@@ -579,6 +581,10 @@ class EmbodiedAgent:
         self._session_output_tokens: int = 0
         self._last_context_tokens: int = 0
         self._post_compact: bool = False
+        # Separate from _post_compact (which tunes recall depth and resets on
+        # the very next prepare_turn): the recovery block waits for the next
+        # non-brief turn so it is never consumed invisibly by a brief reply.
+        self._post_compact_recovery_pending: bool = False
         self._coherence_retried: bool = False
 
         self._camera: CameraTool | None = None
@@ -635,9 +641,15 @@ class EmbodiedAgent:
         self._workspace = GlobalWorkspace()
         self._workspace.register_broadcast_listener(self._self_state.on_broadcast)
         self._prediction = PredictionEngine()
-        self._attention_schema = AttentionSchema()
+        # Self-ledger: attention history and the previous session's
+        # metacognitive summary survive restarts (JSON state files, same
+        # idiom as identity_state.json).
+        _state_dir = Path.home() / ".familiar_ai"
+        self._attention_schema = AttentionSchema(state_path=_state_dir / "attention_state.json")
         self._dmn = DefaultModeProcessor(self._memory)
-        self._meta_monitor = MetaMonitor()
+        self._meta_monitor = MetaMonitor(state_path=_state_dir / "meta_state.json")
+        self._self_ledger_tool = SelfLedgerTool(self)
+        self._constitution_block: str | None = None  # rendered once per session
         self._appraisal = AppraisalEngine()
         self._social_policy = SocialPolicyEngine()
         self._mental_state_bus = MentalStateBus()
@@ -1021,6 +1033,9 @@ class EmbodiedAgent:
         identity_tool = getattr(self, "_identity_tool", None)
         if identity_tool is not None:
             registry.register(IdentityCapability(identity_tool))
+        self_ledger_tool = getattr(self, "_self_ledger_tool", None)
+        if self_ledger_tool is not None:
+            registry.register(SelfLedgerCapability(self_ledger_tool))
         if self._mcp:
             provider = MCPCapability(self._mcp)
             registry.register(provider)
@@ -1207,6 +1222,87 @@ class EmbodiedAgent:
         body_inner = "\n".join(parts)
         return f"(body\n{body_inner})"
 
+    def _self_ledger_carryover_context(self) -> str:
+        """First-turn carryover: last session's metacognitive thread plus
+        corrected interpretations, so a restart resumes a self, not a blank."""
+        lines: list[str] = []
+        meta = getattr(self, "_meta_monitor", None)
+        previous = getattr(meta, "previous_session_summary", None)
+        if callable(previous):
+            carried = previous()
+            if carried:
+                lines.append(f"[Last session's metacognitive thread]\n{carried}")
+        recall = getattr(getattr(self, "_memory", None), "recall_interpretation_shifts", None)
+        if callable(recall):
+            try:
+                shifts = recall(n=3)
+            except Exception:  # noqa: BLE001
+                shifts = []
+            if shifts:
+                shift_lines = ["[Interpretation shifts — corrections that must not regress]"]
+                shift_lines.extend(
+                    f'- {s["entity_key"]}: now read as "{s["new_text"][:120]}"' for s in shifts
+                )
+                lines.append("\n".join(shift_lines))
+        return "\n\n".join(lines)
+
+    def _post_compact_recovery_context(self) -> str:
+        """Re-anchor right after context compaction.
+
+        Ordering is deliberate — constitution before memory: the identity
+        block lives in the stable prompt half above; this block reminds the
+        model that what was condensed does not include who it is, and
+        re-surfaces corrected interpretations so compaction cannot silently
+        roll them back.
+        """
+        lines = [
+            "[Post-compaction recovery] Earlier turns were just condensed into a "
+            "summary. Who you are did not change: your persona and constitution "
+            "above still hold. If anything feels blurry, call who_am_i."
+        ]
+        recall = getattr(getattr(self, "_memory", None), "recall_interpretation_shifts", None)
+        if callable(recall):
+            try:
+                shifts = recall(n=3)
+            except Exception:  # noqa: BLE001
+                shifts = []
+            lines.extend(
+                f"- Corrected reading ({s['entity_key']}): {s['new_text'][:120]}" for s in shifts
+            )
+        return "\n".join(lines)
+
+    def _identity_constitution_block(self) -> str:
+        """Render identity assertions for the stable prompt half, once per session.
+
+        Rendered lazily and cached for the process lifetime so the stable half
+        stays byte-identical across turns (prompt caching). Values the agent
+        commits mid-session already act immediately through IdentityCore's
+        checkers and coalitions; they join the rendered constitution on the
+        next session, like ME.md edits.
+        """
+        cached = getattr(self, "_constitution_block", None)
+        if cached is not None:
+            return cached
+        identity = getattr(self, "_identity", None)
+        if identity is None:
+            self._constitution_block = ""
+            return ""
+        try:
+            assertions = identity.assertions()
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("Constitution render failed: %s", exc)
+            self._constitution_block = ""
+            return ""
+        if not assertions:
+            self._constitution_block = ""
+            return ""
+        lines = ["[Constitution — what I hold, in my own words]"]
+        for a in sorted(assertions, key=lambda a: (not a.non_negotiable, -a.confidence)):
+            marker = " (non-negotiable)" if a.non_negotiable else ""
+            lines.append(f"- ({a.kind}) {a.statement}{marker}")
+        self._constitution_block = "\n".join(lines)
+        return self._constitution_block
+
     def _system_prompt(
         self,
         feelings_ctx: str = "",
@@ -1220,8 +1316,9 @@ class EmbodiedAgent:
     ) -> tuple[str, str]:
         """Return (stable, variable) system prompt parts for prompt caching.
 
-        stable  — ME.md + core rules; never changes within a session.
-                  AnthropicBackend marks this block with cache_control.
+        stable  — ME.md + core rules + identity constitution; never changes
+                  within a session. AnthropicBackend marks this block with
+                  cache_control.
         variable — interoception, feelings, inner voice, plan; changes every turn.
         """
         base = assemble_neighbor_system_prompt(max_steps=MAX_ITERATIONS)
@@ -1229,7 +1326,11 @@ class EmbodiedAgent:
         body_desc = self._get_body_description()
         base = re.sub(r"\(body.*?\)", body_desc, base, flags=re.DOTALL)
 
-        stable_parts = [p for p in [self._me_md, base] if p]
+        # Constitution before memory: identity assertions join the STABLE half
+        # (rendered once per session — keeps prompt caching intact; live
+        # dissonance state stays in the variable half via mental_ctx).
+        constitution = self._identity_constitution_block()
+        stable_parts = [p for p in [self._me_md, base, constitution] if p]
         stable = "\n\n---\n\n".join(stable_parts)
 
         agent_mood, agent_mood_intensity = self._decayed_mood()
@@ -1620,6 +1721,7 @@ class EmbodiedAgent:
             asyncio.to_thread(self._prediction.as_coalition),
             asyncio.to_thread(self._attention_schema.as_coalition),
             asyncio.to_thread(self._meta_monitor.as_coalition),
+            asyncio.to_thread(self._meta_inconsistency_coalition),
         ]
         if self._scene is not None:
             sync_tasks.append(asyncio.to_thread(self._scene.as_coalition))
@@ -1660,6 +1762,36 @@ class EmbodiedAgent:
 
         others = [c for c in coalitions if c is not winner]
         return CompeteResult(winner=winner, others=others, coalitions=coalitions)
+
+    def _meta_inconsistency_coalition(self):
+        """Self-inconsistency as a workspace voice.
+
+        MetaMonitor.detect_inconsistency existed but nothing consumed it —
+        the check silently evaporated. When recent behavior contradicts the
+        self-narrative, the mismatch now competes for attention with real
+        urgency, so the agent can notice the contradiction.
+        """
+        meta = getattr(self, "_meta_monitor", None)
+        narrative = getattr(self, "_self_narrative", None)
+        if meta is None or narrative is None:
+            return None
+        try:
+            mismatch = meta.detect_inconsistency(narrative)
+        except Exception:  # noqa: BLE001
+            return None
+        # Strict str check: mocked monitors in tests return truthy non-strings.
+        if not isinstance(mismatch, str) or not mismatch:
+            return None
+        from .workspace import Coalition as _Coalition
+
+        return _Coalition(
+            source="meta",
+            summary="behavior/narrative mismatch",
+            activation=0.5,
+            urgency=0.5,
+            novelty=0.6,
+            context_block=f"[meta — inconsistency] {mismatch}",
+        )
 
     async def _gather_workspace_context(
         self,
@@ -2499,6 +2631,7 @@ class EmbodiedAgent:
 
         self.messages = [summary_marker] + list(recent)
         self._post_compact = True
+        self._post_compact_recovery_pending = True
 
     @property
     def is_embedding_ready(self) -> bool:

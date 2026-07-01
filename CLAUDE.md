@@ -231,6 +231,9 @@ Primary stores under `~/.familiar_ai/`:
 - `self_state.json` — latent bodily carryover
 - `identity_state.json` — identity dissonance ledger (decay + reflection relief)
 - `identity_seed.json` — persona identity seed (operator-supplied; insert-if-missing)
+- `attention_state.json` — attention-schema focus history (survives restarts)
+- `meta_state.json` — previous session's distilled metacognitive summary (the raw
+  MetaMonitor step window is deliberately session-scoped and never persisted)
 - `relationship.json` — legacy; imported once if present, then SQLite is authoritative
 
 **Every schema change must add a timestamped migration under `migration/`**

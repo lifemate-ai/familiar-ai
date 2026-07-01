@@ -9,14 +9,20 @@ All operations are synchronous and lightweight (no LLM calls).
 
 from __future__ import annotations
 
+import json
+import logging
 from dataclasses import dataclass, field
 from collections import Counter, deque
+from datetime import datetime, timezone
+from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
     from .self_narrative import SelfNarrative
     from .social_policy import SocialPolicyDecision
     from .workspace import Coalition
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass(slots=True)
@@ -34,9 +40,42 @@ class MetaMonitor:
     into self_narrative diary entries and workspace competition via as_coalition().
     """
 
-    def __init__(self, window: int = 20) -> None:
+    def __init__(self, window: int = 20, state_path: str | Path | None = None) -> None:
         self._window = window
         self._steps: deque[dict] = deque(maxlen=window)
+        # Optional persistence (self-ledger). The raw step window is
+        # deliberately session-scoped — restoring stale steps would skew
+        # detect_inconsistency's dominant-source heuristic — so only the
+        # DISTILLED summary of the previous session survives a restart.
+        self._state_path = Path(state_path).expanduser() if state_path else None
+        self._previous_session_summary: str = ""
+        self._load_state()
+
+    def _load_state(self) -> None:
+        if self._state_path is None or not self._state_path.exists():
+            return
+        try:
+            raw = json.loads(self._state_path.read_text(encoding="utf-8"))
+            self._previous_session_summary = str(raw.get("last_session_summary", ""))
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("Could not load meta state: %s", exc)
+
+    def _save_state(self) -> None:
+        if self._state_path is None or not self._steps:
+            return
+        try:
+            self._state_path.parent.mkdir(parents=True, exist_ok=True)
+            payload = {
+                "last_session_summary": self.summarize_session(),
+                "saved_at": datetime.now(timezone.utc).isoformat(),
+            }
+            self._state_path.write_text(json.dumps(payload, ensure_ascii=False))
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("Could not save meta state: %s", exc)
+
+    def previous_session_summary(self) -> str:
+        """The distilled metacognitive summary carried over from last session."""
+        return self._previous_session_summary
 
     # ── Public API ────────────────────────────────────────────────────────────
 
@@ -55,6 +94,7 @@ class MetaMonitor:
                 "confidence": max(0.0, min(1.0, confidence)),
             }
         )
+        self._save_state()
 
     def step_count(self) -> int:
         return len(self._steps)

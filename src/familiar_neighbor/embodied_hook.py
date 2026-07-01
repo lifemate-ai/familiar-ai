@@ -296,6 +296,15 @@ class EmbodiedAgentHook(RuntimeHookBase):
             agenda_ctx = agent._today_agenda_context()
             if agenda_ctx:
                 morning_ctx = f"{morning_ctx}\n\n{agenda_ctx}" if morning_ctx else agenda_ctx
+            # Self-ledger: resume last session's metacognitive thread and
+            # re-surface corrected interpretations (anti-regression).
+            carryover_fn = getattr(agent, "_self_ledger_carryover_context", None)
+            if callable(carryover_fn):
+                carryover_ctx = carryover_fn()
+                if carryover_ctx:
+                    morning_ctx = (
+                        f"{morning_ctx}\n\n{carryover_ctx}" if morning_ctx else carryover_ctx
+                    )
 
         # ── Context compaction ──
         if agent._should_compact():
@@ -562,6 +571,17 @@ class EmbodiedAgentHook(RuntimeHookBase):
             if not workspace_ctx:
                 workspace_ctx = agent._cached_workspace_ctx
             continuity_ctx = agent._self_continuity_context()
+            # Post-compaction re-anchor comes FIRST in continuity (constitution
+            # before memory details); pending until the next non-brief turn so
+            # a brief reply can never consume it invisibly.
+            if getattr(agent, "_post_compact_recovery_pending", False):
+                agent._post_compact_recovery_pending = False
+                recovery_fn = getattr(agent, "_post_compact_recovery_context", None)
+                recovery_ctx = recovery_fn() if callable(recovery_fn) else ""
+                if recovery_ctx:
+                    continuity_ctx = recovery_ctx + (
+                        "\n\n" + continuity_ctx if continuity_ctx else ""
+                    )
             heartbeat_ctx = agent._heartbeat.continuity_context_for_prompt()
             if heartbeat_ctx:
                 continuity_ctx = (

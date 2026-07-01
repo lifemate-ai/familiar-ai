@@ -14,6 +14,7 @@ from .identity import IdentityCapability
 from .mcp import MCPCapability
 from .memory import MemoryCapability
 from .mobility import MobilityCapability
+from .self_ledger import SelfLedgerCapability
 from .tom import ToMCapability
 from .voice import VoiceCapability
 
@@ -26,6 +27,7 @@ __all__ = [
     "MCPCapability",
     "MemoryCapability",
     "MobilityCapability",
+    "SelfLedgerCapability",
     "ToMCapability",
     "VoiceCapability",
 ]

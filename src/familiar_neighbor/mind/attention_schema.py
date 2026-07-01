@@ -17,9 +17,11 @@ Key concepts:
 
 from __future__ import annotations
 
+import json
 import logging
 from collections import deque
-from dataclasses import dataclass
+from dataclasses import asdict, dataclass
+from pathlib import Path
 from typing import TYPE_CHECKING
 
 logger = logging.getLogger(__name__)
@@ -53,10 +55,51 @@ class AttentionSchema:
     reasoning — the key AST claim about consciousness.
     """
 
-    def __init__(self, max_history: int = _DEFAULT_MAX_HISTORY) -> None:
+    def __init__(
+        self,
+        max_history: int = _DEFAULT_MAX_HISTORY,
+        state_path: str | Path | None = None,
+    ) -> None:
         self._history: deque[FocusEntry] = deque(maxlen=max_history)
         self._turn: int = 0
         self._last_coalition: Coalition | None = None
+        # Optional persistence (self-ledger): the focus history survives
+        # restarts so "what was I attending to" is state, not luck. The live
+        # `_last_coalition` object is deliberately NOT restored — it
+        # repopulates on the first update_focus() of the new session.
+        self._state_path = Path(state_path).expanduser() if state_path else None
+        self._load_state()
+
+    def _load_state(self) -> None:
+        if self._state_path is None or not self._state_path.exists():
+            return
+        try:
+            raw = json.loads(self._state_path.read_text(encoding="utf-8"))
+            self._turn = int(raw.get("turn", 0))
+            for item in raw.get("history", []):
+                self._history.append(
+                    FocusEntry(
+                        source=str(item.get("source", "")),
+                        summary=str(item.get("summary", "")),
+                        activation=float(item.get("activation", 0.0)),
+                        turn=int(item.get("turn", 0)),
+                    )
+                )
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("Could not load attention state: %s", exc)
+
+    def _save_state(self) -> None:
+        if self._state_path is None:
+            return
+        try:
+            self._state_path.parent.mkdir(parents=True, exist_ok=True)
+            payload = {
+                "turn": self._turn,
+                "history": [asdict(entry) for entry in self._history],
+            }
+            self._state_path.write_text(json.dumps(payload, ensure_ascii=False))
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("Could not save attention state: %s", exc)
 
     # ── Core interface ─────────────────────────────────────────────────────
 
@@ -71,6 +114,7 @@ class AttentionSchema:
             turn=self._turn,
         )
         self._history.append(entry)
+        self._save_state()
         logger.debug("AttentionSchema: focus → %s (turn %d)", winner.source, self._turn)
 
     def current_focus(self) -> Coalition | None:

@@ -1262,6 +1262,45 @@ class ObservationMemory:
             logger.warning("Failed to recall revisions: %s", e)
             return []
 
+    # ── Interpretation shifts (self-ledger) ────────────────────────────────
+    # Anti-regression ledger: "I used to read X as A; now I read it as B."
+    # Rides the generic memory_revisions table with a dedicated entity_type,
+    # so corrected interpretations survive restarts and compaction and can be
+    # re-surfaced before the agent regresses to already-corrected behavior.
+
+    _INTERPRETATION_ENTITY = "interpretation"
+
+    def record_interpretation_shift(
+        self,
+        *,
+        topic: str,
+        previous_reading: str,
+        new_reading: str,
+        reason: str = "self_correction",
+    ) -> None:
+        """Persist one interpretation shift (never raises)."""
+        try:
+            with self._db_lock:
+                db = self._ensure_connected()
+                self._insert_revision_locked(
+                    db,
+                    self._INTERPRETATION_ENTITY,
+                    topic[:120],
+                    previous_reading,
+                    new_reading,
+                    0.0,
+                    1.0,
+                    None,
+                    reason=reason,
+                )
+                db.commit()
+        except Exception as e:  # noqa: BLE001
+            logger.warning("Failed to record interpretation shift: %s", e)
+
+    def recall_interpretation_shifts(self, n: int = 5) -> list[dict]:
+        """Most recent interpretation shifts, newest first."""
+        return self.recall_revisions(entity_type=self._INTERPRETATION_ENTITY, n=n)
+
     def save_with_id(
         self,
         content: str,
