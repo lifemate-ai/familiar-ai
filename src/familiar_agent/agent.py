@@ -75,6 +75,7 @@ from .tools.commitments import (
     format_commitments_for_context,
 )
 from .tools.delegation import DelegatedTaskRunner, DelegationTool
+from .latency import LatencyRecorder
 from .routine_store import RoutineStore
 from .tools.identity import IdentityTool
 from .tools.routines_tool import RoutineTool
@@ -646,6 +647,8 @@ class EmbodiedAgent:
         # fire by materializing commitments — the reminder gates do the rest.
         self._routine_store = RoutineStore()
         self._routine_tool = RoutineTool(self._routine_store)
+        # Latency instrumentation (FAMILIAR_LATENCY=1; dark by default).
+        self._latency = LatencyRecorder()
         # Phase 2 inner loop (off by default). Constructed always so close() can
         # stop it unconditionally; started lazily by prepare_turn when
         # config.inner_loop is set. The UI-owned DesireSystem is late-bound via
@@ -2877,17 +2880,22 @@ class EmbodiedAgent:
         # is a visibility flag for background cognition, NOT a lock — turn
         # single-flight is owned by the UI loops.
         self._turn_active = True
+        latency = getattr(self, "_latency", None) or LatencyRecorder(enabled=False)
         try:
-            prep = await self._hook.prepare_turn(
-                user_input=user_input,
-                on_phase=on_phase,
-                desires=desires,
-                inner_voice=inner_voice,
-            )
+            with latency.span("prepare"):
+                prep = await self._hook.prepare_turn(
+                    user_input=user_input,
+                    on_phase=on_phase,
+                    desires=desires,
+                    inner_voice=inner_voice,
+                )
         except BaseException:
             self._turn_active = False
             raise
 
+        # Assigned again right after the loop finishes; this early value only
+        # matters when the loop raises (the finally must never NameError).
+        finalize_started = time.perf_counter()
         try:
             interrupt_source = (
                 _InterruptQueueSource(self, interrupt_queue)
@@ -2915,27 +2923,29 @@ class EmbodiedAgent:
                 },
                 hooks=[self._hook],
             )
-            run_result = await loop.run(
-                system=self._system_prompt(
-                    prep.feelings_ctx,
-                    prep.morning_ctx,
-                    inner_voice=prep.inner_voice,
-                    plan_ctx=prep.plan_ctx,
-                    companion_mood=prep.companion_mood,
-                    continuity_ctx=prep.continuity_ctx,
-                    workspace_ctx=prep.workspace_ctx,
-                    mental_ctx=prep.mental_ctx,
-                ),
-                messages=self.messages,
-                max_tokens=prep.turn_max_tokens,
-                on_text=on_text,
-                context=ctx,
-                interrupt_source=interrupt_source,
-                on_action=on_action,
-                on_image=on_image,
-                on_tool_result=on_tool_result,
-            )
+            with latency.span("react_loop"):
+                run_result = await loop.run(
+                    system=self._system_prompt(
+                        prep.feelings_ctx,
+                        prep.morning_ctx,
+                        inner_voice=prep.inner_voice,
+                        plan_ctx=prep.plan_ctx,
+                        companion_mood=prep.companion_mood,
+                        continuity_ctx=prep.continuity_ctx,
+                        workspace_ctx=prep.workspace_ctx,
+                        mental_ctx=prep.mental_ctx,
+                    ),
+                    messages=self.messages,
+                    max_tokens=prep.turn_max_tokens,
+                    on_text=on_text,
+                    context=ctx,
+                    interrupt_source=interrupt_source,
+                    on_action=on_action,
+                    on_image=on_image,
+                    on_tool_result=on_tool_result,
+                )
 
+            finalize_started = time.perf_counter()
             if run_result.stop_reason == "end_turn":
                 final_text = run_result.final_text
 
@@ -3052,6 +3062,9 @@ class EmbodiedAgent:
         finally:
             self._restore_backend_after_turn(prep.backend_turn_snapshot)
             self._turn_active = False
+            if latency.enabled:
+                latency.record("finalize", time.perf_counter() - finalize_started)
+                latency.flush_turn(turn=self._turn_count)
 
     @property
     def stt(self) -> STTTool | None:
