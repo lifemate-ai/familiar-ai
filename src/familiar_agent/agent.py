@@ -535,6 +535,34 @@ class _InterruptQueueSource:
         return self._agent._drain_interrupt_queue(self._queue)
 
 
+# ── Inner-loop escalation (Phase 2 PR2) ─────────────────────────────────────
+# A sustained idle focus escalates by boosting the matching drive; the turn
+# itself always fires through the UI-owned idle precedence chain, never from
+# the inner-loop task. Sources with no entry (attention, train_of_thought)
+# never escalate, and "desire" needs no boost — a dominant desire already
+# fires natively through the idle chain.
+_INNER_SOURCE_TO_DRIVE: dict[str, str] = {
+    "identity": "identity_coherence",
+    "prediction": "look_around",
+    "exploration": "explore",
+    "narrative": "reflect",
+    "meta": "reflect",
+    "tom": "care",
+    "scene": "look_around",
+    "affect": "reflect",
+    "memory": "share_memory",
+    "default_mode": "curiosity",
+}
+# The workspace ignition threshold (0.4) gates prompt admission; paying for a
+# self-initiated LLM turn needs a stricter bar: a repeated focus AND salience.
+_INNER_ESCALATION_MIN_STREAK = 3
+_INNER_ESCALATION_MIN_SALIENCE = 1.0  # winner.activation + winner.urgency
+_INNER_ESCALATION_BOOST = 0.25
+_INNER_ESCALATION_COOLDOWN_SEC = 600.0
+# A thought must win twice in a row before it crystallizes into the monologue.
+_INNER_CRYSTALLIZE_MIN_STREAK = 2
+
+
 class EmbodiedAgent:
     """Real-world exploration agent using a pluggable LLM backend."""
 
@@ -584,15 +612,17 @@ class EmbodiedAgent:
             self._identity = None
         self._identity_tool = IdentityTool(self._memory)
         # Phase 2 inner loop (off by default). Constructed always so close() can
-        # stop it unconditionally; the tick is a no-op stub until PR2 wires the
-        # real cycle, and it is never started unless config.inner_loop is set.
+        # stop it unconditionally; started lazily by prepare_turn when
+        # config.inner_loop is set. The UI-owned DesireSystem is late-bound via
+        # bind_desires() — until then idle cognition competes without drives.
         self._turn_active = False
+        self._desires: DesireSystem | None = None
         self._inner_monologue: deque[InnerThought] = deque(maxlen=8)
         self._train_of_thought = TrainOfThought()
-        self._inner_loop = InnerLoop(
-            self._inner_loop_tick,
-            InnerLoopConfig(interval_sec=config.inner_loop_interval),
-        )
+        self._inner_tick_count = 0
+        self._inner_escalated_at: dict[str, float] = {}
+        self._inner_loop_config = InnerLoopConfig(interval_sec=config.inner_loop_interval)
+        self._inner_loop = InnerLoop(self._inner_loop_tick, self._inner_loop_config)
         self._exploration = ExplorationTracker()
         self._scene: SceneTracker | None = None  # initialized after DB ready in _init_tools
 
@@ -645,6 +675,17 @@ class EmbodiedAgent:
         If utility falls back to the main conversation model, skip the extra round-trips.
         """
         return None if self._utility_backend is self.backend else self._utility_backend
+
+    def bind_desires(self, desires: DesireSystem) -> None:
+        """Late-bind the UI-owned DesireSystem for idle cognition.
+
+        The inner loop reads it during workspace competition and boosts it on
+        escalation; ownership (tick/satisfy cadence, idle-turn firing) stays
+        with the UI loops. Called once by each UI entry point right after both
+        objects exist — EmbodiedAgent's constructor cannot own this because the
+        DesireSystem is constructed independently in main.py/gui.py.
+        """
+        self._desires = desires
 
     def _spawn_background_task(self, coro: Coroutine[Any, Any, None], *, name: str) -> None:
         """Run non-critical post-turn work off the response critical path."""
@@ -1466,8 +1507,72 @@ class EmbodiedAgent:
         )
 
     async def _inner_loop_tick(self) -> None:
-        """One idle workspace cycle. No-op stub until PR2 wires the real cycle."""
-        return None
+        """One idle workspace cycle — the sub-verbal train of thought.
+
+        Skipped while a turn is in flight. Cheap (zero LLM/embedding calls)
+        except every ``full_cycle_every``-th tick, which runs the
+        embedding-backed competition. The winner feeds the train of thought;
+        a repeated focus crystallizes into the inner monologue, and a strong
+        sustained focus escalates via ``_maybe_escalate_inner_focus``. The
+        tick itself never starts a turn — single-flight stays with the UI
+        idle loops.
+        """
+        if self._turn_active:
+            return
+        self._inner_tick_count += 1
+        full_every = max(self._inner_loop_config.full_cycle_every, 1)
+        cheap = self._inner_tick_count % full_every != 0
+
+        extra_coalitions = []
+        recurrence = self._train_of_thought.as_coalition()
+        if recurrence is not None:
+            extra_coalitions.append(recurrence)
+        result = await self._compete_once(
+            cheap=cheap, desires=self._desires, extra_coalitions=extra_coalitions
+        )
+        winner = result.winner
+        if winner is None:
+            return
+
+        self._train_of_thought.observe(winner)
+        streak = self._train_of_thought.streak
+        if streak >= _INNER_CRYSTALLIZE_MIN_STREAK:
+            self._inner_monologue.append(
+                InnerThought(
+                    summary=winner.summary,
+                    source=winner.source,
+                    ts=time.time(),
+                    score=winner.activation,
+                )
+            )
+        self._maybe_escalate_inner_focus(winner, streak)
+
+    def _maybe_escalate_inner_focus(self, winner, streak: int) -> None:
+        """Boost the drive matching a strong, sustained idle focus.
+
+        Escalation only feeds the desire system; the actual turn fires through
+        the UI-owned idle precedence chain (user > reminder > desire > idle),
+        never from the inner-loop task — that chain is what guarantees
+        single-flight ``run()`` calls. A per-source cooldown stops one focus
+        from pumping the same drive tick after tick.
+        """
+        if self._desires is None or streak < _INNER_ESCALATION_MIN_STREAK:
+            return
+        if winner.activation + winner.urgency < _INNER_ESCALATION_MIN_SALIENCE:
+            return
+        drive = _INNER_SOURCE_TO_DRIVE.get(winner.source)
+        if drive is None:
+            return
+        now = time.time()
+        last = self._inner_escalated_at.get(winner.source)
+        if last is not None and now - last < _INNER_ESCALATION_COOLDOWN_SEC:
+            return
+        self._inner_escalated_at[winner.source] = now
+        self._desires.boost(drive, _INNER_ESCALATION_BOOST)
+        # The thought did its job — it now lives in drive space; let idle
+        # cognition move on instead of re-pumping the same focus.
+        self._train_of_thought.reset()
+        logger.info("Inner loop: sustained focus on %r escalated to drive %r", winner.source, drive)
 
     async def _compete_once(
         self,
@@ -2491,12 +2596,20 @@ class EmbodiedAgent:
         lifecycle methods; finalisation (meta-gate repair, continuation
         status, auto-say, commit) stays here.
         """
-        prep = await self._hook.prepare_turn(
-            user_input=user_input,
-            on_phase=on_phase,
-            desires=desires,
-            inner_voice=inner_voice,
-        )
+        # Mark the turn in flight so the inner loop skips its idle ticks; this
+        # is a visibility flag for background cognition, NOT a lock — turn
+        # single-flight is owned by the UI loops.
+        self._turn_active = True
+        try:
+            prep = await self._hook.prepare_turn(
+                user_input=user_input,
+                on_phase=on_phase,
+                desires=desires,
+                inner_voice=inner_voice,
+            )
+        except BaseException:
+            self._turn_active = False
+            raise
 
         try:
             interrupt_source = (
@@ -2661,6 +2774,7 @@ class EmbodiedAgent:
             return result.text or "(max iterations reached)"
         finally:
             self._restore_backend_after_turn(prep.backend_turn_snapshot)
+            self._turn_active = False
 
     @property
     def stt(self) -> STTTool | None:

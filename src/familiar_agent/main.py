@@ -595,6 +595,7 @@ def main() -> None:
     elif use_tui:
         agent = EmbodiedAgent(config)
         desires = DesireSystem(companion_name=config.companion_name)
+        agent.bind_desires(desires)
         from .tui import FamiliarApp
 
         app = FamiliarApp(agent, desires)
@@ -602,6 +603,7 @@ def main() -> None:
     else:
         agent = EmbodiedAgent(config)
         desires = DesireSystem(companion_name=config.companion_name)
+        agent.bind_desires(desires)
         _run_repl(agent, desires, debug=debug)
 
 

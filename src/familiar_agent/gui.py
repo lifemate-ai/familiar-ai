@@ -1775,6 +1775,7 @@ class FamiliarWindow(QMainWindow):
             from .agent import EmbodiedAgent  # noqa: PLC0415
 
             agent = await asyncio.to_thread(EmbodiedAgent, self._config)
+            agent.bind_desires(self._desires)
             self._agent = agent
             if not agent.is_embedding_ready:
                 self._set_startup_status(f"{_t('initializing')} memory...")

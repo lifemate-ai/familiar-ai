@@ -156,6 +156,18 @@ def _make_agent(*, with_tts: bool = False, with_camera: bool = False, with_mcp: 
     agent._mood = "neutral"
     agent._mood_intensity = 0.0
 
+    # Inner loop (Phase 2): live tick state; the loop itself is not started.
+    from familiar_agent.inner_loop import InnerLoopConfig, TrainOfThought
+    from collections import deque
+
+    agent._turn_active = False
+    agent._desires = None
+    agent._inner_monologue = deque(maxlen=8)
+    agent._train_of_thought = TrainOfThought()
+    agent._inner_tick_count = 0
+    agent._inner_escalated_at = {}
+    agent._inner_loop_config = InnerLoopConfig()
+
     # Per-turn cognition pipeline (PR3 runtime reorg).  __new__ skipped
     # the EmbodiedAgent.__init__ that normally wires the hook, so attach
     # one here so agent.run() can delegate prepare_turn / commit_after_end_turn.

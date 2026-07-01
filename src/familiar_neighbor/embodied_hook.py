@@ -254,11 +254,20 @@ class EmbodiedAgentHook(RuntimeHookBase):
         if on_phase:
             on_phase("startup" if startup_phase else "thinking")
 
-        # ── Background tasks (MCP connections, memory worker) ──
+        # ── Background tasks (MCP connections, memory worker, inner loop) ──
         if agent._mcp and not agent._mcp.is_started:
             agent._mcp_start_task = asyncio.ensure_future(agent._mcp.start())
         if memory_worker and not memory_worker.is_running:
             await memory_worker.start()
+        # Inner loop starts here (not in __init__) because it needs a running
+        # event loop; gated on config so it stays dark by default.
+        inner_loop = getattr(agent, "_inner_loop", None)
+        if (
+            inner_loop is not None
+            and not inner_loop.is_running
+            and bool(getattr(agent.config, "inner_loop", False))
+        ):
+            await inner_loop.start()
 
         is_desire_turn = bool(inner_voice and not user_input)
         candidate_brief_turn = agent._is_candidate_brief_turn(
