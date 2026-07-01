@@ -630,8 +630,76 @@ def _build_act_decision(
     return None
 
 
+@dataclass(slots=True, frozen=True)
+class AutonomousMoveDecision:
+    """What the agent should do with an autonomous moment.
+
+    A different axis from ``SocialPolicyDecision``: ``decide()`` classifies
+    the companion's incoming utterance reactively; this classifies what to do
+    when NO ONE said anything — a desire fired, a routine came due, an idle
+    pulse arrived. Kept deterministic and typed, like everything else here.
+    """
+
+    move: str  # act_autonomously | write_private_reflection | quietly_prepare | stay_silent
+    reason: str
+    vocalize: bool  # whether speaking aloud is socially appropriate right now
+
+
 class SocialPolicyEngine:
     """Deterministic interaction policy driven by affect + input."""
+
+    def decide_autonomous_move(
+        self,
+        *,
+        quiet_hours: bool,
+        dominant_desire: str | None = None,
+        desire_level: float = 0.0,
+        companion_present: bool | None = None,
+        open_concerns: int = 0,
+    ) -> AutonomousMoveDecision:
+        """Pick the primary move for a self-initiated moment.
+
+        Mirrors the declarative policy that proved out in the reference
+        deployment: quiet hours favor silent reflection over expression; a
+        dominant desire licenses action; with neither, the right move is to
+        quietly tend memory and plans rather than manufacture output.
+        """
+        if quiet_hours:
+            if dominant_desire and desire_level >= 0.9:
+                return AutonomousMoveDecision(
+                    move="act_autonomously",
+                    reason=f"urgent drive ({dominant_desire}) outweighs quiet hours",
+                    vocalize=False,
+                )
+            if open_concerns > 0 or dominant_desire in ("reflect", "consolidate"):
+                return AutonomousMoveDecision(
+                    move="write_private_reflection",
+                    reason="quiet hours — reflect without waking anyone",
+                    vocalize=False,
+                )
+            return AutonomousMoveDecision(
+                move="stay_silent",
+                reason="quiet hours and nothing urgent",
+                vocalize=False,
+            )
+        if dominant_desire:
+            return AutonomousMoveDecision(
+                move="act_autonomously",
+                reason=f"dominant desire: {dominant_desire}",
+                # Speaking is fine unless we positively know no one is around.
+                vocalize=companion_present is not False,
+            )
+        if open_concerns > 0:
+            return AutonomousMoveDecision(
+                move="write_private_reflection",
+                reason="open concerns and no driving desire",
+                vocalize=False,
+            )
+        return AutonomousMoveDecision(
+            move="quietly_prepare",
+            reason="idle — tend memory and plans",
+            vocalize=False,
+        )
 
     def decide(
         self,

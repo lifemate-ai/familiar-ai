@@ -56,6 +56,54 @@ from familiar_runtime.runtime import RuntimeHookBase
 _AUTO_TOM_COOLDOWN_TURNS = 3
 
 
+_AUTONOMOUS_MOVE_DIRECTIVES = {
+    "act_autonomously": "",  # the impulse itself is the directive
+    "write_private_reflection": (
+        "This is a private moment: reflect and remember, but do NOT call say() "
+        "— no one asked, and speaking now would be for you, not for them."
+    ),
+    "quietly_prepare": (
+        "Nothing is urgent: quietly tend your memory, plans and curiosities. Do NOT call say()."
+    ),
+    "stay_silent": (
+        "Quiet hours and nothing urgent: keep this turn minimal and silent — do NOT call say()."
+    ),
+}
+
+
+def _frame_autonomous_moment(agent: Any, desires: DesireSystem | None, inner_voice: str) -> str:
+    """Attach the autonomous-move policy's directive to a self-initiated turn.
+
+    ``decide()`` governs how to answer a companion; this governs what to do
+    with a moment nobody prompted. Deterministic and best-effort: any failure
+    leaves the impulse text untouched.
+    """
+    policy = getattr(agent, "_social_policy", None)
+    decide_move = getattr(policy, "decide_autonomous_move", None)
+    if not callable(decide_move):
+        return inner_voice
+    try:
+        heartbeat = getattr(agent, "_heartbeat", None)
+        quiet = bool(heartbeat.routine_state().quiet_hours) if heartbeat else False
+        dominant = desires.get_dominant() if desires is not None else None
+        concerns = getattr(agent, "_concerns", None)
+        open_concerns = len(concerns.snapshot()) if concerns is not None else 0
+        move = decide_move(
+            quiet_hours=quiet,
+            dominant_desire=dominant[0] if dominant else None,
+            desire_level=float(dominant[1]) if dominant else 0.0,
+            open_concerns=open_concerns,
+        )
+        directive = _AUTONOMOUS_MOVE_DIRECTIVES.get(move.move, "")
+        if not move.vocalize and move.move == "act_autonomously":
+            directive = "No one seems to be around: act, but do NOT call say()."
+        if directive:
+            return f"{inner_voice}\n\n{directive}"
+        return inner_voice
+    except Exception:  # noqa: BLE001
+        return inner_voice
+
+
 def _should_auto_tom(
     social_policy: "SocialPolicyDecision",
     *,
@@ -273,6 +321,8 @@ class EmbodiedAgentHook(RuntimeHookBase):
             await inner_loop.start()
 
         is_desire_turn = bool(inner_voice and not user_input)
+        if is_desire_turn:
+            inner_voice = _frame_autonomous_moment(agent, desires, inner_voice)
         candidate_brief_turn = agent._is_candidate_brief_turn(
             user_input,
             is_desire_turn=is_desire_turn,

@@ -541,6 +541,7 @@ class FamiliarApp(App):
                 now=time.time(),
                 store=store,
                 quiet_hours=quiet,
+                routine_store=getattr(self.agent, "_routine_store", None),
             )
             if not reminders:
                 return

@@ -182,6 +182,7 @@ async def repl(agent: EmbodiedAgent, desires: DesireSystem, debug: bool = False)
                             now=time.time(),
                             store=store,
                             quiet_hours=quiet,
+                            routine_store=getattr(agent, "_routine_store", None),
                         )
                         if reminders:
                             # Record the fire BEFORE the turn: the cadence advances

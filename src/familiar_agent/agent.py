@@ -75,7 +75,9 @@ from .tools.commitments import (
     format_commitments_for_context,
 )
 from .tools.delegation import DelegatedTaskRunner, DelegationTool
+from .routine_store import RoutineStore
 from .tools.identity import IdentityTool
+from .tools.routines_tool import RoutineTool
 from .tools.self_ledger import SelfLedgerTool
 from familiar_neighbor.mind.identity import IdentityCore
 from .tools.memory import MemoryTool, ObservationMemory
@@ -94,6 +96,7 @@ from familiar_capabilities import (
     MCPCapability,
     MemoryCapability,
     MobilityCapability,
+    RoutineCapability,
     SelfLedgerCapability,
     ToMCapability,
     VoiceCapability,
@@ -639,6 +642,10 @@ class EmbodiedAgent:
             logger.warning("IdentityCore init failed (identity layer dormant): %s", exc)
             self._identity = None
         self._identity_tool = IdentityTool(self._memory)
+        # Self-authored time: the agent's own recurring schedule. Routines
+        # fire by materializing commitments — the reminder gates do the rest.
+        self._routine_store = RoutineStore()
+        self._routine_tool = RoutineTool(self._routine_store)
         # Phase 2 inner loop (off by default). Constructed always so close() can
         # stop it unconditionally; started lazily by prepare_turn when
         # config.inner_loop is set. The UI-owned DesireSystem is late-bound via
@@ -1063,6 +1070,9 @@ class EmbodiedAgent:
         self_ledger_tool = getattr(self, "_self_ledger_tool", None)
         if self_ledger_tool is not None:
             registry.register(SelfLedgerCapability(self_ledger_tool))
+        routine_tool = getattr(self, "_routine_tool", None)
+        if routine_tool is not None:
+            registry.register(RoutineCapability(routine_tool))
         if self._mcp:
             provider = MCPCapability(self._mcp)
             registry.register(provider)

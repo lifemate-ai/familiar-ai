@@ -11,6 +11,7 @@ Keeping these here prevents duplication across tui.py, gui.py, and main.py.
 
 from __future__ import annotations
 
+import logging
 import os
 from typing import TYPE_CHECKING
 
@@ -304,6 +305,7 @@ def should_fire_commitment_reminder(
     min_idle_gap: float = REMINDER_MIN_IDLE_GAP,
     quiet_hours: bool = False,
     min_priority_in_quiet: int = REMINDER_QUIET_MIN_PRIORITY,
+    routine_store=None,
 ) -> list[Commitment]:
     """Return commitments that should be proactively reminded right now.
 
@@ -311,11 +313,20 @@ def should_fire_commitment_reminder(
     while the agent is busy, while user input is pending, or before ``min_idle_gap``
     has elapsed since the last interaction. During quiet hours only urgent
     (priority >= ``min_priority_in_quiet``) commitments pass.
+
+    When a ``routine_store`` is supplied, due self-authored routines first
+    materialize as commitments here, then ride the exact same gates — one
+    firing path for everything self-initiated-by-schedule.
     """
     if agent_running or has_pending_input:
         return []
     if now - last_interaction < min_idle_gap:
         return []
+    if routine_store is not None:
+        try:
+            routine_store.materialize_due(store, now=now)
+        except Exception:  # noqa: BLE001
+            logging.getLogger(__name__).exception("routine materialization failed")
     ready = store.list_due_for_reminder(now=now, base_cooldown=base_cooldown)
     if quiet_hours:
         ready = [c for c in ready if c.priority >= min_priority_in_quiet]

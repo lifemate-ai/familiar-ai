@@ -1563,6 +1563,7 @@ class FamiliarWindow(QMainWindow):
                             now=now,
                             store=store,
                             quiet_hours=quiet,
+                            routine_store=getattr(agent_obj, "_routine_store", None),
                         )
                         if reminders and self._input_queue.empty() and not self._agent_running:
                             # Record the fire BEFORE the turn: the cadence advances

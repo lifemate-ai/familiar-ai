@@ -170,6 +170,16 @@ Invariants to preserve when touching these loops:
   cadence reset survives and error turns still burn a capped slot. Cadence:
   escalating backoff (600s × {1,3}) capped at 3 reminders, then quiet; quiet
   hours (23-7) pass only priority>=2.
+- **Self-authored routines** (`routine_store.py`, `~/.familiar_ai/routines.json`;
+  tools `routine_commit`/`routine_review`/`routine_drop`) fire by materializing
+  commitments inside `should_fire_commitment_reminder` (pass `routine_store=`) —
+  one firing path, all the gates above apply unchanged. Guardrails live in the
+  STORE (agent interval floor 600s, cap 12, seed rows operator-owned), never in
+  the tool wrapper. Autonomous moments are framed by
+  `SocialPolicyEngine.decide_autonomous_move()` (a separate axis from the
+  reactive `decide()`): quiet hours → private reflection / stay silent, dominant
+  desire → act, neither → quietly prepare; the directive is appended to the
+  desire turn's `inner_voice` in `prepare_turn`.
 - `repl()`'s finally block calls `os._exit(0)` — tests touching it must patch
   `familiar_agent.main.os._exit` or pytest dies silently.
 
