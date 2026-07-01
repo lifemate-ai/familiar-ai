@@ -199,6 +199,16 @@ class AgentConfig:
     scene_api_key: str = field(default_factory=lambda: os.environ.get("SCENE_API_KEY", ""))
     scene_model: str = field(default_factory=lambda: os.environ.get("SCENE_MODEL", ""))
 
+    # ── Inner backend (optional) ────────────────────────────────────────
+    # Separate small/local model for inner-loop micro-thoughts (one short
+    # completion per crystallized idle thought). Falls back to the utility
+    # backend only when that is separate from the main model; micro-thoughts
+    # stay disabled otherwise — idle cycles never burn main-model calls.
+    inner_platform: str = field(default_factory=lambda: os.environ.get("INNER_PLATFORM", ""))
+    inner_api_key: str = field(default_factory=lambda: os.environ.get("INNER_API_KEY", ""))
+    inner_model: str = field(default_factory=lambda: os.environ.get("INNER_MODEL", ""))
+    inner_base_url: str = field(default_factory=lambda: os.environ.get("INNER_BASE_URL", ""))
+
     # ── Autonomous behavior ───────────────────────────────────────
     # Desire-driven idle turns are OFF by default.
     # Auto-say (speak text responses aloud) is ON by default.

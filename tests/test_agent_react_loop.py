@@ -167,6 +167,8 @@ def _make_agent(*, with_tts: bool = False, with_camera: bool = False, with_mcp: 
     agent._inner_tick_count = 0
     agent._inner_escalated_at = {}
     agent._inner_loop_config = InnerLoopConfig()
+    agent._inner_backend = None
+    agent._last_micro_thought_at = 0.0
 
     # Per-turn cognition pipeline (PR3 runtime reorg).  __new__ skipped
     # the EmbodiedAgent.__init__ that normally wires the hook, so attach

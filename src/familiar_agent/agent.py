@@ -19,7 +19,12 @@ from ._runtime_helpers import (
     _MORNING_CONTEXT_MAX_CHARS,
     _noop_str,
 )
-from .backend import create_backend, create_scene_backend, create_utility_backend
+from .backend import (
+    create_backend,
+    create_inner_backend,
+    create_scene_backend,
+    create_utility_backend,
+)
 from .appraisal import AppraisalEngine
 from .config import AgentConfig
 from .desires import DesireSystem, detect_worry_signal
@@ -563,6 +568,23 @@ _INNER_ESCALATION_BOOST = 0.25
 _INNER_ESCALATION_COOLDOWN_SEC = 600.0
 # A thought must win twice in a row before it crystallizes into the monologue.
 _INNER_CRYSTALLIZE_MIN_STREAK = 2
+# Micro-thoughts (Phase 2 PR4): a crystallized focus may be verbalized by a
+# small dedicated model. Budget floor of 256 — reasoning models spend their
+# first tokens thinking and return empty text on smaller budgets.
+_INNER_MICRO_THOUGHT_MIN_INTERVAL_SEC = 120.0
+_INNER_MICRO_THOUGHT_MAX_TOKENS = 256
+# Idle thoughts fade from the competing monologue after this long.
+_INNER_MONOLOGUE_TTL_SEC = 1800.0
+_INNER_CADENCE_MIN_SEC = 5.0
+_INNER_CADENCE_MAX_SEC = 120.0
+
+_MICRO_THOUGHT_PROMPT = (
+    "You are the sub-verbal inner voice of {agent_name}. Continue the train of "
+    "thought below as ONE short first-person sentence — a passing thought, not "
+    "a message to anyone. Match the language of the focus content. No quotes, "
+    "no preamble.\n\nRecent thoughts:\n{recent}\n\nCurrent focus:\n{focus}\n\n"
+    "Thought:"
+)
 
 
 class EmbodiedAgent:
@@ -629,6 +651,11 @@ class EmbodiedAgent:
         self._inner_escalated_at: dict[str, float] = {}
         self._inner_loop_config = InnerLoopConfig(interval_sec=config.inner_loop_interval)
         self._inner_loop = InnerLoop(self._inner_loop_tick, self._inner_loop_config)
+        # Micro-thoughts: verbalized by a dedicated small model (INNER_*), or
+        # the utility backend when that is separate from the main model —
+        # idle cycles must never burn main-model calls.
+        self._inner_backend = create_inner_backend(config) or self._tape_backend()
+        self._last_micro_thought_at = 0.0
         self._exploration = ExplorationTracker()
         self._scene: SceneTracker | None = None  # initialized after DB ready in _init_tools
 
@@ -1643,6 +1670,7 @@ class EmbodiedAgent:
         if self._turn_active:
             return
         self._inner_tick_count += 1
+        self._modulate_inner_cadence()
         full_every = max(self._inner_loop_config.full_cycle_every, 1)
         cheap = self._inner_tick_count % full_every != 0
 
@@ -1659,10 +1687,16 @@ class EmbodiedAgent:
 
         self._train_of_thought.observe(winner)
         streak = self._train_of_thought.streak
-        if streak >= _INNER_CRYSTALLIZE_MIN_STREAK:
+        # Recurrence sources never re-crystallize — the monologue echoing its
+        # own contents back into itself would be a feedback loop, not thought.
+        if streak >= _INNER_CRYSTALLIZE_MIN_STREAK and winner.source not in (
+            "train_of_thought",
+            "monologue",
+        ):
+            verbalized = await self._maybe_micro_thought(winner)
             self._inner_monologue.append(
                 InnerThought(
-                    summary=winner.summary,
+                    summary=verbalized or winner.summary,
                     source=winner.source,
                     ts=time.time(),
                     score=winner.activation,
@@ -1697,6 +1731,83 @@ class EmbodiedAgent:
         self._train_of_thought.reset()
         logger.info("Inner loop: sustained focus on %r escalated to drive %r", winner.source, drive)
 
+    async def _maybe_micro_thought(self, winner) -> str | None:
+        """Verbalize a crystallized focus as one short first-person thought.
+
+        Only runs with a dedicated small backend and under a rate limit — the
+        sub-verbal monologue works fine without it; this just gives the train
+        of thought words. Failures degrade to the raw coalition summary.
+        """
+        backend = getattr(self, "_inner_backend", None)
+        if backend is None:
+            return None
+        now = time.time()
+        last = getattr(self, "_last_micro_thought_at", 0.0)
+        if now - last < _INNER_MICRO_THOUGHT_MIN_INTERVAL_SEC:
+            return None
+        self._last_micro_thought_at = now
+        recent = "\n".join(f"- {t.summary[:100]}" for t in list(self._inner_monologue)[-3:])
+        prompt = _MICRO_THOUGHT_PROMPT.format(
+            agent_name=self.config.agent_name,
+            recent=recent or "(none)",
+            focus=(winner.context_block or winner.summary)[:400],
+        )
+        try:
+            text = await backend.complete(prompt, max_tokens=_INNER_MICRO_THOUGHT_MAX_TOKENS)
+        except Exception as exc:  # noqa: BLE001
+            logger.debug("Micro-thought generation failed: %s", exc)
+            return None
+        text = (text or "").strip().strip('"')
+        if not text:
+            return None
+        return text.splitlines()[0][:200]
+
+    def _inner_monologue_coalition(self):
+        """Recent idle thoughts compete back into the workspace.
+
+        This is how between-turn thought reaches the next conversation: the
+        monologue surfaces as one modest coalition whose salience fades as the
+        thoughts age (TTL), so stale idle musings don't haunt hours later.
+        """
+        monologue = getattr(self, "_inner_monologue", None)
+        if not monologue:
+            return None
+        now = time.time()
+        fresh = [t for t in monologue if now - t.ts < _INNER_MONOLOGUE_TTL_SEC]
+        if not fresh:
+            return None
+        from .workspace import Coalition as _Coalition
+
+        lines = ["[Inner monologue — my own recent idle thoughts]"]
+        lines.extend(f"- {t.summary[:140]}" for t in fresh[-4:])
+        freshness = max(0.0, 1.0 - (now - fresh[-1].ts) / _INNER_MONOLOGUE_TTL_SEC)
+        return _Coalition(
+            source="monologue",
+            summary=f"idle thoughts ({len(fresh)})",
+            activation=0.3 + 0.15 * freshness,
+            urgency=0.15,
+            novelty=0.2 + 0.3 * freshness,
+            context_block="\n".join(lines),
+        )
+
+    def _modulate_inner_cadence(self) -> None:
+        """Body-modulated thought tempo.
+
+        A lively body (high interoceptive energy) quickens idle cycles; a
+        tired or quiet-hours body slows them — the same self-regulation a
+        person does at 3 AM. Best-effort: any failure leaves the cadence
+        untouched.
+        """
+        try:
+            signal, _ = self._collect_interoception()
+            base = float(self.config.inner_loop_interval)
+            factor = 1.6 - 0.8 * float(signal.energy)  # energy 1.0 → 0.8x; 0.0 → 1.6x
+            self._inner_loop_config.interval_sec = min(
+                _INNER_CADENCE_MAX_SEC, max(_INNER_CADENCE_MIN_SEC, base * factor)
+            )
+        except Exception:  # noqa: BLE001
+            pass
+
     async def _compete_once(
         self,
         *,
@@ -1722,6 +1833,7 @@ class EmbodiedAgent:
             asyncio.to_thread(self._attention_schema.as_coalition),
             asyncio.to_thread(self._meta_monitor.as_coalition),
             asyncio.to_thread(self._meta_inconsistency_coalition),
+            asyncio.to_thread(self._inner_monologue_coalition),
         ]
         if self._scene is not None:
             sync_tasks.append(asyncio.to_thread(self._scene.as_coalition))

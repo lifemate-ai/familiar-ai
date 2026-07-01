@@ -118,6 +118,13 @@ focus escalates by **boosting a drive** (`_INNER_SOURCE_TO_DRIVE`, streak+salien
 gate, per-source cooldown) consumed by the UI-owned idle chain — the tick never
 calls `run()` (no turn lock exists; single-flight is UI-owned). `bind_desires()`
 late-binds the UI's DesireSystem; the loop lazy-starts in `prepare_turn`.
+Micro-thoughts: a crystallized focus may be verbalized by a dedicated small
+model (`INNER_PLATFORM`/`INNER_MODEL`/`INNER_BASE_URL`, local-friendly; falls
+back to the utility backend only when separate from main — idle cycles never
+burn main-model calls). The monologue re-competes as a `monologue` coalition
+with TTL-faded salience; recurrence sources (`train_of_thought`/`monologue`)
+never re-crystallize (feedback-loop guard). Cadence is body-modulated
+(interoceptive energy scales the tick interval, clamped 5–120 s).
 
 **Body daemon (familiard, separate process, dark by default).**
 `familiar_agent/familiard.py` (`uv run familiard`) owns interoception sampling
