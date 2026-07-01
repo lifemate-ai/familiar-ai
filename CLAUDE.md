@@ -24,7 +24,7 @@ uv run familiar
 # Discover ONVIF/Tapo cameras on the LAN
 uv run familiar-discover-cameras
 
-# Tests (pytest-asyncio; ~990 tests)
+# Tests (pytest-asyncio; ~1300 tests)
 uv run pytest -q
 uv run pytest -q tests/test_runtime_hooks.py            # one file
 uv run pytest -q tests/test_runtime_hooks.py::test_name # one test
@@ -107,6 +107,13 @@ input is not double-included). Finalisation (meta-gate repair, continuation
 status, auto-say, `commit_after_end_turn`) and the forced final response on
 max-iterations remain in `run()`. The `run()` public signature is unchanged
 and must stay that way.
+
+**Inner loop (scaffolding, dark by default).** `familiar_agent/inner_loop.py`
+drives a sub-verbal idle workspace between turns; gated by `FAMILIAR_INNER_LOOP`
+(default OFF, interval `FAMILIAR_INNER_LOOP_INTERVAL`). `agent._compete_once(cheap=...)`
+is the shared workspace-cycle seam — `cheap=True` skips embedding-backed sources
+(memory recall + DMN wander) for zero-LLM idle cycles; `_gather_workspace_context`
+is now a thin wrapper over it.
 
 ### Turn flow (conceptual)
 
