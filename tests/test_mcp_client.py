@@ -366,6 +366,160 @@ async def test_call_routes_to_correct_server_and_returns_text(tmp_path: Path) ->
     sess.call_tool.assert_awaited_once_with("remember", arguments={"text": "hello"})
 
 
+# ---------------------------------------------------------------------------
+# Issue #188 — TUI-safe stderr handling + hung-server containment
+# ---------------------------------------------------------------------------
+
+
+_FASTMCP_SERVER = """\
+import sys
+from mcp.server.fastmcp import FastMCP
+
+print("Test MCP server running on stdio", file=sys.stderr, flush=True)
+mcp = FastMCP("test-server")
+
+
+@mcp.tool()
+def echo_tool(text: str) -> str:
+    \"\"\"Echo the input text back.\"\"\"
+    return f"echo: {text}"
+
+
+if __name__ == "__main__":
+    mcp.run()
+"""
+
+
+def _stdio_config(tmp_path: Path, command: str, args: list[str]) -> Path:
+    cfg = tmp_path / "cfg.json"
+    cfg.write_text(
+        json.dumps({"mcpServers": {"test": {"type": "stdio", "command": command, "args": args}}})
+    )
+    return cfg
+
+
+@pytest.mark.asyncio
+async def test_stdio_registers_tools_when_stderr_has_no_fileno(tmp_path: Path) -> None:
+    """Regression for #188: under Textual, sys.stderr lacks a usable fileno and
+    stdio_client's default errlog broke the subprocess spawn — tools silently
+    never registered. The explicit errlog file must make this work."""
+    import io
+
+    server = tmp_path / "server.py"
+    server.write_text(_FASTMCP_SERVER)
+    cfg = _stdio_config(tmp_path, sys.executable, [str(server)])
+
+    from familiar_agent.mcp_client import MCPClientManager
+
+    real_stderr = sys.stderr
+    sys.stderr = io.StringIO()  # Textual-like stderr replacement
+    try:
+        mgr = MCPClientManager(
+            config_path=cfg,
+            errlog_path=tmp_path / "mcp-stderr.log",
+            connect_timeout_seconds=30,
+        )
+        await mgr.start()
+    finally:
+        sys.stderr = real_stderr
+
+    try:
+        names = {d["name"] for d in mgr.get_tool_definitions()}
+        assert names == {"echo_tool"}
+        text, image = await mgr.call("echo_tool", {"text": "hi"})
+        assert text == "echo: hi"
+        assert image is None
+        # The server's stderr banner landed in the log file, not on screen.
+        assert "running on stdio" in (tmp_path / "mcp-stderr.log").read_text()
+    finally:
+        await mgr.stop()
+
+
+@pytest.mark.asyncio
+async def test_hung_server_times_out_and_is_skipped(tmp_path: Path) -> None:
+    """A server that never completes the MCP handshake must not wedge start()."""
+    import time as _time
+
+    cfg = _stdio_config(tmp_path, sys.executable, ["-c", "import time; time.sleep(60)"])
+
+    from familiar_agent.mcp_client import MCPClientManager
+
+    mgr = MCPClientManager(
+        config_path=cfg,
+        errlog_path=tmp_path / "mcp-stderr.log",
+        connect_timeout_seconds=1.5,
+    )
+    started = _time.monotonic()
+    await mgr.start()
+    elapsed = _time.monotonic() - started
+
+    try:
+        assert mgr.get_tool_definitions() == []
+        # 1.5s handshake budget + bounded cleanup — far below the 60s sleep.
+        assert elapsed < 15
+    finally:
+        await mgr.stop()
+
+
+@pytest.mark.asyncio
+async def test_stdio_client_receives_real_file_errlog(tmp_path: Path) -> None:
+    """The mocked transport must be invoked with an errlog that has a fileno."""
+    cfg = _stdio_config(tmp_path, "some-command", [])
+    sess = _session(_tool("t"))
+
+    from unittest.mock import patch
+
+    from familiar_agent.mcp_client import MCPClientManager
+
+    modules = _patch_mcp([sess])
+    with patch.dict(sys.modules, modules):
+        mgr = MCPClientManager(config_path=cfg, errlog_path=tmp_path / "err.log")
+        await mgr.start()
+
+    stdio_mock = modules["mcp.client.stdio"].stdio_client
+    assert stdio_mock.call_count == 1
+    errlog = stdio_mock.call_args.kwargs["errlog"]
+    errlog.fileno()  # must not raise — a real file, never sys.stderr
+
+
+@pytest.mark.asyncio
+async def test_start_mcp_early_is_idempotent() -> None:
+    """start_mcp_early creates at most one in-flight handshake task."""
+    import asyncio
+
+    from tests.test_agent_react_loop import _make_agent
+
+    agent = _make_agent()
+    mcp = MagicMock()
+    mcp.is_started = False
+    started = asyncio.Event()
+
+    async def _slow_start():
+        await started.wait()
+
+    mcp.start = _slow_start
+    agent._mcp = mcp
+    agent._mcp_start_task = None
+
+    agent.start_mcp_early()
+    task1 = agent._mcp_start_task
+    assert task1 is not None
+    agent.start_mcp_early()
+    assert agent._mcp_start_task is task1  # no second task while in flight
+
+    started.set()
+    await task1
+    mcp.is_started = True
+    agent.start_mcp_early()
+    assert agent._mcp_start_task is task1  # started manager → no new task
+
+    # Without an MCP manager it is a no-op.
+    agent._mcp = None
+    agent._mcp_start_task = None
+    agent.start_mcp_early()
+    assert agent._mcp_start_task is None
+
+
 @pytest.mark.asyncio
 async def test_call_extracts_image_from_content(tmp_path: Path) -> None:
     """call() extracts base64 image data when content includes an image block."""

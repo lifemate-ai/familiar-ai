@@ -251,6 +251,10 @@ class FamiliarApp(App):
         self._log_system(_t("startup", log_path=str(self._log_path)))
         self.set_interval(IDLE_CHECK_INTERVAL, self._reminder_tick)
         self.set_interval(IDLE_CHECK_INTERVAL, self._desire_tick)
+        # Start the MCP handshake now so tools are ready by the first turn (#188).
+        start_mcp_early = getattr(self.agent, "start_mcp_early", None)
+        if callable(start_mcp_early):
+            start_mcp_early()
         self.run_worker(self._process_queue(), exclusive=False)
         # Start realtime STT if configured
         if self._realtime_stt:

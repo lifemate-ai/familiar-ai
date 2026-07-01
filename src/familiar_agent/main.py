@@ -86,6 +86,11 @@ async def repl(agent: EmbodiedAgent, desires: DesireSystem, debug: bool = False)
 
     loop = asyncio.get_event_loop()
 
+    # Start the MCP handshake now so tools are ready by the first turn (#188).
+    start_mcp_early = getattr(agent, "start_mcp_early", None)
+    if callable(start_mcp_early):
+        start_mcp_early()
+
     # Persistent input queue — stdin reader runs as a background task
     # so user input is captured even while the agent is busy.
     input_queue: asyncio.Queue[str | None] = asyncio.Queue()

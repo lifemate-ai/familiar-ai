@@ -1776,6 +1776,10 @@ class FamiliarWindow(QMainWindow):
 
             agent = await asyncio.to_thread(EmbodiedAgent, self._config)
             agent.bind_desires(self._desires)
+            # Start the MCP handshake now so tools are ready by the first turn (#188).
+            start_mcp_early = getattr(agent, "start_mcp_early", None)
+            if callable(start_mcp_early):
+                start_mcp_early()
             self._agent = agent
             if not agent.is_embedding_ready:
                 self._set_startup_status(f"{_t('initializing')} memory...")

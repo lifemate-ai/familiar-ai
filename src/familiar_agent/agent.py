@@ -687,6 +687,21 @@ class EmbodiedAgent:
         """
         self._desires = desires
 
+    def start_mcp_early(self) -> None:
+        """Kick off the MCP handshake in the background (issue #188).
+
+        Callable from any running event loop — the UIs invoke it at mount so
+        MCP tools are registered by the first turn instead of the second;
+        ``prepare_turn`` calls it as the fallback for other entry points.
+        Idempotent: at most one in-flight handshake.
+        """
+        if self._mcp is None or self._mcp.is_started:
+            return
+        task = getattr(self, "_mcp_start_task", None)
+        if task is not None and not task.done():
+            return
+        self._mcp_start_task = asyncio.ensure_future(self._mcp.start())
+
     def _spawn_background_task(self, coro: Coroutine[Any, Any, None], *, name: str) -> None:
         """Run non-critical post-turn work off the response critical path."""
         tasks = getattr(self, "_background_tasks", None)

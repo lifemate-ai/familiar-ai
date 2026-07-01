@@ -255,7 +255,10 @@ class EmbodiedAgentHook(RuntimeHookBase):
             on_phase("startup" if startup_phase else "thinking")
 
         # ── Background tasks (MCP connections, memory worker, inner loop) ──
-        if agent._mcp and not agent._mcp.is_started:
+        start_mcp_early = getattr(agent, "start_mcp_early", None)
+        if callable(start_mcp_early):
+            start_mcp_early()
+        elif agent._mcp and not agent._mcp.is_started:  # legacy agents
             agent._mcp_start_task = asyncio.ensure_future(agent._mcp.start())
         if memory_worker and not memory_worker.is_running:
             await memory_worker.start()
