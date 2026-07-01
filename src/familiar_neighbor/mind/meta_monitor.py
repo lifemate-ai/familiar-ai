@@ -69,7 +69,7 @@ class MetaMonitor:
                 "last_session_summary": self.summarize_session(),
                 "saved_at": datetime.now(timezone.utc).isoformat(),
             }
-            self._state_path.write_text(json.dumps(payload, ensure_ascii=False))
+            self._state_path.write_text(json.dumps(payload, ensure_ascii=False), encoding="utf-8")
         except Exception as exc:  # noqa: BLE001
             logger.warning("Could not save meta state: %s", exc)
 

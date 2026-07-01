@@ -97,7 +97,7 @@ class AttentionSchema:
                 "turn": self._turn,
                 "history": [asdict(entry) for entry in self._history],
             }
-            self._state_path.write_text(json.dumps(payload, ensure_ascii=False))
+            self._state_path.write_text(json.dumps(payload, ensure_ascii=False), encoding="utf-8")
         except Exception as exc:  # noqa: BLE001
             logger.warning("Could not save attention state: %s", exc)
 
