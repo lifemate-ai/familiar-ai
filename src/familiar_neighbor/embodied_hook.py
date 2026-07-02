@@ -22,6 +22,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import os
+import time
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -961,6 +962,8 @@ class EmbodiedAgentHook(RuntimeHookBase):
         if call.name == "say":
             prep.say_used = True
             prep.non_say_streak = 0
+            # Voice recency for the consciousness profile's reportability dim.
+            agent._last_say_at = time.time()
         else:
             prep.non_say_streak += 1
 

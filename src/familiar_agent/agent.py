@@ -34,7 +34,13 @@ from .interoception import (
     RuntimeInteroceptionProvider,
     semantic_pressure,
 )
+from .consciousness import (
+    ConsciousnessProfile,
+    ProfileInputs,
+    compute_consciousness_profile,
+)
 from .mental_state import (
+    ConsciousnessState,
     DriveVector,
     IdentityState,
     MentalStateBus,
@@ -687,6 +693,11 @@ class EmbodiedAgent:
         self._meta_monitor = MetaMonitor(state_path=_state_dir / "meta_state.json")
         self._self_ledger_tool = SelfLedgerTool(self)
         self._constitution_block: str | None = None  # rendered once per session
+        # Consciousness profile (instrumentation only, FAMILIAR_CONSCIOUSNESS_PROFILE)
+        self._last_compete_result: CompeteResult | None = None
+        self._last_consciousness_profile: ConsciousnessProfile | None = None
+        self._last_say_at: float = 0.0
+        self._last_intero_signal = None
         self._appraisal = AppraisalEngine()
         self._social_policy = SocialPolicyEngine()
         self._mental_state_bus = MentalStateBus()
@@ -1628,6 +1639,67 @@ class EmbodiedAgent:
             )
         return "\n".join(lines)
 
+    def _update_consciousness_profile(self, *, origin: str, interoception_signal=None):
+        """Compute and cache the consciousness profile from existing signals.
+
+        Instrumentation only (FAMILIAR_CONSCIOUSNESS_PROFILE): the result
+        feeds diagnostics surfaces and the mental-state snapshot, never the
+        prompt. Every input read is getattr-guarded so partially-constructed
+        agents (tests) degrade to defaults instead of raising.
+        """
+        signal = interoception_signal or getattr(self, "_last_intero_signal", None)
+        self_state = getattr(self, "_self_state", None)
+        state = self_state.snapshot() if self_state is not None else {}
+        compete = getattr(self, "_last_compete_result", None)
+        winner = compete.winner if compete is not None else None
+        workspace = getattr(self, "_workspace", None)
+        identity = getattr(self, "_identity", None)
+        identity_state = identity.state_for_snapshot() if identity is not None else None
+        meta = getattr(self, "_meta_monitor", None)
+        prediction = getattr(self, "_prediction", None)
+        pred_signal = prediction.last_signal() if prediction is not None else None
+        train = getattr(self, "_train_of_thought", None)
+        attention = getattr(self, "_attention_schema", None)
+        try:
+            self_report = bool(attention.self_report()) if attention is not None else False
+        except Exception:  # noqa: BLE001
+            self_report = False
+        grounding = getattr(self, "_grounding", None)  # arrives with the reality monitor
+
+        inputs = ProfileInputs(
+            energy=float(getattr(signal, "energy", 0.5)),
+            quiet_hours=bool(getattr(signal, "quiet_hours", False)),
+            arousal=float(state.get("arousal", 0.35)),
+            fatigue=float(state.get("fatigue", 0.2)),
+            winner_present=winner is not None,
+            winner_score=float(winner.score()) if winner is not None else 0.0,
+            effective_threshold=(
+                float(workspace.effective_threshold()) if workspace is not None else 0.4
+            ),
+            coalition_count=len(compete.coalitions) if compete is not None else 0,
+            identity_dissonance=(
+                float(identity_state.dissonance) if identity_state is not None else 0.0
+            ),
+            identity_threat=(
+                float(identity_state.threat_level) if identity_state is not None else 0.0
+            ),
+            meta_inconsistency=self._meta_inconsistency_coalition() is not None,
+            focus_stability=float(state.get("focus_stability", 0.5)),
+            source_diversity=(float(meta.source_diversity()) if meta is not None else 0.0),
+            peripheral_count=len(compete.others) if compete is not None else 0,
+            thought_streak=int(getattr(train, "streak", 0)),
+            sensor_confidence=float(state.get("sensor_confidence", 0.7)),
+            external_surprise=float(getattr(pred_signal, "external_surprise", 0.0)),
+            agency_error=float(getattr(pred_signal, "agency_error", 0.0)),
+            grounding_ratio=(grounding.ratio() if grounding is not None else None),
+            tts_present=getattr(self, "_tts", None) is not None,
+            say_recent=(time.time() - getattr(self, "_last_say_at", 0.0)) < 600.0,
+            self_report_available=self_report,
+        )
+        profile = compute_consciousness_profile(inputs, origin=origin)
+        self._last_consciousness_profile = profile
+        return profile
+
     def _build_mental_snapshot(
         self,
         *,
@@ -1679,6 +1751,13 @@ class EmbodiedAgent:
                 if (identity := getattr(self, "_identity", None)) is not None
                 else IdentityState()
             ),
+            consciousness=(
+                self._update_consciousness_profile(
+                    origin="turn", interoception_signal=interoception_signal
+                ).as_state()
+                if getattr(self.config, "consciousness_profile", False)
+                else ConsciousnessState()
+            ),
         )
 
     async def _inner_loop_tick(self) -> None:
@@ -1706,6 +1785,10 @@ class EmbodiedAgent:
         result = await self._compete_once(
             cheap=cheap, desires=self._desires, extra_coalitions=extra_coalitions
         )
+        if getattr(self.config, "consciousness_profile", False):
+            # Winnerless ticks are informative too (low access), so the
+            # profile updates before the early return below.
+            self._update_consciousness_profile(origin="tick")
         winner = result.winner
         if winner is None:
             return
@@ -1825,6 +1908,7 @@ class EmbodiedAgent:
         """
         try:
             signal, _ = self._collect_interoception()
+            self._last_intero_signal = signal  # cached for the tick-path profile
             base = float(self.config.inner_loop_interval)
             factor = 1.6 - 0.8 * float(signal.energy)  # energy 1.0 → 0.8x; 0.0 → 1.6x
             self._inner_loop_config.interval_sec = min(
@@ -1886,7 +1970,9 @@ class EmbodiedAgent:
                 coalitions.append(coalition)
 
         if not coalitions:
-            return CompeteResult(winner=None, others=[], coalitions=[])
+            empty = CompeteResult(winner=None, others=[], coalitions=[])
+            self._last_compete_result = empty
+            return empty
 
         winner = self._workspace.compete(coalitions)
         if winner is None and not cheap:
@@ -1898,7 +1984,11 @@ class EmbodiedAgent:
                 coalitions.append(dmn_coalition)
 
         others = [c for c in coalitions if c is not winner]
-        return CompeteResult(winner=winner, others=others, coalitions=coalitions)
+        result = CompeteResult(winner=winner, others=others, coalitions=coalitions)
+        # Consciousness-profile seam: one assignment covers both the turn path
+        # (_gather_workspace_context) and the idle tick (_inner_loop_tick).
+        self._last_compete_result = result
+        return result
 
     def _meta_inconsistency_coalition(self):
         """Self-inconsistency as a workspace voice.

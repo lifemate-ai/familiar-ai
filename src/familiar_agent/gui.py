@@ -1153,6 +1153,15 @@ class FamiliarWindow(QMainWindow):
         )
         status_layout.addWidget(self._status_readiness)
 
+        # Consciousness profile line (empty unless FAMILIAR_CONSCIOUSNESS_PROFILE).
+        self._status_consciousness = QLabel("")
+        self._status_consciousness.setWordWrap(True)
+        self._status_consciousness.setStyleSheet(
+            f"color: {_TEXT_SECONDARY}; font-size: {_px(10)}px; background: transparent;"
+            f"font-family: {_MONO_FONT_STACK};"
+        )
+        status_layout.addWidget(self._status_consciousness)
+
         self._status_error_label = QLabel("")
         self._status_error_label.setWordWrap(True)
         self._status_error_label.setStyleSheet(
@@ -1321,6 +1330,9 @@ class FamiliarWindow(QMainWindow):
             readiness.setText(
                 f"{snapshot.readiness}\nqueue={snapshot.queue_backlog} | stt_connected={snapshot.realtime_stt_connected}"
             )
+        consciousness = getattr(self, "_status_consciousness", None)
+        if consciousness is not None:
+            consciousness.setText(snapshot.consciousness_line)
         if error is not None:
             error.setText(f"Last error: {snapshot.last_error}" if snapshot.last_error else "")
 

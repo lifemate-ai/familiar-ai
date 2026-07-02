@@ -243,6 +243,45 @@ class IdentityState:
 
 
 @dataclass(slots=True)
+class ConsciousnessState:
+    """Per-turn consciousness-profile reading (instrumentation; default = dormant).
+
+    Six graded dimensions, never a Bool. Strictly observability: carried on
+    the snapshot for diagnostics/jsonl, never rendered into the prompt.
+    """
+
+    wakefulness: float = 0.0
+    access: float = 0.0
+    self_model_integrity: float = 0.0
+    integration: float = 0.0
+    reality_testing: float = 0.0
+    reportability: float = 0.0
+    origin: str = ""
+
+    def sanitized(self) -> "ConsciousnessState":
+        return ConsciousnessState(
+            wakefulness=_clamp01(self.wakefulness),
+            access=_clamp01(self.access),
+            self_model_integrity=_clamp01(self.self_model_integrity),
+            integration=_clamp01(self.integration),
+            reality_testing=_clamp01(self.reality_testing),
+            reportability=_clamp01(self.reportability),
+            origin=self.origin[:16],
+        )
+
+    def is_default(self) -> bool:
+        return (
+            not self.origin
+            and self.wakefulness == 0.0
+            and self.access == 0.0
+            and self.self_model_integrity == 0.0
+            and self.integration == 0.0
+            and self.reality_testing == 0.0
+            and self.reportability == 0.0
+        )
+
+
+@dataclass(slots=True)
 class MentalStateSnapshot:
     turn_index: int
     created_at: str
@@ -253,6 +292,7 @@ class MentalStateSnapshot:
     working_memory: list[WorkingMemoryItem] = field(default_factory=list)
     continuity_note: str = ""
     identity: IdentityState = field(default_factory=IdentityState)
+    consciousness: ConsciousnessState = field(default_factory=ConsciousnessState)
 
     def sanitized(self) -> "MentalStateSnapshot":
         return MentalStateSnapshot(
@@ -265,6 +305,7 @@ class MentalStateSnapshot:
             working_memory=[item.sanitized() for item in self.working_memory[:6]],
             continuity_note=self.continuity_note[:240],
             identity=self.identity.sanitized(),
+            consciousness=self.consciousness.sanitized(),
         )
 
     def to_json_dict(self) -> dict[str, Any]:
@@ -275,6 +316,9 @@ class MentalStateSnapshot:
             data["affect"].pop("identity_dissonance", None)
         if self.identity.sanitized().is_default():
             data.pop("identity", None)
+        # Same contract for the consciousness profile (instrumentation layer).
+        if self.consciousness.sanitized().is_default():
+            data.pop("consciousness", None)
         return data
 
     @classmethod
@@ -291,6 +335,7 @@ class MentalStateSnapshot:
             ],
             continuity_note=str(data.get("continuity_note", "")),
             identity=IdentityState(**dict(data.get("identity", {}))),
+            consciousness=ConsciousnessState(**dict(data.get("consciousness", {}))),
         )
 
     def prompt_summary(self) -> str:

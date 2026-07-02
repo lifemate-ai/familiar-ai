@@ -71,6 +71,47 @@ def test_format_gui_diagnostics_includes_readiness_and_error() -> None:
     assert "last_error: missing key" in rendered
 
 
+def _window(agent) -> SimpleNamespace:
+    return SimpleNamespace(
+        _agent=agent,
+        _config=SimpleNamespace(
+            platform="openai",
+            model="gemma4",
+            utility_platform="",
+            utility_model="",
+            scene_platform="",
+            scene_model="",
+        ),
+        _startup_status="Ready",
+        _agent_ready=True,
+        _agent_running=False,
+        _agent_init_failed=False,
+        _last_error="",
+        _realtime_stt=SimpleNamespace(connected=False, gated=False),
+        _input_queue=SimpleNamespace(qsize=lambda: 0),
+    )
+
+
+def test_consciousness_line_empty_without_profile() -> None:
+    snapshot = build_gui_diagnostics(_window(SimpleNamespace()))
+    assert snapshot.consciousness_line == ""
+    assert "consciousness:" not in format_gui_diagnostics(snapshot)
+
+
+def test_consciousness_line_renders_profile() -> None:
+    from familiar_neighbor.mind.consciousness import (
+        ProfileInputs,
+        compute_consciousness_profile,
+    )
+
+    agent = SimpleNamespace(
+        _last_consciousness_profile=compute_consciousness_profile(ProfileInputs(energy=0.8))
+    )
+    snapshot = build_gui_diagnostics(_window(agent))
+    assert "wake" in snapshot.consciousness_line
+    assert "consciousness: wake" in format_gui_diagnostics(snapshot)
+
+
 def test_gui_copy_diagnostics_uses_clipboard(monkeypatch) -> None:
     captured: dict[str, str] = {}
     clipboard = SimpleNamespace(setText=lambda text: captured.setdefault("text", text))

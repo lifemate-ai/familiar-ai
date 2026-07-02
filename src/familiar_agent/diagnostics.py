@@ -31,6 +31,8 @@ class GuiDiagnosticsSnapshot:
     mcp_ready: bool
     realtime_stt_connected: bool
     realtime_stt_gated: bool
+    # Consciousness profile one-liner (empty unless FAMILIAR_CONSCIOUSNESS_PROFILE).
+    consciousness_line: str = ""
 
 
 def _backend_summary(platform: str, model: str) -> str:
@@ -105,6 +107,14 @@ def build_gui_diagnostics(window: Any) -> GuiDiagnosticsSnapshot:
             getattr(config, "scene_model", ""),
         )
 
+    profile = getattr(agent, "_last_consciousness_profile", None)
+    consciousness_line = ""
+    if profile is not None:
+        try:
+            consciousness_line = profile.one_line()
+        except Exception:  # noqa: BLE001
+            consciousness_line = ""
+
     return GuiDiagnosticsSnapshot(
         phase=phase,
         headline=headline,
@@ -119,6 +129,7 @@ def build_gui_diagnostics(window: Any) -> GuiDiagnosticsSnapshot:
         mcp_ready=mcp_ready,
         realtime_stt_connected=stt_connected,
         realtime_stt_gated=stt_gated,
+        consciousness_line=consciousness_line,
     )
 
 
@@ -140,6 +151,8 @@ def format_gui_diagnostics(snapshot: GuiDiagnosticsSnapshot) -> str:
         f"realtime_stt_gated: {snapshot.realtime_stt_gated}",
         f"last_error: {snapshot.last_error or 'none'}",
     ]
+    if snapshot.consciousness_line:
+        lines.append(f"consciousness: {snapshot.consciousness_line}")
     return "\n".join(lines)
 
 

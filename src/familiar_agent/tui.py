@@ -441,6 +441,9 @@ class FamiliarApp(App):
                 count = action_counts.get(tool_name, 0)
                 if count:
                     parts.append(f"[dim]{icon} ×{count}[/dim]")
+            profile = getattr(self.agent, "_last_consciousness_profile", None)
+            if profile is not None:
+                parts.append(f"[dim]{profile.one_line()}[/dim]")
             summary = "  [dim]──[/dim] " + "  ".join(parts) + "  [dim]" + "─" * 20 + "[/dim]"
             log.write(summary)
             self._append_log(f"── {elapsed:.1f}s ──")

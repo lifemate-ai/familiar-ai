@@ -7,6 +7,7 @@ re-located in PR-followup #2.  Compatibility shims at
 
 from .attention_schema import AttentionSchema
 from .concern_engine import ConcernEngine
+from .consciousness import ConsciousnessProfile, compute_consciousness_profile
 from .default_mode import DefaultModeProcessor
 from .desires import DesireSystem
 from .mental_state import MentalStateBus
@@ -22,6 +23,7 @@ from .workspace import GlobalWorkspace
 __all__ = [
     "AttentionSchema",
     "ConcernEngine",
+    "ConsciousnessProfile",
     "DefaultModeProcessor",
     "DesireSystem",
     "GlobalWorkspace",
@@ -33,4 +35,5 @@ __all__ = [
     "SceneTracker",
     "SelfNarrative",
     "SelfState",
+    "compute_consciousness_profile",
 ]

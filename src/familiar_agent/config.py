@@ -250,6 +250,13 @@ class AgentConfig:
     proactive_reminders: bool = field(
         default_factory=lambda: _bool_env("FAMILIAR_PROACTIVE_REMINDERS", default=True)
     )
+    # Consciousness profile: multidimensional instrumentation (wakefulness,
+    # access, self-model, integration, reality-testing, reportability) computed
+    # from existing signals. Observability only — surfaces in diagnostics and
+    # mental_state.jsonl, never in the prompt. Default OFF.
+    consciousness_profile: bool = field(
+        default_factory=lambda: _bool_env("FAMILIAR_CONSCIOUSNESS_PROFILE", default=False)
+    )
     # Phase 2 inner loop: cheap workspace cycling between turns. Default OFF —
     # the agent's idle behaviour is byte-identical unless this is enabled.
     inner_loop: bool = field(

@@ -55,6 +55,7 @@ class SetupConfig:
     inner_loop: bool = False
     voice_gate: bool = False
     prompt_profile: str = "full"
+    consciousness_profile: bool = False
 
 
 Validator = Callable[[Any], str | None]
@@ -465,6 +466,16 @@ SETTINGS_FIELDS: tuple[SettingField, ...] = (
         options=("full", "compact"),
         setup_visible=False,
         runtime_getter=lambda config: config.prompt_profile,
+    ),
+    SettingField(
+        env_key="FAMILIAR_CONSCIOUSNESS_PROFILE",
+        attr="consciousness_profile",
+        section="advanced",
+        label="Consciousness profile (diagnostics):",
+        widget="bool",
+        default=False,
+        setup_visible=False,
+        runtime_getter=lambda config: config.consciousness_profile,
     ),
 )
 

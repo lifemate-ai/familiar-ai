@@ -102,6 +102,18 @@ class MetaMonitor:
     def recent_steps(self) -> list[dict]:
         return list(self._steps)
 
+    def source_diversity(self) -> float:
+        """Distinct-source ratio over the step window (0.0 when empty).
+
+        Feeds the consciousness profile's integration dimension: a session
+        where many processors reached the workspace scores higher than one
+        dominated by a single source.
+        """
+        if not self._steps:
+            return 0.0
+        sources = {step.get("source", "") for step in self._steps}
+        return len(sources) / len(self._steps)
+
     def detect_inconsistency(self, self_narrative: SelfNarrative) -> str | None:
         """Return a description of inconsistency if current behaviour diverges from narrative.
 
