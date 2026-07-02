@@ -227,6 +227,14 @@ class AgentConfig:
             or os.environ.get("FAMILIAR_AUTO", "").strip().lower() in ("1", "true", "yes")
         )
     )
+    # Voice gate: a conversational reply that never called say() gets one
+    # in-loop re-ask so the model itself picks the line to speak aloud.
+    # Unlike auto_say (which pipes the whole reply — stage directions and
+    # all — into TTS), this preserves say() as the deliberate voice channel.
+    # Aimed at small local models that write text but forget to speak.
+    voice_gate: bool = field(
+        default_factory=lambda: _bool_env("FAMILIAR_VOICE_GATE", default=False)
+    )
     # Proactive commitment reminders are a baseline neighbor behaviour: on by
     # default and INDEPENDENT of auto_desire (you can silence idle musings yet
     # still be reminded). Disable with FAMILIAR_PROACTIVE_REMINDERS=0.

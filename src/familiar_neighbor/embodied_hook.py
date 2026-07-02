@@ -225,6 +225,7 @@ class PreparedTurn:
     final_text: str = "(no response)"
     non_say_streak: int = 0
     identity_retried: bool = False
+    voice_retried: bool = False
     observation_action_name: str | None = None
     observation_action_input: dict | None = None
     pending_view_action_name: str | None = None
@@ -877,6 +878,36 @@ class EmbodiedAgentHook(RuntimeHookBase):
                         "CAN do instead."
                     ),
                 )
+
+        # Voice gate: written text is silent — a conversational reply that
+        # never called say() gets ONE re-ask so the model itself picks the
+        # line to speak aloud. Unlike auto_say (which would pipe the whole
+        # reply, stage directions and all, into TTS), this keeps say() as the
+        # deliberate voice channel. Small local models write text but forget
+        # to speak; well-behaved models never trip this (say_used is True).
+        # Brief turns (own say-first design, 2-iteration cap) and desire
+        # turns (private reflection must stay silent) are exempt.
+        if (
+            getattr(agent.config, "voice_gate", False)
+            and agent._tts is not None
+            and not prep.voice_retried
+            and not prep.say_used
+            and not prep.is_desire_turn
+            and not prep.brief_reply_turn
+            and (result.text or "").strip()
+        ):
+            prep.voice_retried = True
+            from familiar_runtime.runtime import RetryDecision
+
+            return RetryDecision(
+                retry=True,
+                inject_user_message=(
+                    "[VOICE] Your text is silent — the companion cannot hear it. "
+                    "Call the say tool NOW with only the one or two sentences you "
+                    "want spoken aloud (spoken words only, no stage directions or "
+                    "tags), then finish your reply."
+                ),
+            )
 
         # Coherence gate: ask the utility backend whether the response contains
         # a logical error. Only fires once per turn to avoid infinite loops.

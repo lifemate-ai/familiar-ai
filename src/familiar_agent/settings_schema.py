@@ -53,6 +53,7 @@ class SetupConfig:
     auto_say: bool = True
     proactive_reminders: bool = True
     inner_loop: bool = False
+    voice_gate: bool = False
 
 
 Validator = Callable[[Any], str | None]
@@ -442,6 +443,16 @@ SETTINGS_FIELDS: tuple[SettingField, ...] = (
         default=False,
         setup_visible=False,
         runtime_getter=lambda config: config.inner_loop,
+    ),
+    SettingField(
+        env_key="FAMILIAR_VOICE_GATE",
+        attr="voice_gate",
+        section="advanced",
+        label="Voice gate (re-ask silent replies):",
+        widget="bool",
+        default=False,
+        setup_visible=False,
+        runtime_getter=lambda config: config.voice_gate,
     ),
 )
 
