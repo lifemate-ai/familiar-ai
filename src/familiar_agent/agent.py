@@ -1337,7 +1337,11 @@ class EmbodiedAgent:
                     proposed = sum(1 for e in lessons if e.get("tier") == "auto_proposed")
                     note = f"[Experience ledger] {len(lessons)} lessons held"
                     if proposed:
-                        note += f" ({proposed} proposed overnight — review with ledger_review)"
+                        note += (
+                            f" ({proposed} proposed overnight — inspect with ledger_review; "
+                            "promoting one adds it to your standing context from the "
+                            "next session)"
+                        )
                     lines.append(note)
         return "\n\n".join(lines)
 
@@ -1390,14 +1394,22 @@ class EmbodiedAgent:
             lessons = lister()
         except Exception:  # noqa: BLE001
             lessons = []
-        if not lessons:
+        # Only agent-PROMOTED lessons reach the stable half. Overnight
+        # proposals are distilled from user-influenced observations; letting
+        # them shape the cache prefix without the agent's own ledger_commit
+        # would make "promotion is the agent's decision" visibility-false.
+        # Proposals surface in the morning note and ledger_review instead.
+        held = [
+            entry
+            for entry in (lessons if isinstance(lessons, list) else [])
+            if entry.get("tier") == "agent"
+        ]
+        if not held:
             self._lessons_block = ""
             return ""
         lines = ["[Lessons I have drawn from experience — my own words, advisory]"]
-        for entry in lessons:
-            marker = " (proposed)" if entry.get("tier") == "auto_proposed" else ""
-            lines.append(f"- {entry.get('lesson_text', '')}{marker}")
-        block = "\n".join(lines)[:1400]
+        lines.extend(f"- {entry.get('lesson_text', '')}" for entry in held)
+        block = "\n".join(lines)[:2200]
         self._lessons_block = block
         return block
 
@@ -2226,10 +2238,12 @@ class EmbodiedAgent:
         text = text.strip()[:160]
         if not key or not text or key == "none":
             return 0
-        await self._memory.upsert_experience_lesson_async(
+        ok = await self._memory.upsert_experience_lesson_async(
             key, text, tier="auto_proposed", confidence=0.4, source="night_proposal"
         )
-        return 1
+        # A full ledger of held lessons outranks a fresh proposal — the store
+        # reports the eviction honestly and we count 0, not a phantom write.
+        return 1 if ok else 0
 
     async def _run_dream_cycles(self, cycles: int = 3) -> int:
         """Ungrounded generative cycles, journaled as kind='dream'.

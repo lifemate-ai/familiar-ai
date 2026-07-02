@@ -2011,7 +2011,9 @@ class ObservationMemory:
     _LESSON_TIERS = ("agent", "auto_proposed")
     _LESSON_MAX_ROWS = 12
     _LESSON_MAX_TEXT = 160
-    _LESSON_TOTAL_BUDGET = 1200
+    # Must fit MAX_ROWS full-length lessons (12 × 160 = 1920) — otherwise the
+    # budget silently dominates the row cap and "a dozen lines" is a lie.
+    _LESSON_TOTAL_BUDGET = 2000
 
     def upsert_experience_lesson(
         self,
@@ -2094,8 +2096,17 @@ class ObservationMemory:
                     ),
                 )
             self._evict_lessons_over_budget_locked(db)
+            # Honest postcondition: a low-tier/low-conviction insert into a
+            # full ledger may be the eviction victim itself — report that as
+            # failure instead of claiming the lesson was recorded.
+            survived = (
+                db.execute(
+                    "SELECT 1 FROM experience_lessons WHERE lesson_key = ?", (key,)
+                ).fetchone()
+                is not None
+            )
             db.commit()
-        return True
+        return survived
 
     def _evict_lessons_over_budget_locked(self, db: sqlite3.Connection) -> None:
         while True:

@@ -124,7 +124,15 @@ class SelfLedgerTool:
         lesson = str(tool_input.get("lesson", "")).strip()
         if not lesson:
             return "Error: lesson text is required."
-        key = str(tool_input.get("key", "")).strip() or lesson[:40]
+        key = str(tool_input.get("key", "")).strip()
+        if not key:
+            # Content-hashed fallback: companion lessons commonly share a
+            # 40-char stem ("when the companion is …") — a prefix-only key
+            # would silently merge distinct lessons.
+            import hashlib
+
+            digest = hashlib.sha1(lesson.encode("utf-8")).hexdigest()[:6]
+            key = f"{lesson[:32]}-{digest}"
         memory = getattr(self._agent, "_memory", None)
         upsert = getattr(memory, "upsert_experience_lesson", None)
         if not callable(upsert):
@@ -133,7 +141,10 @@ class SelfLedgerTool:
         # enforces the same, but the intent belongs here too.
         ok = upsert(key, lesson, tier="agent", confidence=0.6, source="agent")
         if not ok:
-            return "Error: lesson was empty after normalization."
+            return (
+                "The ledger is full of lessons you hold more strongly — "
+                "retire one with ledger_review(drop_key=...) first."
+            )
         return (
             "Lesson recorded. It joins your standing context from the next "
             "session on — like something understood before sleep."
