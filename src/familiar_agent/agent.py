@@ -995,6 +995,17 @@ class EmbodiedAgent:
 
         except Exception as exc:  # noqa: BLE001
             logger.warning("Post-response pipeline failed: %s", exc)
+        finally:
+            # Dense recurrence defers self-state writes; the turn's own affect
+            # deltas (apply_turn_context above) must be durable once the
+            # post-response pipeline ends — this is what makes the
+            # defer_saves docstring ("never a real turn's state") true.
+            self_state = getattr(self, "_self_state", None)
+            if self_state is not None and hasattr(self_state, "flush"):
+                try:
+                    self_state.flush()
+                except Exception:  # noqa: BLE001
+                    pass
 
     def _init_tools(self) -> None:
         cam = self.config.camera
@@ -1797,13 +1808,18 @@ class EmbodiedAgent:
         result = await self._compete_once(
             cheap=cheap, desires=self._desires, extra_coalitions=extra_coalitions
         )
+        if self._turn_active:
+            # A real turn started while the competition awaited — yield.
+            # Without this re-check, the dense block below would inject an
+            # idle broadcast into the live turn's self-state and attention.
+            return
         if getattr(self.config, "consciousness_profile", False):
             # Winnerless ticks are informative too (low access), so the
             # profile updates before the early return below.
             self._update_consciousness_profile(origin="tick")
         # Dense recurrence: accumulated drive nudges flush once per full
-        # cycle — one desires.json write per ~full_cycle instead of one per
-        # broadcast.
+        # cycle — up to one desires.json write per mapped drive per cycle,
+        # instead of one per broadcast.
         pending = getattr(self, "_pending_drive_nudges", None)
         if not cheap and pending and self._desires is not None:
             self._pending_drive_nudges = {}
@@ -2961,15 +2977,6 @@ class EmbodiedAgent:
         if self._camera:
             self._camera.close()
 
-        # Dense recurrence defers disk writes — persist any idle backlog.
-        for store_name in ("_self_state", "_attention_schema"):
-            store = getattr(self, store_name, None)
-            if store is not None and hasattr(store, "flush"):
-                try:
-                    store.flush()
-                except Exception:  # noqa: BLE001
-                    pass
-
         await self._drain_background_tasks()
 
         # Write today's self-narrative before shutting down.
@@ -2996,6 +3003,16 @@ class EmbodiedAgent:
                 await asyncio.wait_for(inner_loop.stop(), timeout=1.5)
             except (asyncio.TimeoutError, Exception):
                 pass
+        # Dense recurrence defers disk writes — persist any backlog AFTER all
+        # producers (background pipelines, inner-loop ticks) have stopped, or
+        # a late nudge would re-dirty the stores past the flush and be lost.
+        for store_name in ("_self_state", "_attention_schema"):
+            store = getattr(self, store_name, None)
+            if store is not None and hasattr(store, "flush"):
+                try:
+                    store.flush()
+                except Exception:  # noqa: BLE001
+                    pass
         if self._mcp:
             try:
                 await asyncio.wait_for(self._mcp.stop(), timeout=2.0)

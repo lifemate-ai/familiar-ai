@@ -9,7 +9,7 @@ default = idle cognition stays read-only, byte-identical to before.
 
 from __future__ import annotations
 
-from unittest.mock import MagicMock
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
@@ -180,6 +180,96 @@ async def test_nudge_listener_ignores_unmapped_sources():
     agent._pending_drive_nudges = {}
     await agent._on_broadcast_drive_nudge(_coalition(source="train_of_thought"))
     assert agent._pending_drive_nudges == {}
+
+
+# ── Review-round regressions: durability ordering + turn-yield ──
+
+
+@pytest.mark.asyncio
+async def test_tick_yields_when_turn_starts_mid_compete(tmp_path):
+    """A turn starting during the competition await must abort the dense
+    re-entry — idle broadcasts must not inject into a live turn."""
+    from unittest.mock import AsyncMock
+
+    from familiar_agent.inner_loop import CompeteResult
+
+    agent = _dense_agent(tmp_path, dense=True)
+    winner = _coalition(source="narrative")
+
+    async def compete_then_turn_starts(**kwargs):
+        agent._turn_active = True  # user message landed mid-await
+        return CompeteResult(winner=winner, others=[])
+
+    agent._compete_once = AsyncMock(side_effect=compete_then_turn_starts)
+    fired = []
+
+    async def probe(w):
+        fired.append(w)
+
+    agent._workspace.register_broadcast_listener(probe)
+    await agent._inner_loop_tick()
+    assert not fired
+    assert len(agent._attention_schema.focus_history()) == 0
+
+
+@pytest.mark.asyncio
+async def test_post_response_pipeline_flushes_deferred_self_state(tmp_path):
+    """The turn's own affect deltas must be durable once the post-response
+    pipeline ends — the defer_saves 'never a real turn's state' promise."""
+    path = tmp_path / "self.json"
+    agent = _make_agent()
+    state = SelfState(path=path)
+    state.defer_saves(min_interval=3600.0)
+    state._last_save_at = __import__("time").monotonic()
+    state.apply_broadcast(_coalition(source="prediction"))  # deferred, dirty
+    agent._self_state = state
+    assert not path.exists()
+
+    # Pipeline internals blow up immediately — the finally-flush must still run.
+    agent._infer_emotion = MagicMock(side_effect=RuntimeError("boom"))
+    await agent._run_post_response_pipeline(
+        user_input="x",
+        final_text="y",
+        camera_used=False,
+        observation_action_name=None,
+        observation_action_input=None,
+        is_desire_turn=False,
+        desires=None,
+        companion_mood="engaged",
+    )
+    assert path.exists()
+
+
+@pytest.mark.asyncio
+async def test_close_flushes_after_producers_stop(tmp_path):
+    """close() must stop producers (drain, inner loop) BEFORE the flush, or a
+    late background nudge re-dirties the store past the flush and is lost."""
+    agent = _make_agent()
+    order = []
+
+    state = SelfState(path=tmp_path / "self.json")
+    orig_flush = state.flush
+    state.flush = lambda: (order.append("flush"), orig_flush())[1]  # type: ignore[method-assign]
+    agent._self_state = state
+    agent._attention_schema = AttentionSchema(state_path=tmp_path / "att.json")
+
+    agent._camera = None
+    agent._drain_background_tasks = AsyncMock(side_effect=lambda: order.append("drain"))
+    agent._write_today_narrative = AsyncMock()
+    agent._utility_backend = agent.backend  # skip day summary
+    inner_loop = MagicMock()
+    inner_loop.stop = AsyncMock(side_effect=lambda: order.append("inner_stop"))
+    agent._inner_loop = inner_loop
+    agent._memory_worker = None
+    agent._mcp = None
+    agent._memory = MagicMock()
+    agent._stt = None
+    agent._tts = None
+
+    await agent.close()
+    assert "flush" in order and "drain" in order and "inner_stop" in order
+    assert order.index("flush") > order.index("drain")
+    assert order.index("flush") > order.index("inner_stop")
 
 
 # ── Cadence floor ──

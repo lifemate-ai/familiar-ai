@@ -192,22 +192,26 @@ class AttentionSchema:
         what it is attending to and why.
         Returns None if there is no focus history yet.
         """
-        if not self._history:
+        # Snapshot: as_coalition runs in a worker thread while note_focus /
+        # update_focus append on the event loop — iterating the live deque
+        # can raise "deque mutated during iteration".
+        history = list(self._history)
+        if not history:
             return None
 
-        current = self._history[-1]
+        current = history[-1]
         parts = [f"I'm currently focused on [{current.source}]: {current.summary}."]
 
         # Detect recent shift
-        if len(self._history) >= 2:
-            prev = self._history[-2]
+        if len(history) >= 2:
+            prev = history[-2]
             if prev.source != current.source:
                 parts.append(
                     f"My attention recently shifted from [{prev.source}] to [{current.source}]."
                 )
 
         # Mention stable focus if same source repeated
-        sources = [e.source for e in self._history]
+        sources = [e.source for e in history]
         if len(sources) >= 3 and len(set(sources[-3:])) == 1:
             parts.append(f"I have been consistently focused on [{current.source}].")
 
