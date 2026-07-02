@@ -28,7 +28,7 @@ from .voice_guard import VoiceLoopGuard, get_shared_voice_guard
 
 if TYPE_CHECKING:
     from .tools.realtime_stt import RealtimeSttClient
-    from .tools.mic import MicCapture
+    from .tools.mic import MicCapture, ParecCapture
 
 logger = logging.getLogger(__name__)
 
@@ -101,7 +101,7 @@ class RealtimeSttSession:
         self._language_code = language_code.strip()
         self._voice_guard = voice_guard or get_shared_voice_guard()
         self._stt_client: RealtimeSttClient | None = None
-        self._mic_capture: MicCapture | None = None
+        self._mic_capture: MicCapture | ParecCapture | None = None
         self._relay_task: asyncio.Task | None = None
         self._partial_task: asyncio.Task | None = None
         self._monitor_task: asyncio.Task | None = None
@@ -144,7 +144,7 @@ class RealtimeSttSession:
         committed_queue: asyncio.Queue[str | None],
     ) -> None:
         """Connect the STT WebSocket and start microphone capture."""
-        from .tools.mic import MicCapture  # noqa: PLC0415
+        from .tools.mic import create_mic_capture  # noqa: PLC0415
 
         if self.active:
             logger.debug("Realtime STT session already active; start() is a no-op")
@@ -164,7 +164,8 @@ class RealtimeSttSession:
         self._partial_task = asyncio.create_task(self._partial_relay())
         self._monitor_task = asyncio.create_task(self._monitor_connection())
 
-        self._mic_capture = MicCapture(on_audio=self._send_audio)
+        # Auto-selects sounddevice or the parec fallback (issue #153).
+        self._mic_capture = create_mic_capture(on_audio=self._send_audio)
         self._mic_capture.start(loop)
         logger.info("Realtime STT session started")
 

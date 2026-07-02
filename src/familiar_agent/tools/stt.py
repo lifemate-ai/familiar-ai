@@ -92,6 +92,11 @@ class STTTool:
         # Try PC mic first
         audio_bytes = await asyncio.to_thread(self._record_mic, stop_event)
 
+        # PulseAudio-native fallback: on WSL2/WSLg PortAudio often sees no
+        # input device even though PulseAudio capture works (issue #153).
+        if audio_bytes is None:
+            audio_bytes = await asyncio.to_thread(self._record_parec, stop_event)
+
         # Fallback to RTSP camera mic
         if audio_bytes is None and self._rtsp_url:
             logger.info("STT: no local mic, falling back to RTSP camera mic")
@@ -113,8 +118,8 @@ class STTTool:
             import numpy as np
             import sounddevice as sd
             import soundfile as sf
-        except ImportError:
-            logger.warning("STT: sounddevice/soundfile not installed")
+        except Exception as e:  # noqa: BLE001 — incl. OSError: PortAudio library not found
+            logger.warning("STT: sounddevice/soundfile unavailable (%s)", e)
             return None
 
         chunks: list = []
@@ -136,7 +141,7 @@ class STTTool:
                         chunk, _ = stream.read(1024)
                         chunks.append(chunk)
                         time.sleep(0.01)  # yield slightly; this is already in a thread
-        except sd.PortAudioError as e:
+        except Exception as e:  # noqa: BLE001 — any capture failure falls through
             logger.warning("STT: %s", describe_sounddevice_input_failure(e))
             return None
 
@@ -146,6 +151,57 @@ class STTTool:
         audio = np.concatenate(chunks, axis=0)
         buf = io.BytesIO()
         sf.write(buf, audio, sample_rate, format="WAV", subtype="PCM_16")
+        return buf.getvalue()
+
+    def _record_parec(
+        self, stop_event: asyncio.Event, *, max_seconds: float = 60.0
+    ) -> bytes | None:
+        """Record via PulseAudio's native ``parec`` until stop_event is set.
+
+        Returns WAV bytes, or None when parec is unavailable or captured
+        nothing. parec resamples to 16 kHz mono s16le for us.
+        """
+        from .mic import TARGET_RATE, parec_command
+
+        command = parec_command()
+        if command is None:
+            return None
+        import subprocess
+        import wave
+
+        try:
+            process = subprocess.Popen(command, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL)
+        except OSError as e:
+            logger.warning("STT: parec failed to start: %s", e)
+            return None
+
+        logger.info("STT: recording via parec (PulseAudio) at %dHz...", TARGET_RATE)
+        pcm = io.BytesIO()
+        block_bytes = TARGET_RATE * 2 // 10  # 100 ms of s16le mono
+        start = time.time()
+        try:
+            assert process.stdout is not None
+            while not stop_event.is_set() and time.time() - start < max_seconds:
+                chunk = process.stdout.read(block_bytes)
+                if not chunk:
+                    break
+                pcm.write(chunk)
+        finally:
+            process.terminate()
+            try:
+                process.wait(timeout=2)
+            except subprocess.TimeoutExpired:
+                process.kill()
+
+        raw = pcm.getvalue()
+        if not raw:
+            return None
+        buf = io.BytesIO()
+        with wave.open(buf, "wb") as wav:
+            wav.setnchannels(_CHANNELS)
+            wav.setsampwidth(2)
+            wav.setframerate(TARGET_RATE)
+            wav.writeframes(raw)
         return buf.getvalue()
 
     async def _record_rtsp(self, stop_event: asyncio.Event) -> bytes:

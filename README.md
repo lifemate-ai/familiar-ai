@@ -442,18 +442,27 @@ STT_LANGUAGE=ja            # recommended for Japanese; used by both batch and re
 
 familiar-ai streams microphone audio to ElevenLabs Scribe v2 and auto-commits transcripts when you pause speaking. No button press required. Coexists with the push-to-talk mode (Ctrl+T).
 
-On WSL2/WSLg, realtime STT also depends on `sounddevice` / PortAudio being able to
-see your microphone input, not just PulseAudio playback. Install
-`pulseaudio-utils` and `libasound2-plugins`, set
-`PULSE_SERVER=unix:/mnt/wslg/PulseServer`, then verify:
+On WSL2/WSLg, PortAudio often cannot see the WSLg microphone bridge even though
+PulseAudio-level capture works. familiar-ai handles this automatically: when
+`sounddevice` finds no input device, both STT paths (realtime and push-to-talk)
+fall back to PulseAudio's native `parec`. You only need:
 
 ```bash
-uv run python -m sounddevice
+sudo apt install pulseaudio-utils libasound2-plugins
+# in .env (or your shell):
+PULSE_SERVER=unix:/mnt/wslg/PulseServer
 ```
 
-If that command shows no input devices or reports `Error querying device -1`,
-familiar-ai will not be able to capture microphone audio until PortAudio can
-see the WSLg input bridge.
+Verify PulseAudio capture works (this is what the fallback uses):
+
+```bash
+pactl list short sources      # should show an RDPSource / input
+parec --rate=16000 --channels=1 | head -c 32000 > /dev/null && echo mic OK
+```
+
+To force a specific capture backend, set `FAMILIAR_STT_BACKEND=sounddevice`
+or `FAMILIAR_STT_BACKEND=parec` (default: auto — sounddevice first, parec
+fallback).
 
 ---
 
