@@ -41,6 +41,7 @@ from familiar_neighbor.mind.appraisal import AppraisalContext, AppraisalEngine
 from familiar_neighbor.mind.deferral import DEFERRAL_PREFIX, detect_deferral
 from familiar_neighbor.mind.desires import DesireSystem
 from familiar_neighbor.mind.mental_state import MentalStateBus, MentalStateSnapshot
+from familiar_neighbor.mind.reality import looks_like_fresh_perception_claim
 from familiar_neighbor.mind.social_policy import (
     SPEECH_ACT_VOCABULARY,
     SocialPolicyDecision,
@@ -228,6 +229,7 @@ class PreparedTurn:
     identity_retried: bool = False
     voice_retried: bool = False
     reality_retried: bool = False
+    see_succeeded: bool = False
     observation_action_name: str | None = None
     observation_action_input: dict | None = None
     pending_view_action_name: str | None = None
@@ -764,12 +766,14 @@ class EmbodiedAgentHook(RuntimeHookBase):
         if not final_text or final_text == "(no response)":
             return
         agent = self._agent
-        # Grounding record: did this turn touch the world? Feeds the
-        # consciousness profile's reality_testing dimension via ratio().
+        # Grounding record: did this turn actually touch the world? A failed
+        # see() does not count, and self-initiated reflection turns are not
+        # reality-testing-relevant (the gate exempts them for the same
+        # reason), so they neither raise nor sink the ratio.
         grounding = getattr(agent, "_grounding", None)
-        if grounding is not None:
+        if grounding is not None and not is_desire_turn:
             try:
-                grounding.note_turn(prep.camera_used)
+                grounding.note_turn(prep.see_succeeded)
             except Exception:  # noqa: BLE001
                 pass
         try:
@@ -903,11 +907,9 @@ class EmbodiedAgentHook(RuntimeHookBase):
             and not prep.reality_retried
             and not prep.is_desire_turn
             and not prep.brief_reply_turn
-            and not prep.camera_used
+            and not prep.see_succeeded
             and any(t.get("name") == "see" for t in prep.turn_tools)
         ):
-            from familiar_neighbor.mind.reality import looks_like_fresh_perception_claim
-
             if looks_like_fresh_perception_claim(result.text or ""):
                 prep.reality_retried = True
                 prep.say_used = False
@@ -992,6 +994,12 @@ class EmbodiedAgentHook(RuntimeHookBase):
 
         if call.name == "see":
             prep.camera_used = True
+            # camera_used means "a capture was attempted" (the observation
+            # pipeline keys on it); the reality gate and grounding need
+            # "a capture actually landed" — a failed see() must not license
+            # perception claims.
+            if result.success:
+                prep.see_succeeded = True
             if prep.pending_view_action_name is not None:
                 prep.observation_action_name = prep.pending_view_action_name
                 prep.observation_action_input = dict(prep.pending_view_action_input or {})

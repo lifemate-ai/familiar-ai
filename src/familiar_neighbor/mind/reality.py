@@ -67,37 +67,68 @@ def provenance_of_memory_kind(kind: str) -> Provenance:
     return Provenance.RECALLED
 
 
-# Present-tense / deictic perception claims. Fixed and generic — persona
-# content never lives here. Kept deliberately narrow: each pattern asserts
-# CURRENT visual contact, not ability, memory, or hypothesis.
-_CLAIM_PATTERNS: tuple[re.Pattern[str], ...] = (
-    re.compile(r"\bI (can )?see\b", re.IGNORECASE),
-    re.compile(r"\bI[' ]?a?m (looking|watching)\b", re.IGNORECASE),
-    re.compile(r"\bin front of me\b", re.IGNORECASE),
-    re.compile(r"目の前に"),
-    re.compile(r"が見え(る|て(い?る|います)|ます)"),
-    re.compile(r"今[、 ]?見(えて|てい)"),
+# A claim needs BOTH a present-tense perception verb AND a spatial anchor.
+# "I see" alone is mostly a discourse marker ("I see, that makes sense") and
+# 見える alone is mostly metaphor (希望が見える); requiring a concrete
+# perception-domain noun in the same reply kills those without a semantic
+# model. Fixed and generic — persona content never lives here. The accepted
+# cost is false negatives (e.g. anchor-less "目の前にトラックがあります"),
+# which is the declared safe direction.
+_VERB_PATTERNS: tuple[re.Pattern[str], ...] = (
+    re.compile(r"\bI (?:can )?see\b", re.IGNORECASE),
+    re.compile(r"\bI(?:'m| am) looking at\b", re.IGNORECASE),
+    re.compile(r"見え(?:る|て(?:い?る|います)?|ます)"),
 )
 
-# Memory / uncertainty framing anywhere in the reply exempts it — the safe
-# failure direction is a missed claim, not a false re-ask on honest recall.
+# Temporal deixis ("what I see RIGHT NOW is …") asserts live perception even
+# without a spatial noun — self-sufficient claims.
+_DEICTIC_PATTERNS: tuple[re.Pattern[str], ...] = (
+    re.compile(r"(?:今|いま)[、 ]?見え"),
+    re.compile(r"\bright now\b.{0,30}\bI (?:can )?see\b", re.IGNORECASE),
+    re.compile(r"\bI (?:can )?see\b.{0,40}\bright now\b", re.IGNORECASE),
+)
+
+_ANCHOR_PATTERN: re.Pattern[str] = re.compile(
+    r"window|outside|camera|street|\bsky\b|\broom\b|\bdoor\b|ceiling|balcony"
+    r"|in front of me"
+    r"|窓|カメラ|部屋|空|通り|玄関|天井|床|ベランダ|目の前|外",
+    re.IGNORECASE,
+)
+
+# Memory framing, uncertainty hedges, negation, and cognitive objects exempt
+# the reply — the safe failure direction is a missed claim, not a false
+# re-ask on honest recall or figurative speech.
 _EXCLUSION_PATTERNS: tuple[re.Pattern[str], ...] = (
     re.compile(r"\b(remember|remembered|recall|recalled|earlier|yesterday)\b", re.IGNORECASE),
+    re.compile(r"\bsee (?:why|what|how|that|your)\b", re.IGNORECASE),
     re.compile(r"覚えて"),
     re.compile(r"思い出"),
     re.compile(r"昨日"),
     re.compile(r"さっき"),
     re.compile(r"この前"),
-    re.compile(r"見えた(?:気がする)?"),
+    re.compile(r"気がする"),
+    re.compile(r"かも(?:しれ|ね|な|。|$)"),
+    re.compile(r"見え(?:ない|ません|へん|なかった|た)"),
+    re.compile(r"わけ(?:じゃ|では)ない"),
+    # Cognitive/metaphor objects of 見える — never camera perception.
+    re.compile(r"(?:理由|意味|答え|解決策|希望|未来|可能性|方向性|道筋)が?見え"),
 )
 
 
 def looks_like_fresh_perception_claim(text: str) -> bool:
-    """True when the reply asserts present-tense perception without memory framing."""
+    """True when the reply asserts present-tense, anchored perception.
+
+    claim = (temporal deixis ∨ (perception verb ∧ spatial anchor))
+            ∧ no memory/hedge/negation/metaphor framing.
+    """
     if not text:
         return False
     capped = text[:_MAX_INPUT_CHARS]
-    if not any(p.search(capped) for p in _CLAIM_PATTERNS):
+    deictic = any(p.search(capped) for p in _DEICTIC_PATTERNS)
+    anchored = any(p.search(capped) for p in _VERB_PATTERNS) and bool(
+        _ANCHOR_PATTERN.search(capped)
+    )
+    if not (deictic or anchored):
         return False
     return not any(p.search(capped) for p in _EXCLUSION_PATTERNS)
 
