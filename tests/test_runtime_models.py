@@ -178,6 +178,68 @@ async def test_openai_compat_captures_streaming_usage_and_guards_empty_choices()
     assert "".join(captured) == "Hi there"
 
 
+def test_strip_think_blocks() -> None:
+    pytest.importorskip("openai")
+    from familiar_runtime.models.openai_compat import _strip_think_blocks
+
+    # Closed span removed, reply kept
+    assert _strip_think_blocks("<think>reasoning...</think>\nこんにちは。") == "こんにちは。"
+    # Multiple spans
+    assert _strip_think_blocks("<think>a</think>hi<think>b</think> there") == "hi there"
+    # Unclosed span: model burned the budget reasoning — drop the tail
+    assert _strip_think_blocks("<think>never ends") == ""
+    assert _strip_think_blocks("prefix <think>never ends") == "prefix"
+    # No markers: byte-identical (no stray strip)
+    assert _strip_think_blocks("  plain text  ") == "  plain text  "
+
+
+@pytest.mark.asyncio
+async def test_openai_compat_prompt_mode_scrubs_think_before_tool_parse() -> None:
+    """A <tool_call> the model merely contemplated inside <think> must not run;
+    the committed tool call after the reasoning span still parses."""
+    pytest.importorskip("openai")
+    from types import SimpleNamespace
+
+    from familiar_runtime.models import OpenAICompatibleBackend
+
+    backend = OpenAICompatibleBackend(
+        api_key="", model="gemma4:latest", base_url="http://localhost:11434/v1", tools_mode="prompt"
+    )
+
+    def _delta_chunk(text):
+        choice = SimpleNamespace(delta=SimpleNamespace(content=text), finish_reason=None)
+        return SimpleNamespace(choices=[choice], usage=None)
+
+    class _FakeStream:
+        def __init__(self, chunks):
+            self._chunks = chunks
+
+        def __aiter__(self):
+            async def gen():
+                for c in self._chunks:
+                    yield c
+
+            return gen()
+
+    contemplated = '<think>maybe <tool_call>{"name": "walk", "arguments": {}}</tool_call>?</think>'
+    committed = '<tool_call>{"name": "say", "arguments": {"text": "hi"}}</tool_call>'
+
+    async def _fake_create(**kwargs):
+        return _FakeStream([_delta_chunk(contemplated), _delta_chunk(committed)])
+
+    backend.client.chat.completions.create = _fake_create  # type: ignore[assignment]
+
+    result, raw = await backend.stream_turn(
+        system="s",
+        messages=[{"role": "user", "content": "hi"}],
+        tools=[],
+        max_tokens=50,
+        on_text=None,
+    )
+    assert [tc.name for tc in result.tool_calls] == ["say"]
+    assert "<think>" not in raw["content"]
+
+
 def test_kimi_backend_make_tool_results_includes_image_block() -> None:
     pytest.importorskip("openai")
     from familiar_runtime.models import KimiBackend, ToolCall

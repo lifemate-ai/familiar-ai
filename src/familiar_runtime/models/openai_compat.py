@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 from collections.abc import Callable
 from typing import Any
 
@@ -27,6 +28,29 @@ def _read_usage(chunk: Any, input_tokens: int, output_tokens: int) -> tuple[int,
         getattr(usage, "prompt_tokens", None) or input_tokens,
         getattr(usage, "completion_tokens", None) or output_tokens,
     )
+
+
+_THINK_RE = re.compile(r"<think>.*?</think>", re.DOTALL)
+
+
+def _strip_think_blocks(text: str) -> str:
+    """Drop ``<think>…</think>`` reasoning spans local models emit inline.
+
+    Reasoning-capable local models (gemma, qwen) served through Ollama's
+    OpenAI-compatible endpoint interleave chain-of-thought as literal
+    ``<think>`` markup in the content stream. That text must never reach the
+    conversation: it is not a reply, and feeding it back as assistant context
+    bloats and confuses subsequent turns. An *unclosed* ``<think>`` means the
+    model spent its whole budget reasoning — everything from the marker on is
+    dropped. Text without markers is returned unchanged (byte-stable).
+    """
+    if "<think>" not in text:
+        return text
+    cleaned = _THINK_RE.sub("", text)
+    open_idx = cleaned.find("<think>")
+    if open_idx != -1:
+        cleaned = cleaned[:open_idx]
+    return cleaned.strip()
 
 
 class OpenAICompatibleBackend:
@@ -190,7 +214,9 @@ class OpenAICompatibleBackend:
                 if on_text:
                     on_text(chunk_text)
 
-        text = "".join(text_chunks)
+        # Scrub reasoning spans BEFORE parsing tool calls: a <tool_call> the
+        # model merely contemplated inside <think> must not be executed.
+        text = _strip_think_blocks("".join(text_chunks))
         tool_calls = self._parse_tool_calls_from_text(text)
 
         clean_text = _TOOL_CALL_RE.sub("", text).strip()
@@ -292,7 +318,7 @@ class OpenAICompatibleBackend:
                     if tc_delta.function and tc_delta.function.arguments:
                         raw_tcs[idx]["arguments"] += tc_delta.function.arguments
 
-        text = "".join(text_chunks)
+        text = _strip_think_blocks("".join(text_chunks))
         tool_calls: list[ToolCall] = []
         for idx in sorted(raw_tcs.keys()):
             tc = raw_tcs[idx]
