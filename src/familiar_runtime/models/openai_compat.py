@@ -13,6 +13,22 @@ from .base import ModelTurnResult, ToolCall
 logger = logging.getLogger(__name__)
 
 
+def _read_usage(chunk: Any, input_tokens: int, output_tokens: int) -> tuple[int, int]:
+    """Fold a streaming chunk's usage into running totals, if present.
+
+    With ``stream_options={"include_usage": True}`` OpenAI-compatible servers
+    (Ollama, vLLM, real OpenAI) emit a final usage-only chunk. Servers that
+    ignore the option simply never send one, so tokens stay 0 — no regression.
+    """
+    usage = getattr(chunk, "usage", None)
+    if usage is None:
+        return input_tokens, output_tokens
+    return (
+        getattr(usage, "prompt_tokens", None) or input_tokens,
+        getattr(usage, "completion_tokens", None) or output_tokens,
+    )
+
+
 class OpenAICompatibleBackend:
     """Backend for any OpenAI-compatible endpoint: Ollama, vllm, lm-studio, etc."""
 
@@ -157,10 +173,17 @@ class OpenAICompatibleBackend:
             **{tokens_key: max_tokens},
             messages=flat,
             stream=True,
+            stream_options={"include_usage": True},
         )
 
         text_chunks: list[str] = []
+        input_tokens = 0
+        output_tokens = 0
         async for chunk in stream:
+            input_tokens, output_tokens = _read_usage(chunk, input_tokens, output_tokens)
+            # The final usage-only chunk (and any keep-alive) carries no choices.
+            if not chunk.choices:
+                continue
             if chunk.choices[0].delta.content:
                 chunk_text = chunk.choices[0].delta.content
                 text_chunks.append(chunk_text)
@@ -175,7 +198,13 @@ class OpenAICompatibleBackend:
         stop = "tool_use" if tool_calls else "end_turn"
         raw_assistant = {"role": "assistant", "content": text or ""}
         return (
-            ModelTurnResult(stop_reason=stop, text=clean_text, tool_calls=tool_calls),
+            ModelTurnResult(
+                stop_reason=stop,
+                text=clean_text,
+                tool_calls=tool_calls,
+                input_tokens=input_tokens,
+                output_tokens=output_tokens,
+            ),
             raw_assistant,
         )
 
@@ -200,17 +229,24 @@ class OpenAICompatibleBackend:
         }
         if oai_tools:
             kwargs["tools"] = oai_tools
+        kwargs["stream_options"] = {"include_usage": True}
 
         stream = await self.client.chat.completions.create(**kwargs)
 
         text_chunks: list[str] = []
         raw_tcs: dict[int, dict] = {}
         finish_reason: str | None = None
+        input_tokens = 0
+        output_tokens = 0
         # Filter Gemini thinking tokens: buffer until thinking block ends.
         _thinking_buf: str = ""
         _in_thinking: bool | None = None
 
         async for chunk in stream:
+            input_tokens, output_tokens = _read_usage(chunk, input_tokens, output_tokens)
+            # The final usage-only chunk (and any keep-alive) carries no choices.
+            if not chunk.choices:
+                continue
             choice = chunk.choices[0]
             delta = choice.delta
             finish_reason = choice.finish_reason or finish_reason
@@ -278,7 +314,13 @@ class OpenAICompatibleBackend:
                 for tc in tool_calls
             ]
         return (
-            ModelTurnResult(stop_reason=stop, text=text, tool_calls=tool_calls),
+            ModelTurnResult(
+                stop_reason=stop,
+                text=text,
+                tool_calls=tool_calls,
+                input_tokens=input_tokens,
+                output_tokens=output_tokens,
+            ),
             raw_assistant,
         )
 

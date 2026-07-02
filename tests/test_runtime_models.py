@@ -123,6 +123,61 @@ def test_openai_compat_backend_native_and_prompt_tool_results() -> None:
     assert any(p.get("type") == "image_url" for p in parts)
 
 
+@pytest.mark.asyncio
+async def test_openai_compat_captures_streaming_usage_and_guards_empty_choices() -> None:
+    """Ollama/OpenAI-compat emit a final usage-only chunk (empty choices) under
+    stream_options.include_usage. The backend must fold that usage into the
+    result AND not IndexError on the choiceless chunk."""
+    pytest.importorskip("openai")
+    from types import SimpleNamespace
+
+    from familiar_runtime.models import OpenAICompatibleBackend
+
+    backend = OpenAICompatibleBackend(
+        api_key="", model="gemma4:latest", base_url="http://localhost:11434/v1", tools_mode="prompt"
+    )
+
+    def _delta_chunk(text):
+        choice = SimpleNamespace(delta=SimpleNamespace(content=text), finish_reason=None)
+        return SimpleNamespace(choices=[choice], usage=None)
+
+    def _usage_chunk(pt, ct):
+        return SimpleNamespace(
+            choices=[],  # the usage-only chunk carries no choices
+            usage=SimpleNamespace(prompt_tokens=pt, completion_tokens=ct),
+        )
+
+    class _FakeStream:
+        def __init__(self, chunks):
+            self._chunks = chunks
+
+        def __aiter__(self):
+            async def gen():
+                for c in self._chunks:
+                    yield c
+
+            return gen()
+
+    async def _fake_create(**kwargs):
+        assert kwargs.get("stream_options") == {"include_usage": True}
+        return _FakeStream([_delta_chunk("Hi "), _delta_chunk("there"), _usage_chunk(176, 78)])
+
+    backend.client.chat.completions.create = _fake_create  # type: ignore[assignment]
+
+    captured: list[str] = []
+    result, _ = await backend.stream_turn(
+        system="s",
+        messages=[{"role": "user", "content": "hi"}],
+        tools=[],
+        max_tokens=50,
+        on_text=captured.append,
+    )
+    assert result.text == "Hi there"
+    assert result.input_tokens == 176
+    assert result.output_tokens == 78
+    assert "".join(captured) == "Hi there"
+
+
 def test_kimi_backend_make_tool_results_includes_image_block() -> None:
     pytest.importorskip("openai")
     from familiar_runtime.models import KimiBackend, ToolCall
