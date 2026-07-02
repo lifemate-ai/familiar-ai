@@ -248,7 +248,8 @@ Primary stores under `~/.familiar_ai/`:
 
 - `observations.db` — observations, embeddings, semantic facts, behavior policies,
   revisions, episodes + membership, memory activation, unfinished business,
-  relationship state, memory graph, person inferences, identity assertions
+  relationship state, memory graph, person inferences, identity assertions,
+  experience lessons (self-authored standing context, migration 012)
 - `commitments.db` — secretary commitments (self-init schema, outside the
   `migration/` runner)
 - `mental_state.jsonl` — append-only mental-state snapshots

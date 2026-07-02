@@ -13,6 +13,7 @@ import asyncio
 import json
 import logging
 import os
+import re
 import sqlite3
 import threading
 import uuid
@@ -2001,6 +2002,185 @@ class ObservationMemory:
             confidence=confidence,
             tags=tags,
         )
+
+    # ── Experience ledger (self-authored standing context) ─────────────────
+    # Guardrails live in the STORE (house rule): the tool layer can never
+    # widen them. Lessons are advisory prompt text ONLY — never a checker or
+    # gate input (the identity two-tier discipline).
+
+    _LESSON_TIERS = ("agent", "auto_proposed")
+    _LESSON_MAX_ROWS = 12
+    _LESSON_MAX_TEXT = 160
+    _LESSON_TOTAL_BUDGET = 1200
+
+    def upsert_experience_lesson(
+        self,
+        lesson_key: str,
+        lesson_text: str,
+        *,
+        tier: str = "agent",
+        confidence: float = 0.6,
+        source: str = "agent",
+    ) -> bool:
+        """Insert or update one distilled lesson, revision-audited and capped.
+
+        Same key from a higher tier promotes the row (auto_proposed → agent).
+        Overflow evicts auto_proposed first, then lowest confidence, then
+        oldest — a bounded prompt region forces exactly the biology-like
+        compression the feature exists for.
+        """
+        key = re.sub(r"[^a-z0-9_-]", "", lesson_key.strip().lower().replace(" ", "-"))[:40]
+        text = lesson_text.strip()[: self._LESSON_MAX_TEXT]
+        if not key or not text:
+            return False
+        if tier not in self._LESSON_TIERS:
+            tier = "auto_proposed"  # never let a caller mint a privileged tier
+        confidence = max(0.0, min(1.0, float(confidence)))
+        now_iso = self._now_iso()
+        with self._db_lock:
+            db = self._ensure_connected()
+            existing = db.execute(
+                "SELECT id, lesson_text, tier, confidence FROM experience_lessons "
+                "WHERE lesson_key = ?",
+                (key,),
+            ).fetchone()
+            if existing:
+                # Tier can only ratchet upward (auto_proposed → agent).
+                new_tier = "agent" if "agent" in (tier, str(existing["tier"])) else tier
+                self._insert_revision_locked(
+                    db,
+                    "experience_lesson",
+                    key,
+                    str(existing["lesson_text"]),
+                    text,
+                    float(existing["confidence"]),
+                    confidence,
+                    None,
+                    reason="lesson_update",
+                )
+                db.execute(
+                    "UPDATE experience_lessons SET lesson_text = ?, tier = ?, "
+                    "confidence = ?, last_confirmed_at = ?, updated_at = ? "
+                    "WHERE lesson_key = ?",
+                    (text, new_tier, confidence, now_iso, now_iso, key),
+                )
+            else:
+                self._insert_revision_locked(
+                    db,
+                    "experience_lesson",
+                    key,
+                    "",
+                    text,
+                    0.0,
+                    confidence,
+                    None,
+                    reason="lesson_create",
+                )
+                db.execute(
+                    "INSERT INTO experience_lessons "
+                    "(id, lesson_key, lesson_text, tier, confidence, source, "
+                    "last_confirmed_at, created_at, updated_at) "
+                    "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                    (
+                        str(uuid.uuid4()),
+                        key,
+                        text,
+                        tier,
+                        confidence,
+                        source,
+                        now_iso,
+                        now_iso,
+                        now_iso,
+                    ),
+                )
+            self._evict_lessons_over_budget_locked(db)
+            db.commit()
+        return True
+
+    def _evict_lessons_over_budget_locked(self, db: sqlite3.Connection) -> None:
+        while True:
+            rows = db.execute(
+                "SELECT lesson_key, lesson_text, tier, confidence, "
+                "COALESCE(last_confirmed_at, created_at) AS freshness "
+                "FROM experience_lessons"
+            ).fetchall()
+            total_chars = sum(len(str(r["lesson_text"])) for r in rows)
+            if len(rows) <= self._LESSON_MAX_ROWS and total_chars <= self._LESSON_TOTAL_BUDGET:
+                return
+            victims = sorted(
+                rows,
+                key=lambda r: (
+                    0 if str(r["tier"]) == "auto_proposed" else 1,
+                    float(r["confidence"]),
+                    str(r["freshness"]),
+                ),
+            )
+            victim_key = str(victims[0]["lesson_key"])
+            self._insert_revision_locked(
+                db,
+                "experience_lesson",
+                victim_key,
+                str(victims[0]["lesson_text"]),
+                "",
+                float(victims[0]["confidence"]),
+                0.0,
+                None,
+                reason="lesson_evicted",
+            )
+            db.execute("DELETE FROM experience_lessons WHERE lesson_key = ?", (victim_key,))
+
+    def list_experience_lessons(self) -> list[dict]:
+        """Agent-authored first, then by conviction."""
+        with self._db_lock:
+            db = self._ensure_connected()
+            rows = db.execute(
+                "SELECT lesson_key, lesson_text, tier, confidence, "
+                "last_confirmed_at, created_at FROM experience_lessons "
+                "ORDER BY CASE tier WHEN 'agent' THEN 0 ELSE 1 END, confidence DESC"
+            ).fetchall()
+        return [dict(r) for r in rows]
+
+    def drop_experience_lesson(self, lesson_key: str) -> bool:
+        with self._db_lock:
+            db = self._ensure_connected()
+            existing = db.execute(
+                "SELECT lesson_text, confidence FROM experience_lessons WHERE lesson_key = ?",
+                (lesson_key,),
+            ).fetchone()
+            if not existing:
+                return False
+            self._insert_revision_locked(
+                db,
+                "experience_lesson",
+                lesson_key,
+                str(existing["lesson_text"]),
+                "",
+                float(existing["confidence"]),
+                0.0,
+                None,
+                reason="lesson_dropped",
+            )
+            db.execute("DELETE FROM experience_lessons WHERE lesson_key = ?", (lesson_key,))
+            db.commit()
+        return True
+
+    async def upsert_experience_lesson_async(
+        self,
+        lesson_key: str,
+        lesson_text: str,
+        *,
+        tier: str = "agent",
+        confidence: float = 0.6,
+        source: str = "agent",
+    ) -> bool:
+        return await asyncio.to_thread(
+            lambda: self.upsert_experience_lesson(
+                lesson_key, lesson_text, tier=tier, confidence=confidence, source=source
+            )
+        )
+
+    async def list_experience_lessons_async(self) -> list[dict]:
+        return await asyncio.to_thread(self.list_experience_lessons)
 
     def expire_working_memory(self, days: float = 2.0) -> int:
         """Drop stale working-memory activation rows (nightly hygiene)."""

@@ -288,6 +288,13 @@ class AgentConfig:
     sleep_consolidation: bool = field(
         default_factory=lambda: _bool_env("FAMILIAR_SLEEP_CONSOLIDATION", default=False)
     )
+    # Experience ledger: the agent distills lessons from experience into a
+    # bounded self-authored document injected into the stable prompt half at
+    # session start (self-rewriting prompt region = mechanized learning from
+    # experience). Advisory text only; revision-audited; default OFF.
+    experience_ledger: bool = field(
+        default_factory=lambda: _bool_env("FAMILIAR_EXPERIENCE_LEDGER", default=False)
+    )
     # Dream mode (requires sleep_consolidation + an INNER_* small model):
     # a few ungrounded generative cycles during the nightly job, journaled
     # as kind="dream" and surfaced next morning with an explicit

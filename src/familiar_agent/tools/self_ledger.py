@@ -50,6 +50,46 @@ _NOTE_SHIFT_DEF = {
     },
 }
 
+_LEDGER_COMMIT_DEF = {
+    "name": "ledger_commit",
+    "description": (
+        "Record one distilled lesson from experience into your standing "
+        "context (e.g. 'when the companion is tired, shorter replies land "
+        "better'). Lessons are bounded (a dozen short lines) and load at the "
+        "START of each session — a commit takes effect from the next session, "
+        "like sleep. Advisory only: lessons never become rules or gates."
+    ),
+    "input_schema": {
+        "type": "object",
+        "properties": {
+            "lesson": {
+                "type": "string",
+                "description": "One short first-person lesson (<=160 chars)",
+            },
+            "key": {
+                "type": "string",
+                "description": "Optional stable slug; reuse to revise a lesson",
+            },
+        },
+        "required": ["lesson"],
+    },
+}
+
+_LEDGER_REVIEW_DEF = {
+    "name": "ledger_review",
+    "description": (
+        "List the lessons currently in your standing context (agent-authored "
+        "and overnight proposals). Pass drop_key to retire one."
+    ),
+    "input_schema": {
+        "type": "object",
+        "properties": {
+            "drop_key": {"type": "string", "description": "Lesson key to retire"},
+        },
+        "required": [],
+    },
+}
+
 
 class SelfLedgerTool:
     """Reads the federation of self-state silos and answers as one voice.
@@ -65,14 +105,64 @@ class SelfLedgerTool:
         self._agent = agent
 
     def get_tool_definitions(self) -> list[dict]:
-        return [_WHO_AM_I_DEF, _NOTE_SHIFT_DEF]
+        return [_WHO_AM_I_DEF, _NOTE_SHIFT_DEF, _LEDGER_COMMIT_DEF, _LEDGER_REVIEW_DEF]
 
     async def call(self, name: str, tool_input: dict) -> tuple[str, None]:
         if name == "who_am_i":
             return self._who_am_i(), None
         if name == "note_interpretation_shift":
             return self._note_shift(tool_input), None
+        if name == "ledger_commit":
+            return self._ledger_commit(tool_input), None
+        if name == "ledger_review":
+            return self._ledger_review(tool_input), None
         return f"Error: unknown self-ledger tool '{name}'", None
+
+    # ── experience ledger ──────────────────────────────────────────────────
+
+    def _ledger_commit(self, tool_input: dict) -> str:
+        lesson = str(tool_input.get("lesson", "")).strip()
+        if not lesson:
+            return "Error: lesson text is required."
+        key = str(tool_input.get("key", "")).strip() or lesson[:40]
+        memory = getattr(self._agent, "_memory", None)
+        upsert = getattr(memory, "upsert_experience_lesson", None)
+        if not callable(upsert):
+            return "Error: experience ledger is unavailable."
+        # The tool path can only ever write the agent tier — the store
+        # enforces the same, but the intent belongs here too.
+        ok = upsert(key, lesson, tier="agent", confidence=0.6, source="agent")
+        if not ok:
+            return "Error: lesson was empty after normalization."
+        return (
+            "Lesson recorded. It joins your standing context from the next "
+            "session on — like something understood before sleep."
+        )
+
+    def _ledger_review(self, tool_input: dict) -> str:
+        memory = getattr(self._agent, "_memory", None)
+        drop_key = str(tool_input.get("drop_key", "")).strip()
+        if drop_key:
+            drop = getattr(memory, "drop_experience_lesson", None)
+            if not callable(drop):
+                return "Error: experience ledger is unavailable."
+            dropped = drop(drop_key)
+            return (
+                f"Lesson '{drop_key}' retired (gone from the next session on)."
+                if dropped
+                else f"No lesson with key '{drop_key}'."
+            )
+        lister = getattr(memory, "list_experience_lessons", None)
+        if not callable(lister):
+            return "Error: experience ledger is unavailable."
+        lessons = lister()
+        if not lessons:
+            return "No lessons held yet. ledger_commit records one."
+        lines = ["Lessons in your standing context:"]
+        for entry in lessons:
+            marker = " (proposed overnight)" if entry.get("tier") == "auto_proposed" else ""
+            lines.append(f"- [{entry.get('lesson_key')}] {entry.get('lesson_text')}{marker}")
+        return "\n".join(lines)
 
     # ── who_am_i ────────────────────────────────────────────────────────────
 

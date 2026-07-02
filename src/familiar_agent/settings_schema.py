@@ -59,6 +59,7 @@ class SetupConfig:
     reality_gate: bool = False
     inner_dense: bool = False
     sleep_consolidation: bool = False
+    experience_ledger: bool = False
 
 
 Validator = Callable[[Any], str | None]
@@ -509,6 +510,16 @@ SETTINGS_FIELDS: tuple[SettingField, ...] = (
         default=False,
         setup_visible=False,
         runtime_getter=lambda config: config.sleep_consolidation,
+    ),
+    SettingField(
+        env_key="FAMILIAR_EXPERIENCE_LEDGER",
+        attr="experience_ledger",
+        section="advanced",
+        label="Experience ledger (self-authored):",
+        widget="bool",
+        default=False,
+        setup_visible=False,
+        runtime_getter=lambda config: config.experience_ledger,
     ),
 )
 

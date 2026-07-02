@@ -45,6 +45,7 @@ def _make_agent(*, with_tts: bool = False, with_camera: bool = False, with_mcp: 
     agent.config.inner_min_interval = 5.0
     agent.config.sleep_consolidation = False
     agent.config.dream_mode = False
+    agent.config.experience_ledger = False
 
     agent._turn_count = 0
     agent._session_input_tokens = 0

@@ -97,6 +97,7 @@ from .tools.tts import TTSTool
 from ._i18n import _t
 from ._ui_helpers import night_key_for
 from .mcp_client import MCPClientManager, _resolve_config_path
+from familiar_capabilities.self_ledger import DEFAULT_SELF_LEDGER_TOOLS
 from familiar_capabilities import (
     CameraCapability,
     CodingCapability,
@@ -704,6 +705,7 @@ class EmbodiedAgent:
         self._meta_monitor = MetaMonitor(state_path=_state_dir / "meta_state.json")
         self._self_ledger_tool = SelfLedgerTool(self)
         self._constitution_block: str | None = None  # rendered once per session
+        self._lessons_block: str | None = None  # experience ledger, same idiom
         # Consciousness profile (instrumentation only, FAMILIAR_CONSCIOUSNESS_PROFILE)
         self._last_compete_result: CompeteResult | None = None
         self._last_consciousness_profile: ConsciousnessProfile | None = None
@@ -1108,7 +1110,10 @@ class EmbodiedAgent:
             registry.register(IdentityCapability(identity_tool))
         self_ledger_tool = getattr(self, "_self_ledger_tool", None)
         if self_ledger_tool is not None:
-            registry.register(SelfLedgerCapability(self_ledger_tool))
+            ledger_names = set(DEFAULT_SELF_LEDGER_TOOLS)
+            if getattr(self.config, "experience_ledger", False):
+                ledger_names |= {"ledger_commit", "ledger_review"}
+            registry.register(SelfLedgerCapability(self_ledger_tool, names=ledger_names))
         routine_tool = getattr(self, "_routine_tool", None)
         if routine_tool is not None:
             registry.register(RoutineCapability(routine_tool))
@@ -1321,6 +1326,19 @@ class EmbodiedAgent:
                     f'- {s["entity_key"]}: now read as "{s["new_text"][:120]}"' for s in shifts
                 )
                 lines.append("\n".join(shift_lines))
+        if getattr(self.config, "experience_ledger", False):
+            lister = getattr(getattr(self, "_memory", None), "list_experience_lessons", None)
+            if callable(lister):
+                try:
+                    lessons = lister()
+                except Exception:  # noqa: BLE001
+                    lessons = []
+                if isinstance(lessons, list) and lessons:
+                    proposed = sum(1 for e in lessons if e.get("tier") == "auto_proposed")
+                    note = f"[Experience ledger] {len(lessons)} lessons held"
+                    if proposed:
+                        note += f" ({proposed} proposed overnight — review with ledger_review)"
+                    lines.append(note)
         return "\n\n".join(lines)
 
     def _post_compact_recovery_context(self) -> str:
@@ -1347,6 +1365,41 @@ class EmbodiedAgent:
                 f"- Corrected reading ({s['entity_key']}): {s['new_text'][:120]}" for s in shifts
             )
         return "\n".join(lines)
+
+    def _experience_lessons_block(self) -> str:
+        """Render the self-authored lessons for the stable half, once per session.
+
+        Same idiom as the identity constitution: lazy render, process-lifetime
+        cache — mid-session ledger_commit changes the store only, and the
+        live stable half (the Anthropic cache prefix) is untouched until the
+        next session. Sleep-boundary semantics are not just safe, they are
+        the point: you wake up changed, you do not mutate mid-conversation.
+        """
+        cached = getattr(self, "_lessons_block", None)
+        if cached is not None:
+            return cached
+        if not getattr(self.config, "experience_ledger", False):
+            self._lessons_block = ""
+            return ""
+        memory = getattr(self, "_memory", None)
+        lister = getattr(memory, "list_experience_lessons", None)
+        if not callable(lister):
+            self._lessons_block = ""
+            return ""
+        try:
+            lessons = lister()
+        except Exception:  # noqa: BLE001
+            lessons = []
+        if not lessons:
+            self._lessons_block = ""
+            return ""
+        lines = ["[Lessons I have drawn from experience — my own words, advisory]"]
+        for entry in lessons:
+            marker = " (proposed)" if entry.get("tier") == "auto_proposed" else ""
+            lines.append(f"- {entry.get('lesson_text', '')}{marker}")
+        block = "\n".join(lines)[:1400]
+        self._lessons_block = block
+        return block
 
     def _identity_constitution_block(self) -> str:
         """Render identity assertions for the stable prompt half, once per session.
@@ -1410,7 +1463,8 @@ class EmbodiedAgent:
         # (rendered once per session — keeps prompt caching intact; live
         # dissonance state stays in the variable half via mental_ctx).
         constitution = self._identity_constitution_block()
-        stable_parts = [p for p in [self._me_md, base, constitution] if p]
+        lessons = self._experience_lessons_block()
+        stable_parts = [p for p in [self._me_md, base, constitution, lessons] if p]
         stable = "\n\n---\n\n".join(stable_parts)
 
         agent_mood, agent_mood_intensity = self._decayed_mood()
@@ -2080,7 +2134,11 @@ class EmbodiedAgent:
         except Exception as exc:  # noqa: BLE001
             logger.warning("Working-memory expiry failed: %s", exc)
 
-        # (Experience-ledger nightly proposals attach here in a later PR.)
+        if getattr(self.config, "experience_ledger", False) and not self._turn_active:
+            try:
+                await self._propose_overnight_lesson()
+            except Exception as exc:  # noqa: BLE001
+                logger.warning("Overnight lesson proposal failed: %s", exc)
 
         if getattr(self.config, "dream_mode", False) and not self._turn_active:
             try:
@@ -2132,6 +2190,46 @@ class EmbodiedAgent:
             )
             count += 1
         return count
+
+    async def _propose_overnight_lesson(self) -> int:
+        """One bounded utility call proposing at most ONE auto-tier lesson.
+
+        Proposals land at tier='auto_proposed', confidence 0.4 — visible to
+        the agent as '(proposed)' in its standing context; promoting one is
+        the agent's own ledger_commit decision, never automatic.
+        """
+        if self._utility_backend is self.backend:
+            return 0
+        yesterday = (datetime.now() - timedelta(days=1)).strftime("%Y-%m-%d")
+        observations = await asyncio.to_thread(
+            self._memory.get_observations_for_date, yesterday, 30
+        )
+        if len(observations) < 3:
+            return 0  # too little lived material to generalize from
+        lines = "\n".join(f"- {str(o.get('content', ''))[:140]}" for o in observations[:30])
+        prompt = (
+            "From yesterday's interactions, propose at most ONE short "
+            "first-person lesson about how to be a better companion (e.g. "
+            "'when they are tired, shorter replies land better'). Reply as "
+            "'key-slug: lesson text' (<=140 chars) or 'none'.\n\n"
+            f"Observations:\n{lines}"
+        )
+        reply = await asyncio.wait_for(
+            self._utility_backend.complete(prompt, max_tokens=120), timeout=90.0
+        )
+        line = (reply or "").strip().splitlines()[0] if (reply or "").strip() else ""
+        if ":" not in line:
+            return 0
+        key, _, text = line.partition(":")
+        key = key.strip().lstrip("-*• \t").strip().lower()
+        key = re.sub(r"[^a-z0-9-]", "", key.replace(" ", "-")).strip("-")[:40]
+        text = text.strip()[:160]
+        if not key or not text or key == "none":
+            return 0
+        await self._memory.upsert_experience_lesson_async(
+            key, text, tier="auto_proposed", confidence=0.4, source="night_proposal"
+        )
+        return 1
 
     async def _run_dream_cycles(self, cycles: int = 3) -> int:
         """Ungrounded generative cycles, journaled as kind='dream'.
