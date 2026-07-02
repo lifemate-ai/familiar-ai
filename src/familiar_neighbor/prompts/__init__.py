@@ -24,6 +24,7 @@ NEIGHBOR_PROFILE = "neighbor"
 __all__ = [
     "NEIGHBOR_PROFILE",
     "assemble_neighbor_system_prompt",
+    "load_embodied_compact_template",
     "load_embodied_core_template",
 ]
 
@@ -42,14 +43,30 @@ def load_embodied_core_template() -> str:
     return _read_resource("embodied_core.md")
 
 
-def assemble_neighbor_system_prompt(*, max_steps: int) -> str:
+def load_embodied_compact_template() -> str:
+    """Return the raw compact-profile prompt template.
+
+    A trimmed variant of ``embodied_core.md`` for small local models: only the
+    critical operational constraints survive, the voice rule moves to the end
+    (recency position), and the long-form social/cognitive guidance is dropped —
+    the deterministic mind layers (auto-ToM, social policy, meta-gate, identity)
+    already carry that behaviour as state logic.
+    """
+    return _read_resource("embodied_compact.md")
+
+
+def assemble_neighbor_system_prompt(*, max_steps: int, profile: str = "full") -> str:
     """Materialise the neighbour profile system prompt for one run.
 
-    Equivalent to the legacy ``SYSTEM_PROMPT.format(max_steps=max_steps)`` call
-    site in ``familiar_agent.agent``. The output is byte-for-byte stable and is
-    pinned by ``tests/test_prompt_assembly.py``.
+    ``profile="full"`` (the default) is equivalent to the legacy
+    ``SYSTEM_PROMPT.format(max_steps=max_steps)`` call site; the output is
+    byte-for-byte stable and is pinned by ``tests/test_prompt_assembly.py``.
+    ``profile="compact"`` assembles the small-model template instead. Any
+    unknown profile falls back to ``full``.
     """
-    text = load_embodied_core_template()
+    text = (
+        load_embodied_compact_template() if profile == "compact" else load_embodied_core_template()
+    )
     text = text.replace("{react_loop}", runtime_prompts.load_react_loop())
     text = text.replace("{voice_rules_generic}", runtime_prompts.load_voice_rules_generic())
     text = text.replace("{language_match}", runtime_prompts.load_language_match())

@@ -54,6 +54,7 @@ class SetupConfig:
     proactive_reminders: bool = True
     inner_loop: bool = False
     voice_gate: bool = False
+    prompt_profile: str = "full"
 
 
 Validator = Callable[[Any], str | None]
@@ -453,6 +454,17 @@ SETTINGS_FIELDS: tuple[SettingField, ...] = (
         default=False,
         setup_visible=False,
         runtime_getter=lambda config: config.voice_gate,
+    ),
+    SettingField(
+        env_key="PROMPT_PROFILE",
+        attr="prompt_profile",
+        section="advanced",
+        label="Prompt profile:",
+        widget="combo",
+        default="full",
+        options=("full", "compact"),
+        setup_visible=False,
+        runtime_getter=lambda config: config.prompt_profile,
     ),
 )
 

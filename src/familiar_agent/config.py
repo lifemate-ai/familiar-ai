@@ -169,6 +169,15 @@ class AgentConfig:
     )
     tools_mode: str = field(default_factory=lambda: os.environ.get("TOOLS_MODE", "prompt"))
 
+    # System prompt profile: "full" | "compact".
+    # "compact" is a trimmed framework prompt for small local models (Ollama
+    # gemma-class): only critical operational constraints, voice rule last.
+    # The long-form social/cognitive guidance it drops is carried by the
+    # deterministic mind layers (auto-ToM, social policy, meta-gate, identity).
+    prompt_profile: str = field(
+        default_factory=lambda: os.environ.get("PROMPT_PROFILE", "full").strip().lower() or "full"
+    )
+
     # Thinking mode: "auto" | "adaptive" | "extended" | "disabled"
     # "auto" = adaptive for claude-sonnet-4/opus-4, disabled for others
     thinking_mode: str = field(default_factory=lambda: os.environ.get("THINKING_MODE", "auto"))

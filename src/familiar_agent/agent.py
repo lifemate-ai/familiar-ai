@@ -1362,7 +1362,10 @@ class EmbodiedAgent:
                   cache_control.
         variable — interoception, feelings, inner voice, plan; changes every turn.
         """
-        base = assemble_neighbor_system_prompt(max_steps=MAX_ITERATIONS)
+        base = assemble_neighbor_system_prompt(
+            max_steps=MAX_ITERATIONS,
+            profile=getattr(self.config, "prompt_profile", "full"),
+        )
         # Dynamically replace (body ...) block based on actual hardware
         body_desc = self._get_body_description()
         base = re.sub(r"\(body.*?\)", body_desc, base, flags=re.DOTALL)
