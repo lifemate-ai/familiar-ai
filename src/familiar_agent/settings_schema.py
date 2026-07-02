@@ -57,6 +57,7 @@ class SetupConfig:
     prompt_profile: str = "full"
     consciousness_profile: bool = False
     reality_gate: bool = False
+    inner_dense: bool = False
 
 
 Validator = Callable[[Any], str | None]
@@ -487,6 +488,16 @@ SETTINGS_FIELDS: tuple[SettingField, ...] = (
         default=False,
         setup_visible=False,
         runtime_getter=lambda config: config.reality_gate,
+    ),
+    SettingField(
+        env_key="FAMILIAR_INNER_DENSE",
+        attr="inner_dense",
+        section="advanced",
+        label="Dense idle recurrence:",
+        widget="bool",
+        default=False,
+        setup_visible=False,
+        runtime_getter=lambda config: config.inner_dense,
     ),
 )
 

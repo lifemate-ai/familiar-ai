@@ -271,6 +271,17 @@ class AgentConfig:
     inner_loop_interval: float = field(
         default_factory=lambda: float(os.environ.get("FAMILIAR_INNER_LOOP_INTERVAL", "20") or "20")
     )
+    # Dense recurrence (requires inner_loop): idle ticks also update the
+    # attention schema and re-enter broadcast listeners, with batched disk
+    # writes. Default OFF — idle cognition stays read-only without it.
+    inner_dense: bool = field(
+        default_factory=lambda: _bool_env("FAMILIAR_INNER_DENSE", default=False)
+    )
+    # Lower bound for the body-modulated inner-loop cadence (seconds). The
+    # historical floor is 5.0; dense setups may lower it toward ~1 Hz.
+    inner_min_interval: float = field(
+        default_factory=lambda: float(os.environ.get("FAMILIAR_INNER_MIN_INTERVAL", "5") or "5")
+    )
     # Body daemon (familiard): FAMILIAR_DAEMON=1 makes the UIs listen for wake
     # events from a running `familiard` process (socket override:
     # FAMILIAR_DAEMON_SOCKET) and auto-adopts its interoception payload.

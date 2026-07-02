@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import logging
+import time
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -35,7 +36,26 @@ class SelfState:
     def __init__(self, path: Path | None = None) -> None:
         self._path = path or _DEFAULT_PATH
         self._values = dict(_BASELINES)
+        # Deferred-save mode for dense idle broadcasts: OFF by default, so
+        # the historical write-per-update behaviour is untouched unless the
+        # agent explicitly opts in (FAMILIAR_INNER_DENSE).
+        self._defer_min_interval: float | None = None
+        self._last_save_at: float = 0.0
+        self._dirty: bool = False
         self._load()
+
+    def defer_saves(self, min_interval: float = 30.0) -> None:
+        """Batch disk writes: at most one save per ``min_interval`` seconds.
+
+        Call ``flush()`` at turn boundaries and on close so a crash loses at
+        most one interval's worth of idle nudges — never a real turn's state.
+        """
+        self._defer_min_interval = max(1.0, float(min_interval))
+
+    def flush(self) -> None:
+        """Persist immediately if any deferred update is pending."""
+        if self._dirty:
+            self._write()
 
     def _load(self) -> None:
         try:
@@ -52,9 +72,19 @@ class SelfState:
             logger.warning("Could not load self state: %s", exc)
 
     def _save(self) -> None:
+        if self._defer_min_interval is not None:
+            now = time.monotonic()
+            if (now - self._last_save_at) < self._defer_min_interval:
+                self._dirty = True
+                return
+        self._write()
+
+    def _write(self) -> None:
         try:
             self._path.parent.mkdir(parents=True, exist_ok=True)
             self._path.write_text(json.dumps(self._values, indent=2))
+            self._dirty = False
+            self._last_save_at = time.monotonic()
         except Exception as exc:
             logger.warning("Could not save self state: %s", exc)
 

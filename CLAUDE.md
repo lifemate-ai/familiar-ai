@@ -124,7 +124,13 @@ back to the utility backend only when separate from main — idle cycles never
 burn main-model calls). The monologue re-competes as a `monologue` coalition
 with TTL-faded salience; recurrence sources (`train_of_thought`/`monologue`)
 never re-crystallize (feedback-loop guard). Cadence is body-modulated
-(interoceptive energy scales the tick interval, clamped 5–120 s).
+(interoceptive energy scales the tick interval, clamped
+`FAMILIAR_INNER_MIN_INTERVAL` (default 5 s) – 120 s). **Dense recurrence**
+(`FAMILIAR_INNER_DENSE`, default OFF): idle winners also update the attention
+schema (`note_focus`, batched persistence) and re-enter broadcast listeners
+(self-state with deferred saves flushed at turn boundaries, plus a drive-nudge
+accumulator flushed once per full cycle). Listener REGISTRATION is gated on
+the flag — not just the tick call — because listeners fire on the turn path too.
 
 **Body daemon (familiard, separate process, dark by default).**
 `familiar_agent/familiard.py` (`uv run familiard`) owns interoception sampling

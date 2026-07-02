@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import json
 import logging
+import time
 from collections import deque
 from dataclasses import asdict, dataclass
 from pathlib import Path
@@ -68,6 +69,10 @@ class AttentionSchema:
         # `_last_coalition` object is deliberately NOT restored — it
         # repopulates on the first update_focus() of the new session.
         self._state_path = Path(state_path).expanduser() if state_path else None
+        # Batched persistence for idle notes (note_focus): dense inner-loop
+        # ticks must not turn 1 Hz cognition into 1 Hz disk writes.
+        self._dirty: int = 0
+        self._last_save_at: float = time.monotonic()
         self._load_state()
 
     def _load_state(self) -> None:
@@ -115,7 +120,45 @@ class AttentionSchema:
         )
         self._history.append(entry)
         self._save_state()
+        self._dirty = 0
+        self._last_save_at = time.monotonic()
         logger.debug("AttentionSchema: focus → %s (turn %d)", winner.source, self._turn)
+
+    def note_focus(
+        self,
+        winner: Coalition,
+        *,
+        save_every: int = 10,
+        save_interval_sec: float = 60.0,
+    ) -> None:
+        """``update_focus`` for idle ticks: same recording, batched persistence.
+
+        Idle foci deliberately enter the shared history — idle thought
+        shaping the next turn's attention context IS the feature — but the
+        disk write is deferred until ``save_every`` notes or
+        ``save_interval_sec`` have accumulated. A real turn's
+        ``update_focus`` (or ``flush``) persists any backlog.
+        """
+        self._last_coalition = winner
+        self._turn += 1
+        self._history.append(
+            FocusEntry(
+                source=winner.source,
+                summary=winner.summary,
+                activation=winner.activation,
+                turn=self._turn,
+            )
+        )
+        self._dirty += 1
+        now = time.monotonic()
+        if self._dirty >= save_every or (now - self._last_save_at) >= save_interval_sec:
+            self.flush()
+
+    def flush(self) -> None:
+        """Persist any batched idle notes immediately."""
+        self._save_state()
+        self._dirty = 0
+        self._last_save_at = time.monotonic()
 
     def current_focus(self) -> Coalition | None:
         """Return the most recent workspace winner Coalition, or None."""

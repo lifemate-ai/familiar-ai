@@ -41,6 +41,8 @@ def _make_agent(*, with_tts: bool = False, with_camera: bool = False, with_mcp: 
     # defaults so tests exercise the same paths a default install does.
     agent.config.consciousness_profile = False
     agent.config.reality_gate = False
+    agent.config.inner_dense = False
+    agent.config.inner_min_interval = 5.0
 
     agent._turn_count = 0
     agent._session_input_tokens = 0

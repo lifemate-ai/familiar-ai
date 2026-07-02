@@ -324,6 +324,14 @@ class EmbodiedAgentHook(RuntimeHookBase):
             and bool(getattr(agent.config, "inner_loop", False))
         ):
             await inner_loop.start()
+        # Dense recurrence defers self-state writes between turns; every real
+        # turn starts from persisted state (flush is a no-op otherwise).
+        self_state = getattr(agent, "_self_state", None)
+        if self_state is not None and hasattr(self_state, "flush"):
+            try:
+                self_state.flush()
+            except Exception:  # noqa: BLE001
+                pass
 
         is_desire_turn = bool(inner_voice and not user_input)
         if is_desire_turn:
