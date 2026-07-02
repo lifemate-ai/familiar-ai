@@ -14,6 +14,7 @@ from .mental_state import MentalStateBus
 from .meta_monitor import MetaMonitor
 from .person_model import PersonModelTracker
 from .prediction import PredictionEngine
+from .reality import GroundingTracker, Provenance
 from .relationship import RelationshipTracker
 from .scene import SceneTracker
 from .self_narrative import SelfNarrative
@@ -27,10 +28,12 @@ __all__ = [
     "DefaultModeProcessor",
     "DesireSystem",
     "GlobalWorkspace",
+    "GroundingTracker",
     "MentalStateBus",
     "MetaMonitor",
     "PersonModelTracker",
     "PredictionEngine",
+    "Provenance",
     "RelationshipTracker",
     "SceneTracker",
     "SelfNarrative",

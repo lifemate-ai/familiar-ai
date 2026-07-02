@@ -257,6 +257,12 @@ class AgentConfig:
     consciousness_profile: bool = field(
         default_factory=lambda: _bool_env("FAMILIAR_CONSCIOUSNESS_PROFILE", default=False)
     )
+    # Reality gate: a reply claiming present-tense perception without having
+    # looked this turn gets one [REALITY] re-ask — call see() or reframe as
+    # memory/uncertainty. Deterministic pattern checks; default OFF.
+    reality_gate: bool = field(
+        default_factory=lambda: _bool_env("FAMILIAR_REALITY_GATE", default=False)
+    )
     # Phase 2 inner loop: cheap workspace cycling between turns. Default OFF —
     # the agent's idle behaviour is byte-identical unless this is enabled.
     inner_loop: bool = field(

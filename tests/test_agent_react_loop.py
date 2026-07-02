@@ -40,6 +40,7 @@ def _make_agent(*, with_tts: bool = False, with_camera: bool = False, with_mcp: 
     # MagicMock attrs are truthy — pin flag-gated subsystems to their real
     # defaults so tests exercise the same paths a default install does.
     agent.config.consciousness_profile = False
+    agent.config.reality_gate = False
 
     agent._turn_count = 0
     agent._session_input_tokens = 0

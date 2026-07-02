@@ -87,6 +87,7 @@ from .tools.identity import IdentityTool
 from .tools.routines_tool import RoutineTool
 from .tools.self_ledger import SelfLedgerTool
 from familiar_neighbor.mind.identity import IdentityCore
+from familiar_neighbor.mind.reality import GroundingTracker
 from .tools.memory import MemoryTool, ObservationMemory
 from .tools.tom import ToMTool
 from .tools.mobility import MobilityTool
@@ -698,6 +699,9 @@ class EmbodiedAgent:
         self._last_consciousness_profile: ConsciousnessProfile | None = None
         self._last_say_at: float = 0.0
         self._last_intero_signal = None
+        # Reality monitor: session-scoped grounding record (always tracked;
+        # the [REALITY] gate itself is opt-in via FAMILIAR_REALITY_GATE).
+        self._grounding = GroundingTracker()
         self._appraisal = AppraisalEngine()
         self._social_policy = SocialPolicyEngine()
         self._mental_state_bus = MentalStateBus()

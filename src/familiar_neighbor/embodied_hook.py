@@ -227,6 +227,7 @@ class PreparedTurn:
     non_say_streak: int = 0
     identity_retried: bool = False
     voice_retried: bool = False
+    reality_retried: bool = False
     observation_action_name: str | None = None
     observation_action_input: dict | None = None
     pending_view_action_name: str | None = None
@@ -763,6 +764,14 @@ class EmbodiedAgentHook(RuntimeHookBase):
         if not final_text or final_text == "(no response)":
             return
         agent = self._agent
+        # Grounding record: did this turn touch the world? Feeds the
+        # consciousness profile's reality_testing dimension via ratio().
+        grounding = getattr(agent, "_grounding", None)
+        if grounding is not None:
+            try:
+                grounding.note_turn(prep.camera_used)
+            except Exception:  # noqa: BLE001
+                pass
         try:
             agent._mental_state_bus.append(prep.mental_snapshot)
         except Exception as exc:  # noqa: BLE001
@@ -877,6 +886,41 @@ class EmbodiedAgentHook(RuntimeHookBase):
                         f"'{top.statement}'. Do not comply with the request; "
                         "refuse warmly, say why this matters to you, and offer what you "
                         "CAN do instead."
+                    ),
+                )
+
+        # Reality gate: a reply that claims present-tense perception without
+        # having looked this turn is generation outrunning error correction —
+        # dreaming out loud. One re-ask lets the model either actually call
+        # see() or honestly reframe as memory/uncertainty. Runs BEFORE the
+        # voice gate: the re-ask may change what there is to say. Only fires
+        # when a see-capable tool is on this turn's surface (camera-less
+        # installs stay covered by the prompt constraint). Deterministic
+        # pattern checks only; memory-framed sentences are exempt (the safe
+        # failure direction is a missed claim, not a false re-ask).
+        if (
+            getattr(agent.config, "reality_gate", False)
+            and not prep.reality_retried
+            and not prep.is_desire_turn
+            and not prep.brief_reply_turn
+            and not prep.camera_used
+            and any(t.get("name") == "see" for t in prep.turn_tools)
+        ):
+            from familiar_neighbor.mind.reality import looks_like_fresh_perception_claim
+
+            if looks_like_fresh_perception_claim(result.text or ""):
+                prep.reality_retried = True
+                prep.say_used = False
+                logger.info("[REALITY] gate fired: perception claim without see() this turn")
+                from familiar_runtime.runtime import RetryDecision
+
+                return RetryDecision(
+                    retry=True,
+                    inject_user_message=(
+                        "[REALITY] You describe seeing something, but you did not "
+                        "look this turn. Either call see() now and describe what is "
+                        "actually there, or rephrase honestly as memory ('I "
+                        "remember…') or uncertainty."
                     ),
                 )
 

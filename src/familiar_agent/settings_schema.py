@@ -56,6 +56,7 @@ class SetupConfig:
     voice_gate: bool = False
     prompt_profile: str = "full"
     consciousness_profile: bool = False
+    reality_gate: bool = False
 
 
 Validator = Callable[[Any], str | None]
@@ -476,6 +477,16 @@ SETTINGS_FIELDS: tuple[SettingField, ...] = (
         default=False,
         setup_visible=False,
         runtime_getter=lambda config: config.consciousness_profile,
+    ),
+    SettingField(
+        env_key="FAMILIAR_REALITY_GATE",
+        attr="reality_gate",
+        section="advanced",
+        label="Reality gate (perception claims):",
+        widget="bool",
+        default=False,
+        setup_visible=False,
+        runtime_getter=lambda config: config.reality_gate,
     ),
 )
 
