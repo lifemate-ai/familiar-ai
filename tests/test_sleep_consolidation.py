@@ -172,6 +172,7 @@ def _dream_coalition():
 @pytest.mark.asyncio
 async def test_dream_cycles_journal_with_dream_kind(tmp_path):
     agent = _job_agent(tmp_path, dream=True)
+    agent._inner_backend = MagicMock()  # dreams require the small model
     agent._dmn.wander = AsyncMock(return_value=_dream_coalition())
     agent._verbalize_focus = AsyncMock(return_value="a quiet balcony, the city humming")
     await agent._run_sleep_consolidation()
@@ -245,6 +246,122 @@ def test_expire_working_memory_deletes_stale_rows(tmp_path):
         assert store.expire_working_memory(days=2.0) == 1
     finally:
         store.close()
+
+
+# ── Review-round regressions ──
+
+
+def test_gate_and_job_agree_on_configured_quiet_end():
+    """quiet_hours_end=9: inside the 07:00-09:00 window the gate (with the
+    configured hour threaded through) must compute the SAME night key the job
+    marked — or it re-spawns the job on every tick for two hours."""
+    now = datetime(2026, 7, 3, 8, 30)  # still quiet with end_hour=9
+    job_key = night_key_for(now, quiet_end_hour=9)
+    assert not should_run_sleep_consolidation(
+        enabled=True,
+        agent_running=False,
+        has_pending_input=False,
+        quiet_hours=True,
+        now_dt=now,
+        last_night_key=job_key,
+        quiet_end_hour=9,  # the call sites must thread this
+    )
+    # The old bug: gate at default 7 diverges and would re-fire.
+    assert night_key_for(now, quiet_end_hour=7) != job_key
+
+
+def test_start_sleep_consolidation_is_single_flight(tmp_path):
+    import asyncio
+
+    async def scenario():
+        agent = _job_agent(tmp_path)
+        never_done = asyncio.get_event_loop().create_future()
+
+        async def hang():
+            await never_done
+
+        agent._run_sleep_consolidation = hang  # type: ignore[method-assign]
+        agent._background_tasks = set()
+        agent.start_sleep_consolidation()
+        agent.start_sleep_consolidation()  # second spawn must be refused
+        count = sum(1 for t in agent._background_tasks if t.get_name() == "sleep-consolidation")
+        for t in agent._background_tasks:
+            t.cancel()
+        return count
+
+    assert asyncio.run(scenario()) == 1
+
+
+def test_recall_excludes_dreams_by_default(tmp_path):
+    from unittest.mock import patch
+
+    from familiar_agent.tools.memory import ObservationMemory, _EmbeddingModel
+
+    with patch.object(_EmbeddingModel, "pre_warm"):
+        store = ObservationMemory(db_path=str(tmp_path / "obs.db"))
+    try:
+        store.save("the balcony at dusk, city humming", kind="observation")
+        store.save("a dream of the balcony at dusk", kind="dream")
+        general = store.recall("balcony dusk", n=5)
+        assert general and all(r["kind"] != "dream" for r in general)
+        dreams = store.recall("balcony", n=5, kind="dream")
+        assert dreams and all(r["kind"] == "dream" for r in dreams)
+    finally:
+        store.close()
+
+
+def test_find_near_duplicates_ignores_dreams(tmp_path):
+    from unittest.mock import patch
+
+    from familiar_agent.tools.memory import ObservationMemory, _EmbeddingModel
+
+    with patch.object(_EmbeddingModel, "pre_warm"):
+        store = ObservationMemory(db_path=str(tmp_path / "obs.db"))
+    try:
+        store.save("identical text about the desk lamp", kind="observation")
+        store.save("identical text about the desk lamp", kind="dream")
+        pairs = store.find_near_duplicates(threshold=0.99)
+        assert pairs == []  # a dream can never evict the real memory
+    finally:
+        store.close()
+
+
+def test_recall_recent_by_kind_orders_by_recency(tmp_path):
+    from unittest.mock import patch
+
+    from familiar_agent.tools.memory import ObservationMemory, _EmbeddingModel
+
+    with patch.object(_EmbeddingModel, "pre_warm"):
+        store = ObservationMemory(db_path=str(tmp_path / "obs.db"))
+    try:
+        store.save("old dream", kind="dream", override_date="2026-06-01")
+        store.save("new dream", kind="dream")
+        recent = store.recall_recent_by_kind("dream", 1)
+        assert recent[0]["content"] == "new dream"
+    finally:
+        store.close()
+
+
+def test_dream_cycles_require_inner_backend(tmp_path):
+    import asyncio
+
+    agent = _job_agent(tmp_path, dream=True)
+    agent._inner_backend = None
+    agent._dmn.wander = AsyncMock(return_value=_dream_coalition())
+    assert asyncio.run(agent._run_dream_cycles()) == 0
+    agent._memory.save_async.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_distillation_parser_strips_bullets_and_bold(tmp_path):
+    agent = _job_agent(tmp_path)
+    agent._utility_backend.complete = AsyncMock(
+        return_value="- tuesday-rhythm: works late Tuesdays\n**lighting**: lamp stays on"
+    )
+    await agent._run_sleep_consolidation()
+    keys = [c.args[0] for c in agent._memory.upsert_semantic_fact_async.await_args_list]
+    assert "night:tuesday-rhythm" in keys
+    assert "night:lighting" in keys
 
 
 # ── Config ──

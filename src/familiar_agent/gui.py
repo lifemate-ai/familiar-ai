@@ -1565,13 +1565,19 @@ class FamiliarWindow(QMainWindow):
                 # Nightly consolidation: a background job, never a turn — it
                 # does not participate in idle precedence.
                 try:
-                    if agent_obj is not None and should_run_sleep_consolidation(
-                        enabled=bool(getattr(agent_config, "sleep_consolidation", False)),
-                        agent_running=self._agent_running,
-                        has_pending_input=not self._input_queue.empty(),
-                        quiet_hours=quiet_now,
-                        now_dt=datetime.now(),
-                        last_night_key=agent_obj.last_consolidation_night_key(),
+                    if (
+                        agent_obj is not None
+                        and bool(getattr(agent_config, "sleep_consolidation", False))
+                        and should_run_sleep_consolidation(
+                            enabled=True,
+                            agent_running=self._agent_running,
+                            has_pending_input=not self._input_queue.empty(),
+                            quiet_hours=quiet_now,
+                            now_dt=datetime.now(),
+                            last_night_key=agent_obj.last_consolidation_night_key(),
+                            # Must match the job's configured end hour.
+                            quiet_end_hour=agent_obj.consolidation_quiet_end_hour(),
+                        )
                     ):
                         agent_obj.start_sleep_consolidation()
                 except Exception:

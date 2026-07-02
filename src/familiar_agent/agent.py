@@ -1989,18 +1989,22 @@ class EmbodiedAgent:
     # ── Sleep consolidation (FAMILIAR_SLEEP_CONSOLIDATION) ─────────────────
 
     def last_consolidation_night_key(self) -> str | None:
-        """Persisted once-per-night marker (cached; heartbeat_state idiom)."""
+        """Persisted once-per-night marker (cached; heartbeat_state idiom).
+
+        The cache stores "" for "no marker file", so a fresh install does not
+        re-read the missing file on every idle tick.
+        """
         cached = getattr(self, "_consolidation_night_key", None)
         if cached is not None:
-            return cached
+            return cached or None
         path = Path.home() / ".familiar_ai" / "consolidation_state.json"
         try:
             raw = json.loads(path.read_text(encoding="utf-8"))
-            key = str(raw.get("night_key", "")) or None
+            key = str(raw.get("night_key", ""))
         except Exception:  # noqa: BLE001
-            key = None
+            key = ""
         self._consolidation_night_key = key
-        return key
+        return key or None
 
     def _mark_consolidation_night(self, key: str) -> None:
         self._consolidation_night_key = key
@@ -2011,8 +2015,24 @@ class EmbodiedAgent:
         except Exception as exc:  # noqa: BLE001
             logger.warning("Could not persist consolidation marker: %s", exc)
 
+    def consolidation_quiet_end_hour(self) -> int:
+        """The configured quiet-hours end — gate and job MUST use the same
+        value or their night keys diverge (double runs / permanent skips)."""
+        return int(getattr(getattr(self, "_schedule_rule", None), "end_hour", 7) or 7)
+
     def start_sleep_consolidation(self) -> None:
-        """Spawn the nightly job as a background task — never fires a turn."""
+        """Spawn the nightly job as a background task — never fires a turn.
+
+        Single-flight: the marker-before-LLM ordering protects sequential
+        ticks, but nothing else prevents concurrent jobs (double decay,
+        duplicate distill calls) — refuse to spawn while one is in flight.
+        """
+        for task in getattr(self, "_background_tasks", ()):
+            try:
+                if task.get_name() == "sleep-consolidation" and not task.done():
+                    return
+            except Exception:  # noqa: BLE001
+                continue
         self._spawn_background_task(self._run_sleep_consolidation(), name="sleep-consolidation")
 
     async def _run_sleep_consolidation(self) -> None:
@@ -2027,8 +2047,9 @@ class EmbodiedAgent:
             return
         if self._turn_active:
             return
-        quiet_end = int(getattr(getattr(self, "_schedule_rule", None), "end_hour", 7) or 7)
-        night_key = night_key_for(datetime.now(), quiet_end_hour=quiet_end)
+        night_key = night_key_for(
+            datetime.now(), quiet_end_hour=self.consolidation_quiet_end_hour()
+        )
         self._mark_consolidation_night(night_key)
         stats: dict[str, int] = {}
 
@@ -2099,7 +2120,10 @@ class EmbodiedAgent:
             if count >= 3 or ":" not in raw_line:
                 continue
             key, _, text = raw_line.partition(":")
-            key = re.sub(r"[^a-z0-9-]", "", key.strip().lower().replace(" ", "-"))[:40]
+            # Strip markdown bullets/emphasis BEFORE slugging, or "- key" and
+            # "**key**" mint different fact keys than the bare form.
+            key = key.strip().lstrip("-*• \t").strip().lower()
+            key = re.sub(r"[^a-z0-9-]", "", key.replace(" ", "-")).strip("-")[:40]
             text = text.strip()[:200]
             if not key or not text or key == "none":
                 continue
@@ -2116,6 +2140,11 @@ class EmbodiedAgent:
         off is structural), the small model verbalizes, and the journal is
         provenance-tagged so a dream can never be recalled as observation.
         """
+        if getattr(self, "_inner_backend", None) is None:
+            # Dreams require the dedicated small model: journaling raw recall
+            # summaries as "dreams" would widen the provenance lane for no
+            # generative content.
+            return 0
         dreamed = 0
         for _ in range(max(0, cycles)):
             if self._turn_active:
@@ -2668,9 +2697,10 @@ class EmbodiedAgent:
             blocks.append((self._memory.format_feelings_for_context(feelings), 0.71))
         if getattr(self.config, "dream_mode", False):
             # The not-perception label is load-bearing: a dream must never be
-            # citable as observation.
+            # citable as observation. Recency order — the block says "last
+            # night's", so it must not surface an old dream by similarity.
             try:
-                dreams = await asyncio.to_thread(self._memory.recall, "", 2, "dream")
+                dreams = await self._memory.recall_recent_by_kind_async("dream", 2)
             except Exception:  # noqa: BLE001
                 dreams = []
             if dreams:

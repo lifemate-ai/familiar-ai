@@ -533,14 +533,19 @@ class FamiliarApp(App):
     def _maybe_start_sleep_consolidation(self, *, quiet: bool) -> None:
         """Nightly consolidation: a background job, never a turn — checked
         after the reminder branch so idle precedence stays untouched."""
+        if not bool(getattr(self.agent.config, "sleep_consolidation", False)):
+            return  # short-circuit before touching the marker file
         try:
             if should_run_sleep_consolidation(
-                enabled=bool(getattr(self.agent.config, "sleep_consolidation", False)),
+                enabled=True,
                 agent_running=self._agent_running,
                 has_pending_input=not self._input_queue.empty(),
                 quiet_hours=quiet,
                 now_dt=datetime.now(),
                 last_night_key=self.agent.last_consolidation_night_key(),
+                # Gate and job MUST share the configured end hour, or their
+                # night keys diverge inside an extended quiet window.
+                quiet_end_hour=self.agent.consolidation_quiet_end_hour(),
             ):
                 self.agent.start_sleep_consolidation()
         except Exception:

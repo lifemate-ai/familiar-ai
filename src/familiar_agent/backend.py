@@ -169,7 +169,7 @@ def create_utility_backend(
         return GLMBackend(api_key=api_key, model=model)
     if platform == "openai":
         model = model or "gpt-4o-mini"
-        base_url = config.utility_base_url or "https://api.openai.com/v1"
+        base_url = getattr(config, "utility_base_url", "") or "https://api.openai.com/v1"
         logger.info("Using OpenAI-compatible utility backend: %s (%s)", model, base_url)
         return OpenAICompatibleBackend(api_key=api_key, model=model, base_url=base_url)
 
@@ -265,10 +265,9 @@ def create_scene_backend(
         return GLMBackend(api_key=api_key, model=model)
     if platform == "openai":
         model = model or "gpt-4o-mini"
-        logger.info("Using OpenAI scene backend: %s", model)
-        return OpenAICompatibleBackend(
-            api_key=api_key, model=model, base_url="https://api.openai.com/v1"
-        )
+        base_url = getattr(config, "scene_base_url", "") or "https://api.openai.com/v1"
+        logger.info("Using OpenAI-compatible scene backend: %s (%s)", model, base_url)
+        return OpenAICompatibleBackend(api_key=api_key, model=model, base_url=base_url)
 
     logger.warning("Unknown SCENE_PLATFORM: %s, falling back", platform)
     return None

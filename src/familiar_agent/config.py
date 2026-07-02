@@ -210,6 +210,8 @@ class AgentConfig:
     scene_platform: str = field(default_factory=lambda: os.environ.get("SCENE_PLATFORM", ""))
     scene_api_key: str = field(default_factory=lambda: os.environ.get("SCENE_API_KEY", ""))
     scene_model: str = field(default_factory=lambda: os.environ.get("SCENE_MODEL", ""))
+    # OpenAI-compatible scene endpoint override (mirrors UTILITY_BASE_URL).
+    scene_base_url: str = field(default_factory=lambda: os.environ.get("SCENE_BASE_URL", ""))
 
     # ── Inner backend (optional) ────────────────────────────────────────
     # Separate small/local model for inner-loop micro-thoughts (one short

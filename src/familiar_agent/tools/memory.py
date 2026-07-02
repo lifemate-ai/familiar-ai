@@ -918,9 +918,16 @@ class ObservationMemory:
             return False
 
     def recall(self, query: str, n: int = 3, kind: str | None = None) -> list[dict]:
-        """Recall by vector similarity. Fallback to LIKE + recency."""
+        """Recall by vector similarity. Fallback to LIKE + recency.
+
+        Dreams are an opt-in provenance lane: general recall (``kind=None``)
+        never returns them — they surface only when a caller explicitly asks
+        for ``kind="dream"``. Without this, journaled dreams would re-enter
+        turn context, working memory, and DMN seeding as ordinary memories
+        (and self-amplify across nights).
+        """
         try:
-            kind_filter = "AND kind = ?" if kind else ""
+            kind_filter = "AND kind = ?" if kind else "AND kind != 'dream'"
             kind_params: list[Any] = [kind] if kind else []
 
             # Fetch rows under lock, then compute similarity outside lock
@@ -959,13 +966,15 @@ class ObservationMemory:
                             fallback_rows = db.execute(
                                 f"SELECT id, content, timestamp, date, time, direction, kind, emotion, image_path "
                                 f"FROM observations WHERE ({conditions}) AND superseded_by IS NULL "
+                                f"AND kind != 'dream' "
                                 f"ORDER BY timestamp DESC LIMIT ?",
                                 params_like + [n],
                             ).fetchall()
                     if not fallback_rows:
                         fallback_rows = db.execute(
                             "SELECT id, content, timestamp, date, time, direction, kind, emotion, image_path "
-                            "FROM observations WHERE superseded_by IS NULL ORDER BY timestamp DESC LIMIT ?",
+                            "FROM observations WHERE superseded_by IS NULL AND kind != 'dream' "
+                            "ORDER BY timestamp DESC LIMIT ?",
                             (n,),
                         ).fetchall()
 
@@ -1515,6 +1524,11 @@ class ObservationMemory:
 
         Returns list of (id_older, id_newer, similarity) tuples, sorted by similarity desc.
         Older = earlier timestamp is marked as the one to supersede.
+
+        Dreams are excluded: a dream is verbalized FROM recalled real memories,
+        so a newer dream can sit above the threshold against the very
+        observation it derives from — dedup must never evict a real memory in
+        favor of a hallucinated one.
         """
         with self._db_lock:
             db = self._ensure_connected()
@@ -1523,7 +1537,7 @@ class ObservationMemory:
                 SELECT o.id, o.timestamp, e.vector
                 FROM observations o
                 JOIN obs_embeddings e ON o.id = e.obs_id
-                WHERE o.superseded_by IS NULL
+                WHERE o.superseded_by IS NULL AND o.kind != 'dream'
                 ORDER BY o.timestamp DESC
                 LIMIT ?
                 """,
@@ -1934,6 +1948,21 @@ class ObservationMemory:
             )
             processed += 1
         return processed
+
+    def recall_recent_by_kind(self, kind: str, n: int = 3) -> list[dict]:
+        """Most recent observations of one kind (timestamp desc, not similarity)."""
+        with self._db_lock:
+            db = self._ensure_connected()
+            rows = db.execute(
+                "SELECT id, content, timestamp, date, kind FROM observations "
+                "WHERE kind = ? AND superseded_by IS NULL "
+                "ORDER BY timestamp DESC LIMIT ?",
+                (kind, n),
+            ).fetchall()
+        return [dict(r) for r in rows]
+
+    async def recall_recent_by_kind_async(self, kind: str, n: int = 3) -> list[dict]:
+        return await asyncio.to_thread(self.recall_recent_by_kind, kind, n)
 
     def upsert_semantic_fact(
         self,

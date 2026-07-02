@@ -171,13 +171,17 @@ async def repl(agent: EmbodiedAgent, desires: DesireSystem, debug: bool = False)
                 # Nightly consolidation: a background job, never a turn — it
                 # does not participate in idle precedence.
                 try:
-                    if should_run_sleep_consolidation(
-                        enabled=bool(getattr(agent.config, "sleep_consolidation", False)),
+                    if bool(
+                        getattr(agent.config, "sleep_consolidation", False)
+                    ) and should_run_sleep_consolidation(
+                        enabled=True,
                         agent_running=False,
                         has_pending_input=not input_queue.empty(),
                         quiet_hours=quiet_now,
                         now_dt=datetime.now(),
                         last_night_key=agent.last_consolidation_night_key(),
+                        # Must match the job's configured end hour.
+                        quiet_end_hour=agent.consolidation_quiet_end_hour(),
                     ):
                         agent.start_sleep_consolidation()
                 except Exception:
