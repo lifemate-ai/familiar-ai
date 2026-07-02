@@ -37,6 +37,9 @@ def _make_agent(*, with_tts: bool = False, with_camera: bool = False, with_mcp: 
     agent.config.max_tokens = 1000
     agent.config.agent_name = "Kokone"
     agent.config.companion_name = "Kouta"
+    # MagicMock attrs are truthy — pin flag-gated subsystems to their real
+    # defaults so tests exercise the same paths a default install does.
+    agent.config.consciousness_profile = False
 
     agent._turn_count = 0
     agent._session_input_tokens = 0
