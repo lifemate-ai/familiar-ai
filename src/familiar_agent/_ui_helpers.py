@@ -333,6 +333,43 @@ def should_fire_commitment_reminder(
     return ready
 
 
+def night_key_for(now_dt, *, quiet_end_hour: int = 7) -> str:
+    """Group one 23:00→07:00 window under a single key.
+
+    Subtracting ``quiet_end_hour`` maps every instant of the same night
+    (before AND after midnight) onto the same calendar date.
+    """
+    from datetime import timedelta
+
+    return (now_dt - timedelta(hours=quiet_end_hour)).date().isoformat()
+
+
+def should_run_sleep_consolidation(
+    *,
+    enabled: bool,
+    agent_running: bool,
+    has_pending_input: bool,
+    quiet_hours: bool,
+    now_dt,
+    last_night_key: str | None,
+    quiet_end_hour: int = 7,
+) -> bool:
+    """Pure scheduling gate for the nightly consolidation job.
+
+    Mirrors :func:`should_fire_commitment_reminder`: never during activity,
+    only in quiet hours, at most once per night (``last_night_key`` is the
+    persisted marker). The caller spawns a background job — no turn fires,
+    so idle precedence (user > reminder > desire) is untouched.
+    """
+    if not enabled:
+        return False
+    if agent_running or has_pending_input:
+        return False
+    if not quiet_hours:
+        return False
+    return night_key_for(now_dt, quiet_end_hour=quiet_end_hour) != (last_night_key or "")
+
+
 def commitment_reminder_prompt(commitments: list[Commitment]) -> str:
     """Render the internal-impulse text for a proactive reminder turn."""
     items = "\n".join(f"- {c.summary}" for c in commitments)

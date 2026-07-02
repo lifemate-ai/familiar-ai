@@ -1935,6 +1935,56 @@ class ObservationMemory:
             processed += 1
         return processed
 
+    def upsert_semantic_fact(
+        self,
+        fact_key: str,
+        fact_text: str,
+        *,
+        confidence: float = 0.6,
+        tags: str = "",
+        source_memory_id: str | None = None,
+    ) -> None:
+        """Public wrapper for distillation jobs — locked, revision-audited."""
+        with self._db_lock:
+            db = self._ensure_connected()
+            self._upsert_semantic_fact_locked(
+                db,
+                fact_key,
+                fact_text,
+                source_memory_id=source_memory_id,
+                confidence=confidence,
+                tags=tags,
+            )
+            db.commit()
+
+    async def upsert_semantic_fact_async(
+        self,
+        fact_key: str,
+        fact_text: str,
+        *,
+        confidence: float = 0.6,
+        tags: str = "",
+    ) -> None:
+        await asyncio.to_thread(
+            self.upsert_semantic_fact,
+            fact_key,
+            fact_text,
+            confidence=confidence,
+            tags=tags,
+        )
+
+    def expire_working_memory(self, days: float = 2.0) -> int:
+        """Drop stale working-memory activation rows (nightly hygiene)."""
+        cutoff = (datetime.now() - timedelta(days=days)).isoformat()
+        with self._db_lock:
+            db = self._ensure_connected()
+            cur = db.execute("DELETE FROM memory_activation WHERE activated_at < ?", (cutoff,))
+            db.commit()
+            return int(cur.rowcount or 0)
+
+    async def expire_working_memory_async(self, days: float = 2.0) -> int:
+        return await asyncio.to_thread(self.expire_working_memory, days)
+
     def open_unfinished_business(
         self,
         summary: str,

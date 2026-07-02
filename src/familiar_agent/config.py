@@ -200,6 +200,9 @@ class AgentConfig:
     utility_platform: str = field(default_factory=lambda: os.environ.get("UTILITY_PLATFORM", ""))
     utility_api_key: str = field(default_factory=lambda: os.environ.get("UTILITY_API_KEY", ""))
     utility_model: str = field(default_factory=lambda: os.environ.get("UTILITY_MODEL", ""))
+    # OpenAI-compatible utility endpoint override (mirrors INNER_BASE_URL) —
+    # lets summaries/distillation run on a local server (Ollama, vllm).
+    utility_base_url: str = field(default_factory=lambda: os.environ.get("UTILITY_BASE_URL", ""))
 
     # ── Scene backend (optional) ────────────────────────────────────────
     # Separate backend for scene entity extraction — cheaper/local model.
@@ -277,6 +280,17 @@ class AgentConfig:
     inner_dense: bool = field(
         default_factory=lambda: _bool_env("FAMILIAR_INNER_DENSE", default=False)
     )
+    # Sleep consolidation: a once-per-night background job during quiet hours
+    # (dedup near-duplicates, decay importance, distill yesterday into
+    # semantic facts, expire stale working memory). Never fires a turn.
+    sleep_consolidation: bool = field(
+        default_factory=lambda: _bool_env("FAMILIAR_SLEEP_CONSOLIDATION", default=False)
+    )
+    # Dream mode (requires sleep_consolidation + an INNER_* small model):
+    # a few ungrounded generative cycles during the nightly job, journaled
+    # as kind="dream" and surfaced next morning with an explicit
+    # not-perception label.
+    dream_mode: bool = field(default_factory=lambda: _bool_env("FAMILIAR_DREAM", default=False))
     # Lower bound for the body-modulated inner-loop cadence (seconds). The
     # historical floor is 5.0; dense setups may lower it toward ~1 Hz.
     inner_min_interval: float = field(

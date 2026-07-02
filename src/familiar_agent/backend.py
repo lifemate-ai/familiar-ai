@@ -169,10 +169,9 @@ def create_utility_backend(
         return GLMBackend(api_key=api_key, model=model)
     if platform == "openai":
         model = model or "gpt-4o-mini"
-        logger.info("Using OpenAI utility backend: %s", model)
-        return OpenAICompatibleBackend(
-            api_key=api_key, model=model, base_url="https://api.openai.com/v1"
-        )
+        base_url = config.utility_base_url or "https://api.openai.com/v1"
+        logger.info("Using OpenAI-compatible utility backend: %s (%s)", model, base_url)
+        return OpenAICompatibleBackend(api_key=api_key, model=model, base_url=base_url)
 
     logger.warning("Unknown UTILITY_PLATFORM: %s, falling back to main backend", platform)
     return None

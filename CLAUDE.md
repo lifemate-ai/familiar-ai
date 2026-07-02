@@ -253,6 +253,7 @@ Primary stores under `~/.familiar_ai/`:
   `migration/` runner)
 - `mental_state.jsonl` — append-only mental-state snapshots
 - `heartbeat_state.json` — continuation / carryover status
+- `consolidation_state.json` — sleep-consolidation once-per-night marker
 - `desires.json` — drive levels
 - `self_state.json` — latent bodily carryover
 - `identity_state.json` — identity dissonance ledger (decay + reflection relief)

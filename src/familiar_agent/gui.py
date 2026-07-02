@@ -25,6 +25,7 @@ import os
 import re
 import sys
 import time
+from datetime import datetime
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, cast
 from urllib.parse import quote
@@ -63,6 +64,7 @@ from ._ui_helpers import (
     format_tool_result,
     should_fire_commitment_reminder,
     should_fire_idle_desire,
+    should_run_sleep_consolidation,
 )
 from .bootstrap import resolve_env_path
 from .diagnostics import (
@@ -1558,6 +1560,22 @@ class FamiliarWindow(QMainWindow):
                     continue
                 agent_obj = getattr(self, "_agent", None)
                 agent_config = getattr(agent_obj, "config", None)
+                heartbeat = getattr(agent_obj, "_heartbeat", None)
+                quiet_now = heartbeat.routine_state().quiet_hours if heartbeat else False
+                # Nightly consolidation: a background job, never a turn — it
+                # does not participate in idle precedence.
+                try:
+                    if agent_obj is not None and should_run_sleep_consolidation(
+                        enabled=bool(getattr(agent_config, "sleep_consolidation", False)),
+                        agent_running=self._agent_running,
+                        has_pending_input=not self._input_queue.empty(),
+                        quiet_hours=quiet_now,
+                        now_dt=datetime.now(),
+                        last_night_key=agent_obj.last_consolidation_night_key(),
+                    ):
+                        agent_obj.start_sleep_consolidation()
+                except Exception:
+                    logger.exception("sleep consolidation gate failed; skipping")
                 # Proactive commitment reminders fire independently of auto_desire.
                 store = getattr(agent_obj, "_commitment_store", None)
                 if (
@@ -1566,8 +1584,7 @@ class FamiliarWindow(QMainWindow):
                     and getattr(agent_config, "proactive_reminders", True)
                 ):
                     try:
-                        heartbeat = getattr(agent_obj, "_heartbeat", None)
-                        quiet = heartbeat.routine_state().quiet_hours if heartbeat else False
+                        quiet = quiet_now
                         reminders = should_fire_commitment_reminder(
                             agent_running=self._agent_running,
                             has_pending_input=not self._input_queue.empty(),

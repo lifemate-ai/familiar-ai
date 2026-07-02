@@ -3,6 +3,7 @@
 from __future__ import annotations
 import asyncio
 import hashlib
+import json
 import logging
 import math
 import os
@@ -10,7 +11,7 @@ import re
 import time
 from collections import deque
 from collections.abc import Callable, Coroutine, Mapping
-from datetime import datetime
+from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any, cast
 
@@ -94,6 +95,7 @@ from .tools.mobility import MobilityTool
 from .tools.stt import STTTool
 from .tools.tts import TTSTool
 from ._i18n import _t
+from ._ui_helpers import night_key_for
 from .mcp_client import MCPClientManager, _resolve_config_path
 from familiar_capabilities import (
     CameraCapability,
@@ -1897,14 +1899,23 @@ class EmbodiedAgent:
         sub-verbal monologue works fine without it; this just gives the train
         of thought words. Failures degrade to the raw coalition summary.
         """
+        return await self._verbalize_focus(winner)
+
+    async def _verbalize_focus(self, winner, *, bypass_rate_limit: bool = False) -> str | None:
+        """Shared verbalization core for micro-thoughts and dream cycles.
+
+        Dreams run in their own bounded nightly loop, so they bypass the
+        120 s micro-thought limiter instead of starving it (and vice versa).
+        """
         backend = getattr(self, "_inner_backend", None)
         if backend is None:
             return None
-        now = time.time()
-        last = getattr(self, "_last_micro_thought_at", 0.0)
-        if now - last < _INNER_MICRO_THOUGHT_MIN_INTERVAL_SEC:
-            return None
-        self._last_micro_thought_at = now
+        if not bypass_rate_limit:
+            now = time.time()
+            last = getattr(self, "_last_micro_thought_at", 0.0)
+            if now - last < _INNER_MICRO_THOUGHT_MIN_INTERVAL_SEC:
+                return None
+            self._last_micro_thought_at = now
         recent = "\n".join(f"- {t.summary[:100]}" for t in list(self._inner_monologue)[-3:])
         prompt = _MICRO_THOUGHT_PROMPT.format(
             agent_name=self.config.agent_name,
@@ -1974,6 +1985,157 @@ class EmbodiedAgent:
             )
         except Exception:  # noqa: BLE001
             pass
+
+    # ── Sleep consolidation (FAMILIAR_SLEEP_CONSOLIDATION) ─────────────────
+
+    def last_consolidation_night_key(self) -> str | None:
+        """Persisted once-per-night marker (cached; heartbeat_state idiom)."""
+        cached = getattr(self, "_consolidation_night_key", None)
+        if cached is not None:
+            return cached
+        path = Path.home() / ".familiar_ai" / "consolidation_state.json"
+        try:
+            raw = json.loads(path.read_text(encoding="utf-8"))
+            key = str(raw.get("night_key", "")) or None
+        except Exception:  # noqa: BLE001
+            key = None
+        self._consolidation_night_key = key
+        return key
+
+    def _mark_consolidation_night(self, key: str) -> None:
+        self._consolidation_night_key = key
+        path = Path.home() / ".familiar_ai" / "consolidation_state.json"
+        try:
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text(json.dumps({"night_key": key}), encoding="utf-8")
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("Could not persist consolidation marker: %s", exc)
+
+    def start_sleep_consolidation(self) -> None:
+        """Spawn the nightly job as a background task — never fires a turn."""
+        self._spawn_background_task(self._run_sleep_consolidation(), name="sleep-consolidation")
+
+    async def _run_sleep_consolidation(self) -> None:
+        """Nightly memory hygiene: dedup, decay, distill, expire (+ dreams).
+
+        Sleep is lossy compression of episodes into the model. Marker is
+        written BEFORE the LLM steps (record-before-run: a crashed job must
+        not retry all night); every step is individually best-effort and
+        yields to a starting turn.
+        """
+        if not getattr(self.config, "sleep_consolidation", False):
+            return
+        if self._turn_active:
+            return
+        quiet_end = int(getattr(getattr(self, "_schedule_rule", None), "end_hour", 7) or 7)
+        night_key = night_key_for(datetime.now(), quiet_end_hour=quiet_end)
+        self._mark_consolidation_night(night_key)
+        stats: dict[str, int] = {}
+
+        try:
+            stats["deduped"] = await self._memory.consolidate_memories_async()
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("Sleep consolidation dedup failed: %s", exc)
+        if self._turn_active:
+            return
+
+        try:
+            today = datetime.now().strftime("%Y-%m-%d")
+            stats["decayed"] = await self._memory.decay_importance_async(before_date=today)
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("Sleep consolidation decay failed: %s", exc)
+        if self._turn_active:
+            return
+
+        try:
+            stats["distilled"] = await self._distill_yesterday_facts()
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("Sleep distillation failed: %s", exc)
+        if self._turn_active:
+            return
+
+        try:
+            stats["expired"] = await self._memory.expire_working_memory_async()
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("Working-memory expiry failed: %s", exc)
+
+        # (Experience-ledger nightly proposals attach here in a later PR.)
+
+        if getattr(self.config, "dream_mode", False) and not self._turn_active:
+            try:
+                stats["dreams"] = await self._run_dream_cycles()
+            except Exception as exc:  # noqa: BLE001
+                logger.warning("Dream cycle failed: %s", exc)
+
+        logger.info("Sleep consolidation done (%s): %s", night_key, stats)
+
+    async def _distill_yesterday_facts(self) -> int:
+        """One bounded utility call: yesterday's observations → ≤3 stable facts."""
+        if self._utility_backend is self.backend:
+            return 0  # never burn main-model calls on maintenance
+        yesterday = (datetime.now() - timedelta(days=1)).strftime("%Y-%m-%d")
+        observations = await asyncio.to_thread(
+            self._memory.get_observations_for_date, yesterday, 40
+        )
+        if not observations:
+            return 0
+        lines = "\n".join(f"- {str(o.get('content', ''))[:160]}" for o in observations[:40])
+        prompt = (
+            "From yesterday's observations, extract at most 3 stable facts worth "
+            "remembering long-term (recurring patterns, preferences, environment "
+            "facts — NOT one-off events). Reply with one fact per line as "
+            "'key-slug: fact text' (slug: lowercase, hyphens). Reply 'none' if "
+            f"nothing qualifies.\n\nObservations:\n{lines}"
+        )
+        # Generous timeout: a nightly job on a local server usually finds the
+        # utility model cold-unloaded — the load alone can eat 30 s, and
+        # nothing is waiting on this background task.
+        reply = await asyncio.wait_for(
+            self._utility_backend.complete(prompt, max_tokens=300), timeout=90.0
+        )
+        logger.debug("Night distillation reply: %r", (reply or "")[:400])
+        count = 0
+        for raw_line in (reply or "").strip().splitlines():
+            if count >= 3 or ":" not in raw_line:
+                continue
+            key, _, text = raw_line.partition(":")
+            key = re.sub(r"[^a-z0-9-]", "", key.strip().lower().replace(" ", "-"))[:40]
+            text = text.strip()[:200]
+            if not key or not text or key == "none":
+                continue
+            await self._memory.upsert_semantic_fact_async(
+                f"night:{key}", text, confidence=0.55, tags="night_distill"
+            )
+            count += 1
+        return count
+
+    async def _run_dream_cycles(self, cycles: int = 3) -> int:
+        """Ungrounded generative cycles, journaled as kind='dream'.
+
+        The DMN wanders (embedding recall, no camera, no tools — grounding
+        off is structural), the small model verbalizes, and the journal is
+        provenance-tagged so a dream can never be recalled as observation.
+        """
+        dreamed = 0
+        for _ in range(max(0, cycles)):
+            if self._turn_active:
+                break
+            coalition = await self._dmn.wander()
+            if coalition is None:
+                break
+            text = await self._verbalize_focus(coalition, bypass_rate_limit=True)
+            content = (text or coalition.summary or "").strip()
+            if not content:
+                continue
+            await self._memory.save_async(
+                content,
+                direction="dream",
+                kind="dream",
+                materialize_now=False,
+                dedupe_key=f"dream:{content[:60]}",
+            )
+            dreamed += 1
+        return dreamed
 
     async def _on_broadcast_drive_nudge(self, winner) -> None:
         """Dense-recurrence listener: a broadcast gently presses its drive.
@@ -2504,6 +2666,22 @@ class EmbodiedAgent:
             blocks.append((self._memory.format_curiosities_for_context(curiosities), 0.74))
         if feelings:
             blocks.append((self._memory.format_feelings_for_context(feelings), 0.71))
+        if getattr(self.config, "dream_mode", False):
+            # The not-perception label is load-bearing: a dream must never be
+            # citable as observation.
+            try:
+                dreams = await asyncio.to_thread(self._memory.recall, "", 2, "dream")
+            except Exception:  # noqa: BLE001
+                dreams = []
+            if dreams:
+                dream_lines = "\n".join(f"- {d.get('content', '')[:140]}" for d in dreams)
+                blocks.append(
+                    (
+                        "[Last night's dreams — generated during sleep, not perception]\n"
+                        + dream_lines,
+                        0.60,
+                    )
+                )
 
         parts = self._select_context_blocks(blocks, _MORNING_CONTEXT_MAX_CHARS)
 

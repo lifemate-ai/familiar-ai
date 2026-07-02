@@ -58,6 +58,7 @@ class SetupConfig:
     consciousness_profile: bool = False
     reality_gate: bool = False
     inner_dense: bool = False
+    sleep_consolidation: bool = False
 
 
 Validator = Callable[[Any], str | None]
@@ -498,6 +499,16 @@ SETTINGS_FIELDS: tuple[SettingField, ...] = (
         default=False,
         setup_visible=False,
         runtime_getter=lambda config: config.inner_dense,
+    ),
+    SettingField(
+        env_key="FAMILIAR_SLEEP_CONSOLIDATION",
+        attr="sleep_consolidation",
+        section="advanced",
+        label="Sleep consolidation (nightly):",
+        widget="bool",
+        default=False,
+        setup_visible=False,
+        runtime_getter=lambda config: config.sleep_consolidation,
     ),
 )
 
