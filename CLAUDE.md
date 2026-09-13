@@ -217,7 +217,9 @@ Invariants to preserve when touching these loops:
   `PersonModelTracker` each carry a duck-typed `event_log` (default None →
   byte-stable); `agent._init_social_events()` attaches the single
   `SocialEventLog`. Emission is best-effort (never raises); kinds are the
-  closed `SOCIAL_EVENT_KINDS` frozenset. Read-only tool: `social_timeline`.
+  closed `SOCIAL_EVENT_KINDS` frozenset; retention is bounded (every 100
+  appends: drop rows older than `retention_days`=180, cap at `max_rows`=20000).
+  Read-only tool: `social_timeline`.
 - **Narrative arcs + daybook** (`familiar_neighbor/mind/narrative.py`,
   `narrative_arcs` table, migration 014; `~/.familiar_ai/daybook.jsonl`): the
   plot layer of selfhood. `NarrativeStore` holds at most 7 active arcs (an 8th

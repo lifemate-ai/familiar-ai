@@ -449,3 +449,94 @@ def test_agent_social_events_init_failure_is_dormant(tmp_path: Path):
     assert agent._social_timeline_tool is None
     assert agent._relationship.event_log is None
     agent._relationship.close()
+
+
+# ── concurrency, retention, shutdown ──
+
+
+def test_concurrent_appends_from_threads_all_land(tmp_path: Path):
+    import threading
+
+    ledger = SocialEventLog(db_path=tmp_path / "obs.db")
+    ledger.append("repair", source="warm")  # open the connection on the main thread
+    per_thread = 25
+    errors: list[BaseException] = []
+
+    def worker(idx: int) -> None:
+        try:
+            for j in range(per_thread):
+                assert ledger.append("repair", source=f"t{idx}", payload={"j": j}) is not None
+        except BaseException as exc:  # noqa: BLE001
+            errors.append(exc)
+
+    threads = [threading.Thread(target=worker, args=(i,)) for i in range(8)]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join()
+    assert errors == []
+    assert ledger.count() == 1 + 8 * per_thread
+    ledger.close()
+
+
+def test_append_prunes_rows_older_than_retention(tmp_path: Path):
+    from datetime import datetime, timedelta, timezone
+
+    from familiar_neighbor.mind.social_events import PRUNE_EVERY
+
+    ledger = SocialEventLog(db_path=tmp_path / "obs.db", retention_days=2, max_rows=10_000)
+    stale_ts = (datetime.now(timezone.utc) - timedelta(days=5)).isoformat()
+    fresh_ts = (datetime.now(timezone.utc) - timedelta(days=1)).isoformat()
+    db = ledger._ensure_db()
+    for i, ts in enumerate([stale_ts, stale_ts, fresh_ts]):
+        db.execute(
+            "INSERT INTO social_events (id, ts, source, kind, payload_json) VALUES (?, ?, ?, ?, ?)",
+            (f"seed{i}", ts, "seed", "repair", "{}"),
+        )
+    db.commit()
+    assert ledger.count() == 3
+    for _ in range(PRUNE_EVERY - 1):
+        ledger.append("repair", source="x")
+    assert ledger.count() == 3 + PRUNE_EVERY - 1  # not yet pruned
+    ledger.append("repair", source="x")  # the PRUNE_EVERY-th append prunes
+    assert ledger.count() == 1 + PRUNE_EVERY
+    ids = {e.id for e in ledger.recent(limit=200)}
+    assert "seed2" in ids and "seed0" not in ids and "seed1" not in ids
+    ledger.close()
+
+
+def test_append_prunes_oldest_rows_beyond_max_rows(tmp_path: Path):
+    from familiar_neighbor.mind.social_events import PRUNE_EVERY
+
+    cap = 30
+    ledger = SocialEventLog(db_path=tmp_path / "obs.db", retention_days=365, max_rows=cap)
+    kept: list[str] = []
+    for i in range(PRUNE_EVERY):
+        ev = ledger.append("repair", source="x", payload={"i": i})
+        assert ev is not None
+        kept.append(ev.id)
+    assert ledger.count() == cap
+    survivors = {e.id for e in ledger.recent(limit=200)}
+    assert survivors == set(kept[-cap:])  # newest survive, oldest dropped
+    ledger.close()
+
+
+@pytest.mark.asyncio
+async def test_agent_close_closes_social_events_and_narrative_store():
+    from familiar_agent.agent import EmbodiedAgent
+
+    agent = EmbodiedAgent.__new__(EmbodiedAgent)
+    agent._camera = None
+    agent._mcp = None
+    agent._memory = MagicMock()
+    agent.backend = MagicMock()
+    agent._utility_backend = agent.backend
+    agent._drain_background_tasks = AsyncMock()  # type: ignore[method-assign]
+    agent._write_today_narrative = AsyncMock(return_value="")  # type: ignore[method-assign]
+    agent._write_today_daybook = AsyncMock()  # type: ignore[method-assign]
+    agent._social_events = MagicMock()
+    agent._narrative_store = MagicMock()
+    agent._narrative_store.close.side_effect = RuntimeError("boom")  # must be swallowed
+    await agent.close()
+    agent._social_events.close.assert_called_once()
+    agent._narrative_store.close.assert_called_once()

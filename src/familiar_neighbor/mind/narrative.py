@@ -24,6 +24,8 @@ Design constraints:
 - **No persona strings.** Titles and summaries come from the agent.
 - Arc changes are mirrored onto the social event ledger as ``arc_updated``
   via the optional duck-typed ``event_log`` (best-effort, same as Phase 1).
+- **Thread-safe.** :class:`NarrativeStore` serializes all connection access
+  through one ``threading.Lock`` (same pattern as the commitment store).
 """
 
 from __future__ import annotations
@@ -32,6 +34,7 @@ import json
 import logging
 import os
 import sqlite3
+import threading
 import uuid
 from dataclasses import asdict, dataclass, field
 from datetime import date, datetime, timezone
@@ -116,6 +119,7 @@ class NarrativeStore:
     ) -> None:
         self._db_path = Path(db_path) if db_path is not None else DEFAULT_NARRATIVE_DB_PATH
         self._db: sqlite3.Connection | None = None
+        self._lock = threading.Lock()
         self.event_log = event_log
         self._max_active = max(1, int(max_active))
 
@@ -133,11 +137,12 @@ class NarrativeStore:
         return self._db
 
     def close(self) -> None:
-        if self._db is not None:
-            try:
-                self._db.close()
-            finally:
-                self._db = None
+        with self._lock:
+            if self._db is not None:
+                try:
+                    self._db.close()
+                finally:
+                    self._db = None
 
     # ── helpers ──
 
@@ -185,7 +190,8 @@ class NarrativeStore:
             sql += " LIMIT ?"
             params = [*params, max(1, int(limit))]
         try:
-            rows = self._ensure_db().execute(sql, params).fetchall()
+            with self._lock:
+                rows = self._ensure_db().execute(sql, params).fetchall()
         except Exception as exc:  # noqa: BLE001
             logger.warning("narrative_arcs: read failed: %s", exc)
             return []
@@ -210,27 +216,28 @@ class NarrativeStore:
         weight = _clamp01(importance)
         now = _now_iso()
         try:
-            db = self._ensure_db()
-            existing = db.execute(
-                "SELECT id, created_at FROM narrative_arcs WHERE arc_key = ?", (arc_key,)
-            ).fetchone()
-            if existing is None:
-                arc_id = f"arc_{uuid.uuid4().hex}"
-                db.execute(
-                    "INSERT INTO narrative_arcs "
-                    "(id, arc_key, title, summary, importance, status, created_at, updated_at) "
-                    "VALUES (?, ?, ?, ?, ?, 'active', ?, ?)",
-                    (arc_id, arc_key, clean_title, clean_summary, weight, now, now),
-                )
-            else:
-                arc_id = str(existing["id"])
-                db.execute(
-                    "UPDATE narrative_arcs SET title = ?, summary = ?, importance = ?, "
-                    "status = 'active', updated_at = ? WHERE id = ?",
-                    (clean_title, clean_summary, weight, now, arc_id),
-                )
-            demoted = self._enforce_bound(db)
-            db.commit()
+            with self._lock:
+                db = self._ensure_db()
+                existing = db.execute(
+                    "SELECT id, created_at FROM narrative_arcs WHERE arc_key = ?", (arc_key,)
+                ).fetchone()
+                if existing is None:
+                    arc_id = f"arc_{uuid.uuid4().hex}"
+                    db.execute(
+                        "INSERT INTO narrative_arcs "
+                        "(id, arc_key, title, summary, importance, status, created_at, updated_at) "
+                        "VALUES (?, ?, ?, ?, ?, 'active', ?, ?)",
+                        (arc_id, arc_key, clean_title, clean_summary, weight, now, now),
+                    )
+                else:
+                    arc_id = str(existing["id"])
+                    db.execute(
+                        "UPDATE narrative_arcs SET title = ?, summary = ?, importance = ?, "
+                        "status = 'active', updated_at = ? WHERE id = ?",
+                        (clean_title, clean_summary, weight, now, arc_id),
+                    )
+                demoted = self._enforce_bound(db)
+                db.commit()
             arc = self._get_by_id(arc_id)
         except Exception as exc:  # noqa: BLE001
             logger.warning("narrative_arcs: upsert failed (%s): %s", arc_key, exc)
@@ -269,13 +276,14 @@ class NarrativeStore:
         if not arc_key:
             return False
         try:
-            db = self._ensure_db()
-            cur = db.execute(
-                "UPDATE narrative_arcs SET status = 'closed', updated_at = ? "
-                "WHERE arc_key = ? AND status != 'closed'",
-                (_now_iso(), arc_key),
-            )
-            db.commit()
+            with self._lock:
+                db = self._ensure_db()
+                cur = db.execute(
+                    "UPDATE narrative_arcs SET status = 'closed', updated_at = ? "
+                    "WHERE arc_key = ? AND status != 'closed'",
+                    (_now_iso(), arc_key),
+                )
+                db.commit()
         except Exception as exc:  # noqa: BLE001
             logger.warning("narrative_arcs: close failed (%s): %s", arc_key, exc)
             return False

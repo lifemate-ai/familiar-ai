@@ -15,6 +15,13 @@ Design constraints:
   an unknown kind is logged and dropped rather than silently widening the
   schema of the timeline.
 - **No persona strings.** Person keys and payloads come from the emitters.
+- **Bounded retention.** Every :data:`PRUNE_EVERY` appends the ledger drops
+  rows older than ``retention_days`` (default 180) and trims the oldest rows
+  beyond ``max_rows`` (default 20000), so the timeline cannot grow without
+  limit across a long-lived companion.
+- **Thread-safe.** The GUI builds the agent off the event-loop thread while
+  emitters write from it; all connection access is serialized through one
+  ``threading.Lock`` (same pattern as the commitment store).
 
 Rows live in the shared observations DB (``social_events`` table, migration
 013) via the same lazy-connection + migration pattern as
@@ -26,9 +33,10 @@ from __future__ import annotations
 import json
 import logging
 import sqlite3
+import threading
 import uuid
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
 
@@ -59,6 +67,9 @@ SOCIAL_EVENT_KINDS: frozenset[str] = frozenset(
 )
 
 _MAX_RECENT = 200
+PRUNE_EVERY = 100
+DEFAULT_RETENTION_DAYS = 180
+DEFAULT_MAX_ROWS = 20000
 
 
 @dataclass(frozen=True)
@@ -99,11 +110,17 @@ class SocialEventLog:
         *,
         default_person: str | None = None,
         session_id: str | None = None,
+        retention_days: int = DEFAULT_RETENTION_DAYS,
+        max_rows: int = DEFAULT_MAX_ROWS,
     ) -> None:
         self._db_path = Path(db_path) if db_path is not None else DEFAULT_SOCIAL_EVENTS_DB_PATH
         self._db: sqlite3.Connection | None = None
+        self._lock = threading.Lock()
         self._default_person = (default_person or "").strip() or None
         self.session_id = session_id or f"sess_{uuid.uuid4().hex[:12]}"
+        self._retention_days = max(1, int(retention_days))
+        self._max_rows = max(1, int(max_rows))
+        self._appends_since_prune = 0
 
     # ── connection ──
 
@@ -119,13 +136,25 @@ class SocialEventLog:
         return self._db
 
     def close(self) -> None:
-        if self._db is not None:
-            try:
-                self._db.close()
-            finally:
-                self._db = None
+        with self._lock:
+            if self._db is not None:
+                try:
+                    self._db.close()
+                finally:
+                    self._db = None
 
     # ── writes ──
+
+    def _prune_locked(self, db: sqlite3.Connection) -> None:
+        """Drop rows past ``retention_days``, then the oldest beyond ``max_rows``."""
+        cutoff = (datetime.now(timezone.utc) - timedelta(days=self._retention_days)).isoformat()
+        db.execute("DELETE FROM social_events WHERE ts < ?", (cutoff,))
+        db.execute(
+            "DELETE FROM social_events WHERE rowid IN ("
+            "SELECT rowid FROM social_events ORDER BY ts DESC, rowid DESC LIMIT -1 OFFSET ?)",
+            (self._max_rows,),
+        )
+        db.commit()
 
     def append(
         self,
@@ -158,28 +187,33 @@ class SocialEventLog:
                 confidence=_clamp_confidence(confidence),
                 payload=dict(payload or {}),
             )
-            db = self._ensure_db()
-            db.execute(
-                """
-                INSERT INTO social_events (
-                    id, ts, source, kind, person_key, session_id,
-                    correlation_id, confidence, payload_json
+            with self._lock:
+                db = self._ensure_db()
+                db.execute(
+                    """
+                    INSERT INTO social_events (
+                        id, ts, source, kind, person_key, session_id,
+                        correlation_id, confidence, payload_json
+                    )
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    """,
+                    (
+                        event.id,
+                        event.ts,
+                        event.source,
+                        event.kind,
+                        event.person_key,
+                        event.session_id,
+                        event.correlation_id,
+                        event.confidence,
+                        json.dumps(event.payload, ensure_ascii=False, default=str),
+                    ),
                 )
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-                """,
-                (
-                    event.id,
-                    event.ts,
-                    event.source,
-                    event.kind,
-                    event.person_key,
-                    event.session_id,
-                    event.correlation_id,
-                    event.confidence,
-                    json.dumps(event.payload, ensure_ascii=False, default=str),
-                ),
-            )
-            db.commit()
+                db.commit()
+                self._appends_since_prune += 1
+                if self._appends_since_prune >= PRUNE_EVERY:
+                    self._appends_since_prune = 0
+                    self._prune_locked(db)
             return event
         except Exception as exc:  # noqa: BLE001
             logger.warning("social_events: append failed (%s): %s", kind, exc)
@@ -210,13 +244,14 @@ class SocialEventLog:
         limit = max(1, min(int(limit), _MAX_RECENT))
         where, params = self._where(kind, person_key)
         try:
-            db = self._ensure_db()
-            rows = db.execute(
-                "SELECT id, ts, source, kind, person_key, session_id, correlation_id, "
-                f"confidence, payload_json FROM social_events{where} "
-                "ORDER BY ts DESC, rowid DESC LIMIT ?",
-                [*params, limit],
-            ).fetchall()
+            with self._lock:
+                db = self._ensure_db()
+                rows = db.execute(
+                    "SELECT id, ts, source, kind, person_key, session_id, correlation_id, "
+                    f"confidence, payload_json FROM social_events{where} "
+                    "ORDER BY ts DESC, rowid DESC LIMIT ?",
+                    [*params, limit],
+                ).fetchall()
         except Exception as exc:  # noqa: BLE001
             logger.warning("social_events: recent() failed: %s", exc)
             return []
@@ -231,8 +266,9 @@ class SocialEventLog:
     def count(self, *, kind: str | None = None, person_key: str | None = None) -> int:
         where, params = self._where(kind, person_key)
         try:
-            db = self._ensure_db()
-            row = db.execute(f"SELECT COUNT(*) FROM social_events{where}", params).fetchone()
+            with self._lock:
+                db = self._ensure_db()
+                row = db.execute(f"SELECT COUNT(*) FROM social_events{where}", params).fetchone()
         except Exception as exc:  # noqa: BLE001
             logger.warning("social_events: count() failed: %s", exc)
             return 0

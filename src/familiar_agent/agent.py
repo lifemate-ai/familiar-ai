@@ -1151,7 +1151,13 @@ class EmbodiedAgent:
             logger.warning("IdentityAnchorTool init failed (anchor dormant): %s", exc)
 
     def _invalidate_arcs_block(self) -> None:
-        """Drop the cached ``[Life arcs]`` block after the agent itself edits an arc."""
+        """Drop the cached ``[Life arcs]`` block after the agent itself edits an arc.
+
+        Arcs live in the STABLE prompt half by design (they change rarely, like
+        the experience lessons), so a mid-session ``arc_commit`` invalidates the
+        provider's cache prefix exactly once — the next turn re-renders and
+        re-caches.
+        """
         self._arcs_block = None
 
     def _life_arcs_block(self) -> str:
@@ -1160,7 +1166,10 @@ class EmbodiedAgent:
         Same idiom as the experience lessons: lazy render, process-lifetime
         cache — except the agent's OWN arc_commit / arc_close invalidates it
         (``_invalidate_arcs_block``), since a storyline it just named should
-        be in view. Empty store → ``""`` so existing prompt pins hold.
+        be in view. Arcs sit in the stable prompt half on purpose: they change
+        rarely (same as the lessons), so one mid-session ``arc_commit`` costs a
+        single cache-prefix invalidation rather than a per-turn miss. Empty
+        store → ``""`` so existing prompt pins hold.
         """
         cached = getattr(self, "_arcs_block", None)
         if cached is not None:
@@ -3501,6 +3510,8 @@ class EmbodiedAgent:
         for closable in (
             getattr(self, "_person_model", None),
             getattr(self, "_commitment_store", None),
+            getattr(self, "_narrative_store", None),
+            getattr(self, "_social_events", None),
         ):
             if closable is not None:
                 try:

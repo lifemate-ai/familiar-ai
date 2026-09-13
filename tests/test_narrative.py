@@ -561,5 +561,31 @@ async def test_write_today_daybook_never_raises(tmp_path: Path):
     agent._daybook.append_today.side_effect = RuntimeError("boom")
     agent._memory = MagicMock()
     agent._memory.list_unfinished_business_async = AsyncMock(side_effect=RuntimeError("x"))
-    await agent._write_today_daybook("x")
+    await agent._write_today_daybook("x")  # append raised inside; must not propagate
+    agent._daybook.append_today.assert_called_once()
     agent._social_events.close()
+
+
+def test_narrative_store_concurrent_upserts_from_threads(tmp_path: Path):
+    import threading
+
+    store = NarrativeStore(db_path=tmp_path / "obs.db", max_active=100)
+    store.upsert_arc("warm", "Warm", "", 0.5)  # open the connection on the main thread
+    errors: list[BaseException] = []
+
+    def worker(idx: int) -> None:
+        try:
+            for j in range(10):
+                store.upsert_arc(f"arc-{idx}-{j}", f"Arc {idx}-{j}", "s", 0.5)
+                store.active_arcs(limit=100)
+        except BaseException as exc:  # noqa: BLE001
+            errors.append(exc)
+
+    threads = [threading.Thread(target=worker, args=(i,)) for i in range(8)]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join()
+    assert errors == []
+    assert len(store.active_arcs(limit=100)) == 1 + 80
+    store.close()
