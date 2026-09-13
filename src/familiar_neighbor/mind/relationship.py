@@ -406,6 +406,65 @@ class RelationshipTracker:
     def permission(self, permission: str) -> dict | None:
         return self._state.get("permission_model", {}).get(permission)
 
+    def record_consent(
+        self,
+        person: str,
+        consent_type: str,
+        value: bool,
+        source: str = "explicit",
+    ) -> None:
+        """Record one person's consent (or its withdrawal) for one thing.
+
+        Finer than the coarse ``permission_model``: keyed by (person,
+        consent_type), case-insensitive on both, latest record replaces the
+        previous one. Persists through the same state save as everything
+        else on the tracker and mirrors onto the ledger as ``consent_recorded``.
+        """
+        person_clean = (person or "").strip()
+        type_clean = (consent_type or "").strip()
+        if not person_clean or not type_clean:
+            raise ValueError("person and consent_type are required")
+        source_clean = (source or "").strip() or "explicit"
+        consents = self._state.setdefault("consents", [])
+        person_key = person_clean.lower()
+        type_key = type_clean.lower()
+        kept = [
+            item
+            for item in consents
+            if not (
+                str(item.get("person", "")).lower() == person_key
+                and str(item.get("consent_type", "")).lower() == type_key
+            )
+        ]
+        kept.append(
+            {
+                "person": person_clean,
+                "consent_type": type_clean,
+                "value": bool(value),
+                "source": source_clean,
+                "recorded_at": time.time(),
+            }
+        )
+        self._state["consents"] = kept
+        self._save()
+        self._emit(
+            "consent_recorded",
+            person_key=person_clean,
+            payload={
+                "person": person_clean,
+                "consent_type": type_clean,
+                "value": bool(value),
+                "source": source_clean,
+            },
+        )
+
+    def consents(self, person: str | None = None) -> list[dict]:
+        rows = list(self._state.get("consents", []))
+        if person is None:
+            return rows
+        key = person.strip().lower()
+        return [r for r in rows if str(r.get("person", "")).lower() == key]
+
     def get_tendencies(self, min_confidence: float = 0.3) -> list[dict]:
         return [
             tendency
@@ -489,6 +548,13 @@ class RelationshipTracker:
                 parts.append(f"(permissions-allowed: {'; '.join(allowed)})")
             if blocked:
                 parts.append(f"(permissions-blocked: {'; '.join(blocked)})")
+        consents = self.consents()
+        if consents:
+            items = "; ".join(
+                f"{c.get('person')}/{c.get('consent_type')}={'yes' if c.get('value') else 'no'}"
+                for c in consents[:6]
+            )
+            parts.append(f"(consents: {items})")
         return "\n".join(parts)
 
     def context_for_prompt(self) -> str:

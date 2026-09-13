@@ -9,17 +9,17 @@ Gap analysis vs. current develop (`RelationshipTracker`, `IdentityCore`,
 
 | kokone mechanism | familiar-ai today | plan |
 |---|---|---|
-| Append-only social event log (`SocialEventCreate`) | scattered: mental_state.jsonl, relationship evidence, person_inferences | **Phase 1** |
-| Narrative arcs + daybook + self summary | one-sentence self_narrative, experience lessons | **Phase 2** |
-| `who_am_i` identity anchor tool; `evaluate_action` pre-action boundary check | IdentityCore only gates the final reply | **Phase 3** |
-| Consent records per person | `set_permission` (coarse) | **Phase 3** |
+| Append-only social event log (`SocialEventCreate`) | scattered: mental_state.jsonl, relationship evidence, person_inferences | **Phase 1** — landed (1dce643) |
+| Narrative arcs + daybook + self summary | one-sentence self_narrative, experience lessons | **Phase 2** — landed (00e56b0) |
+| `who_am_i` identity anchor tool; `evaluate_action` pre-action boundary check | IdentityCore only gates the final reply | **Phase 3** — landed |
+| Consent records per person | `set_permission` (coarse) | **Phase 3** — landed |
 | Preferences w/ evidence, rituals, tendencies, quiet mode, open loops | present | none |
 
 Invariants (all phases): getattr-guarded wiring, byte-stable prompts when the
 layer is empty/disabled, schema changes via timestamped `migration/`, no
 persona strings in code, tests first, full gate green.
 
-## Phase 1 — social event ledger
+## Phase 1 — social event ledger (landed: 1dce643)
 - `migration/2026-09-14-013_social_events.py`: `social_events(id, ts, source,
   kind, person_key, session_id, correlation_id, confidence, payload_json)` +
   index on (ts), (person_key, kind).
@@ -32,7 +32,7 @@ persona strings in code, tests first, full gate green.
 - Tool `social_timeline` (list recent events, optional person/kind filter).
 - Tests: migration, log CRUD, emitter wiring, tool.
 
-## Phase 2 — narrative arcs, daybook, self summary
+## Phase 2 — narrative arcs, daybook, self summary (landed: 00e56b0)
 - `migration/...-014_narrative_arcs.py`: `narrative_arcs(id, arc_key, title,
   summary, importance, status, created_at, updated_at)`.
 - `familiar_neighbor/mind/narrative.py`: `NarrativeStore` (arcs CRUD, bounded
@@ -42,7 +42,7 @@ persona strings in code, tests first, full gate green.
 - Tools `arc_commit` / `arc_review` / `arc_close`; `[Life arcs]` block injected
   next to `[Experience lessons]`; daybook entry written at session end.
 
-## Phase 3 — identity anchor, action evaluation, consent
+## Phase 3 — identity anchor, action evaluation, consent (landed)
 - Tool `who_am_i`: returns the IdentityCore statement of held values /
   boundaries (data from seed rows, not code).
 - `IdentityCore.evaluate_action(action_kind, text) -> ActionVerdict`

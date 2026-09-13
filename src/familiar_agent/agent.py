@@ -88,6 +88,7 @@ from .tools.identity import IdentityTool
 from .tools.routines_tool import RoutineTool
 from .tools.self_ledger import SelfLedgerTool
 from .tools.social_timeline import SocialTimelineTool
+from .tools.identity import IdentityAnchorTool
 from .tools.narrative import NarrativeTool
 from familiar_neighbor.mind.identity import IdentityCore
 from familiar_neighbor.mind.reality import GroundingTracker
@@ -103,6 +104,7 @@ from ._ui_helpers import night_key_for
 from .mcp_client import MCPClientManager, _resolve_config_path
 from familiar_capabilities.self_ledger import DEFAULT_SELF_LEDGER_TOOLS
 from familiar_capabilities.social_timeline import SocialTimelineCapability
+from familiar_capabilities.identity import IdentityAnchorCapability
 from familiar_capabilities.narrative import NarrativeCapability
 from familiar_capabilities import (
     CameraCapability,
@@ -694,6 +696,8 @@ class EmbodiedAgent:
         self._self_narrative = SelfNarrative()
         # Life arcs + daybook (Phase 2): mirrors arc changes onto the ledger.
         self._init_narrative()
+        # Identity anchor (Phase 3): who_am_i / evaluate_action / consent_record.
+        self._init_identity_anchor()
         self._concerns = ConcernEngine()
         self._workspace = GlobalWorkspace()
         self._workspace.register_broadcast_listener(self._self_state.on_broadcast)
@@ -1129,6 +1133,23 @@ class EmbodiedAgent:
             on_change=self._invalidate_arcs_block,
         )
 
+    def _init_identity_anchor(self) -> None:
+        """Construct the identity anchor tool over core, arcs and relationship.
+
+        Every collaborator is getattr-guarded: the tool registers even when
+        the identity core, the arc store or the tracker is dormant, and each
+        of its three tools degrades to a neutral line in that case.
+        """
+        self._identity_anchor_tool: IdentityAnchorTool | None = None
+        try:
+            self._identity_anchor_tool = IdentityAnchorTool(
+                getattr(self, "_identity", None),
+                narrative=getattr(self, "_narrative_store", None),
+                relationship=getattr(self, "_relationship", None),
+            )
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("IdentityAnchorTool init failed (anchor dormant): %s", exc)
+
     def _invalidate_arcs_block(self) -> None:
         """Drop the cached ``[Life arcs]`` block after the agent itself edits an arc."""
         self._arcs_block = None
@@ -1195,6 +1216,9 @@ class EmbodiedAgent:
         narrative_tool = getattr(self, "_narrative_tool", None)
         if narrative_tool is not None:
             registry.register(NarrativeCapability(narrative_tool))
+        identity_anchor_tool = getattr(self, "_identity_anchor_tool", None)
+        if identity_anchor_tool is not None:
+            registry.register(IdentityAnchorCapability(identity_anchor_tool))
         self_ledger_tool = getattr(self, "_self_ledger_tool", None)
         if self_ledger_tool is not None:
             ledger_names = set(DEFAULT_SELF_LEDGER_TOOLS)

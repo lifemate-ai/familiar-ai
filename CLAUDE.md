@@ -261,6 +261,16 @@ first-person `statement`, `non_negotiable`, `confidence`, and a `checker_id`.
   enforcement-critical fields on update). A background honor-check
   (`_maybe_update_identity`) nudges *value* conviction with revision-audited
   evidence.
+- **Anchor + pre-action check + consent** (selfhood/sociality Phase 3):
+  `IdentityCore.evaluate_action(action_kind, text) -> ActionVerdict` grades a
+  *proposed* action with the same checker library (`override` = non-negotiable
+  boundary at stake, `deny` = negotiable boundary/value, `allow` otherwise; the
+  safer alternative is the row's `repair_text` or statement) and emits
+  `action_evaluated` without touching `assess()`/gate state. `IdentityAnchorTool`
+  (`who_am_i` / `evaluate_action` / `consent_record`, `IdentityAnchorCapability`)
+  renders held rows + active arcs; `RelationshipTracker.record_consent` /
+  `consents()` keep per-person consent next to the permission model and add a
+  `(consents: …)` line to the relationship context only when one exists.
 - **Seeding**: persona content loads from `~/.familiar_ai/identity_seed.json`
   (insert-if-missing by key; `FAMILIAR_AI_IDENTITY_SEED` override;
   `identity.sample.json` is the shipped template). The generic repo carries no
