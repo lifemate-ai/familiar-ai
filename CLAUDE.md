@@ -24,7 +24,13 @@ uv run familiar
 # Discover ONVIF/Tapo cameras on the LAN
 uv run familiar-discover-cameras
 
-# Tests (pytest-asyncio; ~1300 tests)
+# Body daemon (separate process; see "Body daemon" below)
+uv run familiard
+
+# Desktop GUI launchers (TUI stays the default — never change `familiar`'s default surface)
+./run-gui.sh   # run-gui.bat on Windows
+
+# Tests (pytest-asyncio; ~1500 tests, no pytest.ini — config lives in pyproject)
 uv run pytest -q
 uv run pytest -q tests/test_runtime_hooks.py            # one file
 uv run pytest -q tests/test_runtime_hooks.py::test_name # one test
@@ -242,6 +248,49 @@ first-person `statement`, `non_negotiable`, `confidence`, and a `checker_id`.
   `identity.sample.json` is the shipped template). The generic repo carries no
   persona strings — identity lives in the seed/config, not the code.
 
+### Self-model and reality layers (mostly dark by default)
+
+These modules live in `familiar_neighbor/mind/` and are wired through
+`embodied_hook.py` / `agent.py`. All are getattr-guarded: an absent or
+disabled layer must leave prompts and decisions byte-stable.
+
+- **Consciousness profile** (`consciousness.py`, `FAMILIAR_CONSCIOUSNESS_PROFILE`,
+  default OFF): six graded dimensions computed in `_build_mental_snapshot`,
+  clamped to [0,1]. **Instrumentation only** — it lands in diagnostics and
+  `mental_state.jsonl`, never in the prompt.
+- **Reality monitor** (`reality.py`, `FAMILIAR_REALITY_GATE`, default OFF): a
+  perception-claim gate. A final reply asserting a fresh observation without a
+  present-turn `see()` gets one `[REALITY]` `RetryDecision` re-ask. Pattern
+  library is fixed and ReDoS-guarded; it is deliberately conservative (false
+  negatives over false positives).
+- **Voice gate** (`FAMILIAR_VOICE_GATE`): one in-loop re-ask when a
+  conversational turn ends without `say()`. Independent of `auto_say`; aimed at
+  small local models.
+- **Sleep consolidation**: `should_run_sleep_consolidation()` in
+  `_ui_helpers.py` gates `consolidate_memories_async(threshold=0.97)` from the
+  TUI/GUI idle paths; once-per-night via `consolidation_state.json`.
+- **Self-narrative** (`self_narrative.py`, `~/.familiar_ai/self_narrative.jsonl`):
+  one first-person sentence per session, appended post-turn.
+- **Concern engine** (`concern_engine.py`, `~/.familiar_ai/active_concerns.json`):
+  at most 5 active concerns, decayed every turn, surfaced above a threshold
+  with a 2-turn cooldown after prompting.
+- **Default-mode wander** (`default_mode.py`): spontaneous memory wandering
+  in the inner loop's non-cheap cycles; near-duplicate hits (>0.85) fold.
+- **Deferral detector** (`deferral.py`): fixed JA/EN "talk later" patterns
+  that become unfinished business; no env gate.
+- **Meta-monitor** (`meta_monitor.py`): session-scoped HOT layer recording the
+  winning coalition per step and inconsistencies vs. the self-narrative; sync,
+  no LLM; only the distilled summary persists (`meta_state.json`).
+- **Attention schema** (`attention_schema.py`, `attention_state.json`):
+  focus-history self-model; `context_for_prompt()` yields the compact block.
+- **Auto-ToM** (`embodied_hook._should_auto_tom` / `_run_auto_tom_background`):
+  deterministic cooldown, runs ToM in a background task (<12s) and persists
+  structured inferences to the person model.
+- **Compact prompt profile** (`PROMPT_PROFILE=compact`, `config.py`): trimmed
+  framework for gemma-class local models; long social guidance is dropped
+  because the deterministic layers carry it. `<think>` blocks from local
+  models are scrubbed in `familiar_runtime/models/openai_compat.py`.
+
 ## Persistence
 
 Primary stores under `~/.familiar_ai/`:
@@ -258,6 +307,7 @@ Primary stores under `~/.familiar_ai/`:
 - `desires.json` — drive levels
 - `self_state.json` — latent bodily carryover
 - `identity_state.json` — identity dissonance ledger (decay + reflection relief)
+- `self_narrative.jsonl` / `active_concerns.json` — self-narrative diary and concern engine state
 - `identity_seed.json` — persona identity seed (operator-supplied; insert-if-missing)
 - `attention_state.json` — attention-schema focus history (survives restarts)
 - `meta_state.json` — previous session's distilled metacognitive summary (the raw
