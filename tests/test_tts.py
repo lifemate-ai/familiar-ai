@@ -21,6 +21,25 @@ def _make_tts(api_key: str = "fake-key", voice_id: str = "fake-voice"):
     return tool
 
 
+class _Body:
+    """aiohttp-like ``content`` that yields the whole payload as one chunk."""
+
+    def __init__(self, payload: bytes) -> None:
+        self.payload = payload
+
+    async def iter_chunked(self, _size: int):
+        yield self.payload
+
+
+def _sink_patch():
+    """Streaming local sink stub so tests never touch a real audio device."""
+    sink = MagicMock()
+    sink.error = None
+    sink.bytes_played = 0
+    sink.close = AsyncMock(return_value=True)
+    return patch("familiar_agent.tools.tts.open_pcm_sink", return_value=sink)
+
+
 # ---------------------------------------------------------------------------
 # Tests: get_tool_definitions()
 # ---------------------------------------------------------------------------
@@ -71,6 +90,7 @@ async def test_say_calls_elevenlabs_api():
     mock_response = MagicMock()
     mock_response.status = 200
     mock_response.read = AsyncMock(return_value=b"fake_mp3_data")
+    mock_response.content = _Body(b"fake_mp3_data")
     mock_response.__aenter__ = AsyncMock(return_value=mock_response)
     mock_response.__aexit__ = AsyncMock(return_value=False)
 
@@ -81,6 +101,7 @@ async def test_say_calls_elevenlabs_api():
 
     with (
         patch("aiohttp.ClientSession", return_value=mock_session),
+        _sink_patch(),
         patch("familiar_agent.tools.tts._play_local", new=AsyncMock(return_value=True)),
         patch("builtins.open", MagicMock()),
         patch("os.unlink"),
@@ -119,6 +140,7 @@ async def test_say_truncates_long_text():
     mock_response = MagicMock()
     mock_response.status = 200
     mock_response.read = AsyncMock(return_value=b"fake_mp3_data")
+    mock_response.content = _Body(b"fake_mp3_data")
     mock_response.__aenter__ = AsyncMock(return_value=mock_response)
     mock_response.__aexit__ = AsyncMock(return_value=False)
 
@@ -136,6 +158,7 @@ async def test_say_truncates_long_text():
 
     with (
         patch("aiohttp.ClientSession", return_value=mock_session),
+        _sink_patch(),
         patch("familiar_agent.tools.tts._play_local", new=AsyncMock(return_value=True)),
         patch("os.unlink"),
         patch("tempfile.NamedTemporaryFile") as mock_tmp,
@@ -185,6 +208,7 @@ async def test_say_notifies_voice_guard_on_success():
     mock_response = MagicMock()
     mock_response.status = 200
     mock_response.read = AsyncMock(return_value=b"fake_mp3_data")
+    mock_response.content = _Body(b"fake_mp3_data")
     mock_response.__aenter__ = AsyncMock(return_value=mock_response)
     mock_response.__aexit__ = AsyncMock(return_value=False)
 
@@ -195,6 +219,7 @@ async def test_say_notifies_voice_guard_on_success():
 
     with (
         patch("aiohttp.ClientSession", return_value=mock_session),
+        _sink_patch(),
         patch("familiar_agent.tools.tts._play_local", new=AsyncMock(return_value=True)),
         patch("os.unlink"),
         patch("tempfile.NamedTemporaryFile") as mock_tmp,
@@ -221,6 +246,7 @@ async def test_say_serializes_concurrent_calls():
     mock_response = MagicMock()
     mock_response.status = 200
     mock_response.read = AsyncMock(return_value=b"fake")
+    mock_response.content = _Body(b"fake")
     mock_response.__aenter__ = AsyncMock(return_value=mock_response)
     mock_response.__aexit__ = AsyncMock(return_value=False)
 
@@ -231,6 +257,7 @@ async def test_say_serializes_concurrent_calls():
 
     with (
         patch("aiohttp.ClientSession", return_value=mock_session),
+        _sink_patch(),
         patch("familiar_agent.tools.tts._play_local", new=AsyncMock(return_value=True)),
         patch("os.unlink"),
         patch("tempfile.NamedTemporaryFile") as mock_tmp,

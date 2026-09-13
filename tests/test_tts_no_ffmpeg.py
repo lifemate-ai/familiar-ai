@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import struct
 import wave
-from unittest.mock import AsyncMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
@@ -101,6 +101,11 @@ async def test_tts_payload_requests_pcm_format() -> None:
         async def read(self):
             return _make_pcm(1600)
 
+        class content:  # aiohttp-like streaming body
+            @staticmethod
+            async def iter_chunked(_size: int):
+                yield _make_pcm(1600)
+
         async def text(self):
             return ""
 
@@ -133,7 +138,11 @@ async def test_tts_payload_requests_pcm_format() -> None:
         async def __aexit__(self, *a):
             pass
 
-    with patch("familiar_agent.tools.tts._play_local", new=AsyncMock(return_value=True)):
+    sink = MagicMock()
+    sink.error = None
+    sink.bytes_played = 0
+    sink.close = AsyncMock(return_value=True)
+    with patch("familiar_agent.tools.tts.open_pcm_sink", return_value=sink):
         with patch("aiohttp.ClientSession", return_value=FakeSession()):
             await tool.say("テスト")
             await tool.wait_idle(timeout=1.0)

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import json
 import logging
 import os
@@ -12,10 +13,12 @@ import subprocess
 import sys
 import tempfile
 import urllib.request
+from collections.abc import AsyncIterator
 from pathlib import Path
+from typing import Any
 from urllib.parse import quote
 
-from ..tts_playback import PlaybackQueue
+from ..tts_playback import AudioChunkRelay, PcmSink, PlaybackQueue
 from ..voice_guard import VoiceLoopGuard, get_shared_voice_guard
 
 logger = logging.getLogger(__name__)
@@ -166,38 +169,120 @@ class TTSTool:
         await queue.wait_idle(timeout=timeout)
         await queue.stop()
 
+    def _guard(self) -> VoiceLoopGuard:
+        voice_guard = getattr(self, "_voice_guard", None)
+        if voice_guard is None:
+            voice_guard = get_shared_voice_guard()
+            self._voice_guard = voice_guard
+        return voice_guard
+
     async def _play_file(self, tmp_path: str, text: str, output: str) -> list[str]:
         """Play one synthesized file; runs on the queue worker.
 
         Owns the voice-guard boundaries so STT echo suppression tracks real
         playback rather than enqueue time.
         """
-        voice_guard = getattr(self, "_voice_guard", None)
-        if voice_guard is None:
-            voice_guard = get_shared_voice_guard()
-            self._voice_guard = voice_guard
-        played_via: list[str] = []
+        voice_guard = self._guard()
         voice_guard.on_tts_start(text)
+        played_via: list[str] = []
         try:
-            if output in ("remote", "both"):
-                ok, msg = await asyncio.to_thread(
-                    _play_via_go2rtc, tmp_path, self.go2rtc_url, self.go2rtc_stream
-                )
-                if ok:
-                    played_via.append("camera")
-                else:
-                    logger.warning("go2rtc playback failed: %s", msg)
-                    if output == "remote":
-                        return played_via
+            played_via = await self._play_file_sinks(tmp_path, output)
+            return played_via
+        finally:
+            voice_guard.on_tts_end(text, played=bool(played_via))
 
-            if output in ("local", "both") or (output == "remote" and not played_via):
-                if await _play_local(tmp_path):
+    async def _play_file_sinks(self, tmp_path: str, output: str) -> list[str]:
+        """Route a file to camera and/or local speaker; returns the sinks used."""
+        played_via: list[str] = []
+        if output in ("remote", "both") and await self._play_camera(tmp_path):
+            played_via.append("camera")
+
+        # "remote" falls back to the local speaker when the camera is unavailable.
+        if output in ("local", "both") or (output == "remote" and not played_via):
+            if await _play_local(tmp_path):
+                played_via.append("local")
+        if not played_via:
+            logger.warning("TTS playback failed (no working audio player found)")
+        return played_via
+
+    async def _play_camera(self, tmp_path: str) -> bool:
+        ok, msg = await asyncio.to_thread(
+            _play_via_go2rtc, tmp_path, self.go2rtc_url, self.go2rtc_stream
+        )
+        if not ok:
+            logger.warning("go2rtc playback failed: %s", msg)
+        return ok
+
+    async def _play_stream(
+        self, chunks: AsyncIterator[bytes], text: str, output: str, *, is_mp3: bool
+    ) -> list[str]:
+        """Play a synthesis stream as it arrives; runs on the queue worker.
+
+        PCM + local output streams straight into a :class:`PcmSink`
+        (``sounddevice``); the whole body is also buffered so the camera path
+        can write a WAV after the download, and so a failed sink can fall back
+        to file playback of the not-yet-played remainder. MP3 bodies (some
+        models ignore ``pcm_16000``) are buffered whole and played via the
+        file path. With ``output="both"`` the local speaker streams first and
+        the camera plays the buffered file after it finishes — sequential, as
+        the file path always was.
+        """
+        voice_guard = self._guard()
+        voice_guard.on_tts_start(text)
+        played_via: list[str] = []
+        buffer = bytearray()
+        sink: Any = None
+        want_local = output in ("local", "both")
+        try:
+            if want_local and not is_mp3:
+                try:
+                    sink = open_pcm_sink(sample_rate=16000)
+                except Exception as exc:  # noqa: BLE001
+                    logger.warning("streaming local playback unavailable (%s); buffering", exc)
+            try:
+                async for chunk in chunks:
+                    buffer += chunk
+                    if sink is not None:
+                        sink.write(chunk)
+            finally:
+                if sink is not None and not await sink.close():
+                    logger.warning("streaming local playback failed: %s", sink.error)
+
+            if is_mp3:
+                played_via = await self._play_tmp(
+                    _write_tmp_audio(bytes(buffer), suffix=".mp3"), output
+                )
+                return played_via
+
+            if sink is not None and sink.error is None:
+                played_via.append("local")
+            elif want_local:
+                rest = bytes(buffer[sink.bytes_played if sink is not None else 0 :])
+                if rest and await self._play_tmp(_write_pcm_as_wav(rest), "local"):
                     played_via.append("local")
+
+            if output in ("remote", "both"):
+                camera_mode = "remote" if "local" not in played_via else "camera_only"
+                played_via.extend(
+                    await self._play_tmp(_write_pcm_as_wav(bytes(buffer)), camera_mode)
+                )
             if not played_via:
                 logger.warning("TTS playback failed (no working audio player found)")
             return played_via
         finally:
+            with contextlib.suppress(Exception):
+                await chunks.aclose()  # type: ignore[attr-defined]
             voice_guard.on_tts_end(text, played=bool(played_via))
+
+    async def _play_tmp(self, path: str, output: str) -> list[str]:
+        """Play a temp file through the requested sinks, then delete it."""
+        try:
+            if output == "camera_only":
+                return ["camera"] if await self._play_camera(path) else []
+            return await self._play_file_sinks(path, output)
+        finally:
+            with contextlib.suppress(OSError):
+                os.unlink(path)
 
     async def say(self, text: str, output: str | None = None) -> str:
         """Speak text aloud via ElevenLabs.
@@ -205,8 +290,10 @@ class TTSTool:
         output: "local" = PC speaker, "remote" = camera speaker (go2rtc), "both" = both.
                 Defaults to self.output when not specified.
 
-        Synthesis is awaited here; playback is queued and plays sequentially
-        on a background worker so the turn is not blocked. Set
+        Uses the streaming synthesis endpoint: the request is opened and the
+        first audio chunk awaited here (~1 s); the rest of the body is drained
+        in the background and played as it arrives by the playback queue, so
+        say() returns long before synthesis or playback finish. Set
         ``FAMILIAR_TTS_BLOCKING=1`` to await playback as well.
         """
         import aiohttp
@@ -216,7 +303,8 @@ class TTSTool:
         if len(text) > 200:
             text = text[:197] + "..."
 
-        url = f"https://api.elevenlabs.io/v1/text-to-speech/{self.voice_id}?output_format=pcm_16000"
+        base = f"https://api.elevenlabs.io/v1/text-to-speech/{self.voice_id}"
+        query = "?output_format=pcm_16000"
         headers = {"xi-api-key": self.api_key, "Content-Type": "application/json"}
         payload = {
             "text": text,
@@ -225,36 +313,55 @@ class TTSTool:
         }
 
         async with self._lock:
-            async with aiohttp.ClientSession() as session:
-                async with session.post(url, json=payload, headers=headers) as resp:
-                    if resp.status != 200:
-                        err = await resp.text()
-                        return f"TTS API failed ({resp.status}): {err[:80]}"
-                    content_type = resp.headers.get("Content-Type", "")
-                    audio_data = await resp.read()
+            stack = contextlib.AsyncExitStack()
+            try:
+                session = await stack.enter_async_context(aiohttp.ClientSession())
+                resp_stack = contextlib.AsyncExitStack()
+                resp = await resp_stack.enter_async_context(
+                    session.post(f"{base}/stream{query}", json=payload, headers=headers)
+                )
+                if resp.status in _STREAM_FALLBACK_STATUSES:
+                    logger.info(
+                        "ElevenLabs stream endpoint returned %s; retrying without /stream",
+                        resp.status,
+                    )
+                    await resp_stack.aclose()
+                    resp_stack = contextlib.AsyncExitStack()
+                    resp = await resp_stack.enter_async_context(
+                        session.post(f"{base}{query}", json=payload, headers=headers)
+                    )
+                stack.push_async_callback(resp_stack.aclose)
+                if resp.status != 200:
+                    err = await resp.text()
+                    await stack.aclose()
+                    return f"TTS API failed ({resp.status}): {err[:80]}"
+                content_type = resp.headers.get("Content-Type", "")
+                source = resp.content.iter_chunked(_STREAM_CHUNK_BYTES)
+                try:
+                    first = bytes(await source.__anext__())
+                except StopAsyncIteration:
+                    first = b""
+            except BaseException:
+                await stack.aclose()
+                raise
+            if not first:
+                await stack.aclose()
+                return "TTS API returned no audio"
 
             # ElevenLabs may return MP3 even when PCM was requested (model-dependent).
-            # Detect by content-type and save to the correct format.
-            is_mp3 = "mpeg" in content_type or audio_data[:3] in (
-                b"ID3",
-                b"\xff\xfb",
-                b"\xff\xf3",
-            )
-            if is_mp3:
-                tmp_path = _write_tmp_audio(audio_data, suffix=".mp3")
-            else:
-                tmp_path = _write_pcm_as_wav(audio_data, sample_rate=16000)
+            is_mp3 = "mpeg" in content_type or first[:3] in (b"ID3", b"\xff\xfb", b"\xff\xf3")
+            relay = AudioChunkRelay(source, head=first, close=stack.aclose)
+            relay.start()
 
-            async def play(path: str) -> list[str]:
-                return await self._play_file(path, text, output)
+            async def play(chunks: AsyncIterator[bytes]) -> list[str]:
+                return await self._play_stream(chunks, text, output, is_mp3=is_mp3)
 
             def cleanup(_played: list[str]) -> None:
-                try:
-                    os.unlink(tmp_path)
-                except OSError:
-                    pass
+                relay.cancel()  # no-op once drained; releases the HTTP session if dropped
 
-            future = self._queue().enqueue(tmp_path, cleanup, play=play)
+            future = self._queue().enqueue_stream(
+                relay, play=play, on_done=cleanup, label=text[:30]
+            )
 
         if not _blocking_playback():
             return f"Said: {text[:50]}... (via {_output_label(output)})"
@@ -291,6 +398,16 @@ class TTSTool:
             result = await self.say(tool_input["text"])
             return result, None
         return f"Unknown tool: {tool_name}", None
+
+
+_STREAM_CHUNK_BYTES = 4096
+# Older accounts / some voices have no streaming endpoint; retry once without it.
+_STREAM_FALLBACK_STATUSES = (400, 404)
+
+
+def open_pcm_sink(*, sample_rate: int = 16000) -> PcmSink:
+    """Open the local streaming sink (patched in tests; raises when unavailable)."""
+    return PcmSink(sample_rate=sample_rate)
 
 
 def _blocking_playback() -> bool:
