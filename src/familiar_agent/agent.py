@@ -82,7 +82,7 @@ from .tools.commitments import (
     format_commitments_for_context,
 )
 from .tools.delegation import DelegatedTaskRunner, DelegationTool
-from .latency import LatencyRecorder
+from .latency import LatencyRecorder, instrument_backend
 from .routine_store import RoutineStore
 from .tools.identity import IdentityTool
 from .tools.routines_tool import RoutineTool
@@ -529,7 +529,9 @@ class _TurnToolAdapter:
 
     async def call(self, name: str, tool_input: dict) -> ToolExecutionResult:
         logger.info("Tool call: %s(%s)", name, tool_input)
-        text, image = await self._agent._execute_tool(name, tool_input)
+        latency = getattr(self._agent, "_latency", None) or LatencyRecorder(enabled=False)
+        with latency.span(f"tool:{name}"):
+            text, image = await self._agent._execute_tool(name, tool_input)
         logger.info("Tool result: %s", text[:100])
         return ToolExecutionResult(text=text, image_b64=image)
 
@@ -3419,7 +3421,7 @@ class EmbodiedAgent:
                 _TOOL_TIMEOUTS
             )
             loop = ReActLoop(
-                backend=cast("RuntimeModelBackend", self.backend),
+                backend=cast("RuntimeModelBackend", instrument_backend(self.backend, latency)),
                 tools=cast(ToolRegistry, _TurnToolAdapter(self, prep.turn_tools)),
                 max_iterations=prep.turn_max_iterations,
                 default_tool_timeout=self._tool_timeout_seconds(""),

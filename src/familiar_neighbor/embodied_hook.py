@@ -36,6 +36,7 @@ from familiar_agent._runtime_helpers import (
     _call_optional_async,
 )
 from familiar_agent.heartbeat import HeartbeatRuntime
+from familiar_agent.latency import record_retry
 from familiar_agent.routines import parse_schedule_config
 from familiar_neighbor.mind.appraisal import AppraisalContext, AppraisalEngine
 from familiar_neighbor.mind.deferral import DEFERRAL_PREFIX, detect_deferral
@@ -886,6 +887,8 @@ class EmbodiedAgentHook(RuntimeHookBase):
                 prep.say_used = False
                 from familiar_runtime.runtime import RetryDecision
 
+                record_retry(agent, "identity")
+
                 strength = (
                     "a line you hold non-negotiable"
                     if top.severity >= 0.99
@@ -924,6 +927,8 @@ class EmbodiedAgentHook(RuntimeHookBase):
                 logger.info("[REALITY] gate fired: perception claim without see() this turn")
                 from familiar_runtime.runtime import RetryDecision
 
+                record_retry(agent, "reality")
+
                 return RetryDecision(
                     retry=True,
                     inject_user_message=(
@@ -954,6 +959,8 @@ class EmbodiedAgentHook(RuntimeHookBase):
             prep.voice_retried = True
             from familiar_runtime.runtime import RetryDecision
 
+            record_retry(agent, "voice")
+
             return RetryDecision(
                 retry=True,
                 inject_user_message=(
@@ -979,6 +986,8 @@ class EmbodiedAgentHook(RuntimeHookBase):
         agent._coherence_retried = True
         prep.say_used = False
         from familiar_runtime.runtime import RetryDecision
+
+        record_retry(agent, "coherence")
 
         return RetryDecision(
             retry=True,
