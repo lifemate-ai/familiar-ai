@@ -13,8 +13,11 @@ import sqlite3
 import time
 from datetime import date, datetime
 from pathlib import Path
+from typing import Any
 
 from familiar_agent.sqlite_migrations import apply_migrations, default_migration_dir
+
+from .social_events import emit_social_event
 
 logger = logging.getLogger(__name__)
 
@@ -59,6 +62,9 @@ class RelationshipTracker:
         else:
             self._db_path = Path(db_path)
         self._db: sqlite3.Connection | None = None
+        # Optional social event ledger (duck-typed: ``append(kind, **kw)``).
+        # None keeps every write path byte-stable; emission never raises.
+        self.event_log: Any = None
         self._state: dict = self._load()
 
     def close(self) -> None:
@@ -195,12 +201,20 @@ class RelationshipTracker:
     def intimacy(self) -> float:
         return self._current_metric("intimacy_trajectory", 0.4)
 
+    def _emit(self, kind: str, **kwargs: Any) -> None:
+        emit_social_event(self.event_log, kind, source="relationship", **kwargs)
+
     def note_trust_shift(self, value: float, evidence: str, confidence: float = 0.6) -> None:
         self._append_evidence(
             "trust_trajectory",
             value=value,
             evidence=evidence,
             confidence=confidence,
+        )
+        self._emit(
+            "trust_shift",
+            confidence=confidence,
+            payload={"value": float(value), "evidence": evidence},
         )
 
     def note_intimacy_shift(self, value: float, evidence: str, confidence: float = 0.6) -> None:
@@ -209,6 +223,11 @@ class RelationshipTracker:
             value=value,
             evidence=evidence,
             confidence=confidence,
+        )
+        self._emit(
+            "intimacy_shift",
+            confidence=confidence,
+            payload={"value": float(value), "evidence": evidence},
         )
 
     @property
@@ -277,9 +296,14 @@ class RelationshipTracker:
                 boundary["severity"] = severity
                 boundary["observed_at"] = time.time()
                 self._save()
+                self._emit(
+                    "boundary_added",
+                    payload={"text": text, "severity": int(severity), "updated": True},
+                )
                 return
         bounds.append({"text": text, "severity": severity, "observed_at": time.time()})
         self._save()
+        self._emit("boundary_added", payload={"text": text, "severity": int(severity)})
 
     def record_support_preference(
         self,
@@ -335,6 +359,9 @@ class RelationshipTracker:
             confidence=confidence,
             extra={"text": text, "caution": caution},
         )
+        self._emit(
+            "sensitive_topic", confidence=confidence, payload={"text": text, "caution": caution}
+        )
 
     def record_repair(
         self,
@@ -348,6 +375,9 @@ class RelationshipTracker:
             evidence=text,
             confidence=confidence,
             extra={"text": text, "resolved": bool(resolved)},
+        )
+        self._emit(
+            "repair", confidence=confidence, payload={"text": text, "resolved": bool(resolved)}
         )
 
     def set_permission(
@@ -367,6 +397,11 @@ class RelationshipTracker:
             "recency": time.time(),
         }
         self._save()
+        self._emit(
+            "permission_set",
+            confidence=confidence,
+            payload={"permission": permission, "allowed": bool(allowed), "evidence": evidence},
+        )
 
     def permission(self, permission: str) -> dict | None:
         return self._state.get("permission_model", {}).get(permission)

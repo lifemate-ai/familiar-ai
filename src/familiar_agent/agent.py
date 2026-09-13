@@ -87,8 +87,10 @@ from .routine_store import RoutineStore
 from .tools.identity import IdentityTool
 from .tools.routines_tool import RoutineTool
 from .tools.self_ledger import SelfLedgerTool
+from .tools.social_timeline import SocialTimelineTool
 from familiar_neighbor.mind.identity import IdentityCore
 from familiar_neighbor.mind.reality import GroundingTracker
+from familiar_neighbor.mind.social_events import SocialEventLog
 from .tools.memory import MemoryTool, ObservationMemory
 from .tools.tom import ToMTool
 from .tools.mobility import MobilityTool
@@ -98,6 +100,7 @@ from ._i18n import _t
 from ._ui_helpers import night_key_for
 from .mcp_client import MCPClientManager, _resolve_config_path
 from familiar_capabilities.self_ledger import DEFAULT_SELF_LEDGER_TOOLS
+from familiar_capabilities.social_timeline import SocialTimelineCapability
 from familiar_capabilities import (
     CameraCapability,
     CodingCapability,
@@ -682,6 +685,8 @@ class EmbodiedAgent:
         self._mcp: MCPClientManager | None = None
         self._mcp_start_task: asyncio.Future[Any] | None = None
         self._relationship = RelationshipTracker()
+        # One social event ledger, handed to every emitter (best-effort).
+        self._init_social_events()
         self._self_state = SelfState()
         self._self_narrative = SelfNarrative()
         self._concerns = ConcernEngine()
@@ -1074,6 +1079,26 @@ class EmbodiedAgent:
     def _all_tool_defs(self) -> list[dict]:
         return self._build_tool_registry().tool_defs()
 
+    def _init_social_events(self) -> None:
+        """Construct the social event ledger and attach it to each emitter.
+
+        Failure leaves every emitter's ``event_log`` None — the historical,
+        byte-stable path — and the ``social_timeline`` tool unregistered.
+        """
+        self._social_events: SocialEventLog | None = None
+        self._social_timeline_tool: SocialTimelineTool | None = None
+        try:
+            log = SocialEventLog(default_person=self.config.companion_name)
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("SocialEventLog init failed (social ledger dormant): %s", exc)
+            return
+        self._social_events = log
+        self._social_timeline_tool = SocialTimelineTool(log)
+        for attr in ("_relationship", "_commitment_store", "_identity", "_person_model"):
+            emitter = getattr(self, attr, None)
+            if emitter is not None and hasattr(emitter, "event_log"):
+                emitter.event_log = log
+
     def _build_tool_registry(self) -> ToolRegistry:
         """Build the per-turn tool registry from configured providers."""
         registry = ToolRegistry()
@@ -1108,6 +1133,9 @@ class EmbodiedAgent:
         identity_tool = getattr(self, "_identity_tool", None)
         if identity_tool is not None:
             registry.register(IdentityCapability(identity_tool))
+        social_timeline_tool = getattr(self, "_social_timeline_tool", None)
+        if social_timeline_tool is not None:
+            registry.register(SocialTimelineCapability(social_timeline_tool))
         self_ledger_tool = getattr(self, "_self_ledger_tool", None)
         if self_ledger_tool is not None:
             ledger_names = set(DEFAULT_SELF_LEDGER_TOOLS)

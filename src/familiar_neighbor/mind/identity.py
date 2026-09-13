@@ -30,6 +30,8 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
+from .social_events import emit_social_event
+
 if TYPE_CHECKING:
     from .workspace import Coalition
 
@@ -199,6 +201,8 @@ class IdentityCore:
         self._last_violation: dict[str, Any] | None = None
         self._recent: list[dict[str, Any]] = []
         self._last_threat = IdentityThreat()
+        # Optional social event ledger (duck-typed); None is byte-stable.
+        self.event_log: Any = None
         self._load_state()
         self._load_seed()
 
@@ -379,6 +383,19 @@ class IdentityCore:
             except Exception as exc:  # noqa: BLE001
                 logger.warning("record_identity_violation failed: %s", exc)
         self.invalidate()
+        emit_social_event(
+            self.event_log,
+            "identity_violation",
+            source="identity",
+            correlation_id=violation.assertion_key,
+            confidence=violation.severity,
+            payload={
+                "key": violation.assertion_key,
+                "reason": violation.reason,
+                "severity": float(violation.severity),
+                "turn_index": int(turn_index),
+            },
+        )
 
     def resolve_reflection(self) -> None:
         """A reflection turn addressed the dissonance: sharp relief + evidence."""
@@ -399,6 +416,16 @@ class IdentityCore:
             except Exception as exc:  # noqa: BLE001
                 logger.warning("resolve_reflection store update failed: %s", exc)
             self.invalidate()
+        emit_social_event(
+            self.event_log,
+            "identity_reflection",
+            source="identity",
+            correlation_id=str(last.get("key", "")) if last else None,
+            payload={
+                "key": str(last.get("key", "")) if last else "",
+                "dissonance": float(self._dissonance),
+            },
+        )
 
     # ── surfacing ──
 

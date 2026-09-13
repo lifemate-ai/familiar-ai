@@ -211,6 +211,13 @@ Invariants to preserve when touching these loops:
   `embodied_hook.prepare_turn` via `relationship_learning_inputs`): distress
   acts surface the relational memory and soften; explicit advice requests force
   ToM on with gentler delivery. Defaults keep historical decisions byte-stable.
+- **Social event ledger** (`familiar_neighbor/mind/social_events.py`,
+  `social_events` table, migration 013): one append-only relational timeline.
+  `RelationshipTracker`, `SQLiteCommitmentStore`, `IdentityCore` and
+  `PersonModelTracker` each carry a duck-typed `event_log` (default None →
+  byte-stable); `agent._init_social_events()` attaches the single
+  `SocialEventLog`. Emission is best-effort (never raises); kinds are the
+  closed `SOCIAL_EVENT_KINDS` frozenset. Read-only tool: `social_timeline`.
 
 ### Identity layer: values, boundaries, and self-commitments
 
@@ -298,7 +305,8 @@ Primary stores under `~/.familiar_ai/`:
 - `observations.db` — observations, embeddings, semantic facts, behavior policies,
   revisions, episodes + membership, memory activation, unfinished business,
   relationship state, memory graph, person inferences, identity assertions,
-  experience lessons (self-authored standing context, migration 012)
+  experience lessons (self-authored standing context, migration 012),
+  social events (append-only relational timeline, migration 013)
 - `commitments.db` — secretary commitments (self-init schema, outside the
   `migration/` runner)
 - `mental_state.jsonl` — append-only mental-state snapshots
