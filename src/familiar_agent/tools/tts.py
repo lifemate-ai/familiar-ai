@@ -15,6 +15,7 @@ import urllib.request
 from pathlib import Path
 from urllib.parse import quote
 
+from ..tts_playback import PlaybackQueue
 from ..voice_guard import VoiceLoopGuard, get_shared_voice_guard
 
 logger = logging.getLogger(__name__)
@@ -127,10 +128,76 @@ class TTSTool:
         # "local" = PC speaker only, "remote" = camera speaker only, "both" = both simultaneously
         self.output = output
         self._voice_guard = voice_guard or get_shared_voice_guard()
-        # Serialize concurrent say() calls so audio never overlaps
+        # Serialize synthesis so consecutive say() calls enqueue in call order.
         self._lock = asyncio.Lock()
+        # Playback runs on a single worker, one file at a time, off the turn.
+        self._playback = PlaybackQueue()
         # Ensure go2rtc is running at startup
         _ensure_go2rtc(self.go2rtc_url)
+
+    # ------------------------------------------------------------ playback
+
+    def _queue(self) -> PlaybackQueue:
+        """Lazily create the playback queue (instances built via __new__ lack it)."""
+        queue = getattr(self, "_playback", None)
+        if queue is None:
+            queue = PlaybackQueue()
+            self._playback = queue
+        return queue
+
+    @property
+    def is_speaking(self) -> bool:
+        """True while an utterance is playing or queued to play."""
+        queue = getattr(self, "_playback", None)
+        return bool(queue is not None and queue.is_speaking)
+
+    async def wait_idle(self, timeout: float | None = None) -> bool:
+        """Wait until queued speech has finished playing. False on timeout."""
+        queue = getattr(self, "_playback", None)
+        if queue is None:
+            return True
+        return await queue.wait_idle(timeout=timeout)
+
+    async def close(self, timeout: float = 3.0) -> None:
+        """Let in-flight speech finish (bounded), then stop the worker."""
+        queue = getattr(self, "_playback", None)
+        if queue is None:
+            return
+        await queue.wait_idle(timeout=timeout)
+        await queue.stop()
+
+    async def _play_file(self, tmp_path: str, text: str, output: str) -> list[str]:
+        """Play one synthesized file; runs on the queue worker.
+
+        Owns the voice-guard boundaries so STT echo suppression tracks real
+        playback rather than enqueue time.
+        """
+        voice_guard = getattr(self, "_voice_guard", None)
+        if voice_guard is None:
+            voice_guard = get_shared_voice_guard()
+            self._voice_guard = voice_guard
+        played_via: list[str] = []
+        voice_guard.on_tts_start(text)
+        try:
+            if output in ("remote", "both"):
+                ok, msg = await asyncio.to_thread(
+                    _play_via_go2rtc, tmp_path, self.go2rtc_url, self.go2rtc_stream
+                )
+                if ok:
+                    played_via.append("camera")
+                else:
+                    logger.warning("go2rtc playback failed: %s", msg)
+                    if output == "remote":
+                        return played_via
+
+            if output in ("local", "both") or (output == "remote" and not played_via):
+                if await _play_local(tmp_path):
+                    played_via.append("local")
+            if not played_via:
+                logger.warning("TTS playback failed (no working audio player found)")
+            return played_via
+        finally:
+            voice_guard.on_tts_end(text, played=bool(played_via))
 
     async def say(self, text: str, output: str | None = None) -> str:
         """Speak text aloud via ElevenLabs.
@@ -138,7 +205,9 @@ class TTSTool:
         output: "local" = PC speaker, "remote" = camera speaker (go2rtc), "both" = both.
                 Defaults to self.output when not specified.
 
-        Concurrent calls are serialized via self._lock so audio never overlaps.
+        Synthesis is awaited here; playback is queued and plays sequentially
+        on a background worker so the turn is not blocked. Set
+        ``FAMILIAR_TTS_BLOCKING=1`` to await playback as well.
         """
         import aiohttp
 
@@ -156,60 +225,46 @@ class TTSTool:
         }
 
         async with self._lock:
-            voice_guard = getattr(self, "_voice_guard", None)
-            if voice_guard is None:
-                voice_guard = get_shared_voice_guard()
-                self._voice_guard = voice_guard
-            played_via: list[str] = []
-            tmp_path: str | None = None
-            voice_guard.on_tts_start(text)
-            try:
-                async with aiohttp.ClientSession() as session:
-                    async with session.post(url, json=payload, headers=headers) as resp:
-                        if resp.status != 200:
-                            err = await resp.text()
-                            return f"TTS API failed ({resp.status}): {err[:80]}"
-                        content_type = resp.headers.get("Content-Type", "")
-                        audio_data = await resp.read()
+            async with aiohttp.ClientSession() as session:
+                async with session.post(url, json=payload, headers=headers) as resp:
+                    if resp.status != 200:
+                        err = await resp.text()
+                        return f"TTS API failed ({resp.status}): {err[:80]}"
+                    content_type = resp.headers.get("Content-Type", "")
+                    audio_data = await resp.read()
 
-                # ElevenLabs may return MP3 even when PCM was requested (model-dependent).
-                # Detect by content-type and save to the correct format.
-                is_mp3 = "mpeg" in content_type or audio_data[:3] in (
-                    b"ID3",
-                    b"\xff\xfb",
-                    b"\xff\xf3",
-                )
-                if is_mp3:
-                    tmp_path = _write_tmp_audio(audio_data, suffix=".mp3")
-                else:
-                    tmp_path = _write_pcm_as_wav(audio_data, sample_rate=16000)
+            # ElevenLabs may return MP3 even when PCM was requested (model-dependent).
+            # Detect by content-type and save to the correct format.
+            is_mp3 = "mpeg" in content_type or audio_data[:3] in (
+                b"ID3",
+                b"\xff\xfb",
+                b"\xff\xf3",
+            )
+            if is_mp3:
+                tmp_path = _write_tmp_audio(audio_data, suffix=".mp3")
+            else:
+                tmp_path = _write_pcm_as_wav(audio_data, sample_rate=16000)
 
-                if output in ("remote", "both"):
-                    ok, msg = await asyncio.to_thread(
-                        _play_via_go2rtc, tmp_path, self.go2rtc_url, self.go2rtc_stream
-                    )
-                    if ok:
-                        played_via.append("camera")
-                    else:
-                        logger.warning("go2rtc playback failed: %s", msg)
-                        if output == "remote":
-                            return f"TTS remote playback failed: {msg}"
+            async def play(path: str) -> list[str]:
+                return await self._play_file(path, text, output)
 
-                if output in ("local", "both") or (output == "remote" and not played_via):
-                    local_ok = await _play_local(tmp_path)
-                    if local_ok:
-                        played_via.append("local")
+            def cleanup(_played: list[str]) -> None:
+                try:
+                    os.unlink(tmp_path)
+                except OSError:
+                    pass
 
-                if not played_via:
-                    return "TTS playback failed (no working audio player found)"
-                return f"Said: {text[:50]}... (via {', '.join(played_via)})"
-            finally:
-                voice_guard.on_tts_end(text, played=bool(played_via))
-                if tmp_path is not None:
-                    try:
-                        os.unlink(tmp_path)
-                    except OSError:
-                        pass
+            future = self._queue().enqueue(tmp_path, cleanup, play=play)
+
+        if not _blocking_playback():
+            return f"Said: {text[:50]}... (via {_output_label(output)})"
+
+        played_via = await future
+        if not played_via:
+            if output == "remote":
+                return "TTS remote playback failed (see log)"
+            return "TTS playback failed (no working audio player found)"
+        return f"Said: {text[:50]}... (via {', '.join(played_via)})"
 
     def get_tool_definitions(self) -> list[dict]:
         return [
@@ -236,6 +291,18 @@ class TTSTool:
             result = await self.say(tool_input["text"])
             return result, None
         return f"Unknown tool: {tool_name}", None
+
+
+def _blocking_playback() -> bool:
+    """``FAMILIAR_TTS_BLOCKING=1`` restores fully synchronous say() (default: off)."""
+    return os.environ.get("FAMILIAR_TTS_BLOCKING", "").strip().lower() in ("1", "true", "yes", "on")
+
+
+_OUTPUT_LABELS = {"local": "local", "remote": "camera", "both": "camera, local"}
+
+
+def _output_label(output: str) -> str:
+    return _OUTPUT_LABELS.get(output, output)
 
 
 def _pulse_env() -> dict[str, str] | None:

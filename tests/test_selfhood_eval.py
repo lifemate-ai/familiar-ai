@@ -250,3 +250,32 @@ def test_full_selfhood_report(tmp_path: Path, monkeypatch):
     markdown = report.to_markdown()
     assert "boundary_respect" in markdown
     assert "continuity_across_restart" in markdown
+
+
+def test_total_sec_counts_top_level_buckets_only(tmp_path: Path):
+    """``model_call`` / ``tool:*`` live inside ``react_loop`` — nested spans
+    must not inflate ``total_sec`` (it is the sum of the three top-level
+    buckets, per-bucket fields kept as-is)."""
+    path = tmp_path / "latency.jsonl"
+    recorder = LatencyRecorder(enabled=True, path=path)
+    recorder.record("prepare", 1.0)
+    recorder.record("react_loop", 10.0)
+    recorder.record("model_call", 4.0)
+    recorder.record("tool:say", 5.0)
+    recorder.record("retry:coherence", 0.0)
+    recorder.record("finalize", 0.5)
+    recorder.flush_turn(turn=1)
+
+    record = json.loads(path.read_text().splitlines()[0])
+    assert record["total_sec"] == pytest.approx(11.5)
+    assert record["buckets_sec"]["model_call"] == pytest.approx(4.0)
+    assert record["buckets_sec"]["tool:say"] == pytest.approx(5.0)
+
+
+def test_total_sec_falls_back_to_all_buckets_without_top_level(tmp_path: Path):
+    path = tmp_path / "latency.jsonl"
+    recorder = LatencyRecorder(enabled=True, path=path)
+    recorder.record("model_call", 2.0)
+    recorder.flush_turn(turn=1)
+    record = json.loads(path.read_text().splitlines()[0])
+    assert record["total_sec"] == pytest.approx(2.0)

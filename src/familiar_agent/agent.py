@@ -3294,10 +3294,24 @@ class EmbodiedAgent:
         except Exception as e:
             logger.warning("Could not write today's self narrative: %s", e)
 
+    async def _drain_tts(self, timeout: float = 3.0) -> None:
+        """Wait (bounded) for the TTS playback queue, then stop its worker."""
+        tts = getattr(self, "_tts", None)
+        close = getattr(tts, "close", None)
+        if close is None:
+            return
+        try:
+            await asyncio.wait_for(close(timeout=timeout), timeout=timeout + 0.5)
+        except (asyncio.TimeoutError, Exception):  # noqa: BLE001
+            pass
+
     async def close(self) -> None:
         """Clean up resources. Bounded by timeouts to avoid hanging on exit."""
         if self._camera:
             self._camera.close()
+
+        # Let queued speech finish first (bounded) so a goodbye is not cut off.
+        await self._drain_tts()
 
         await self._drain_background_tasks()
 

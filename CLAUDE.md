@@ -147,6 +147,14 @@ every behavioral gate re-checks in the cortex. Daemon config:
 there; CI: `.github/workflows/rust.yml`) — keep the two implementations'
 payload shape, socket protocol, config keys and probe SQL in lockstep.
 
+**TTS playback is non-blocking.** `TTSTool.say()` awaits synthesis only,
+then hands the file to `familiar_agent/tts_playback.py`'s `PlaybackQueue`
+(one worker, strictly sequential) and returns — the turn no longer stalls for
+the 15–20 s an utterance takes to play. The voice guard's `on_tts_start` /
+`on_tts_end` (STT echo suppression) fire from the worker at real playback
+boundaries, and `agent.close()` drains the queue (bounded) so a goodbye is not
+cut off. `FAMILIAR_TTS_BLOCKING=1` restores the old fully synchronous say().
+
 ### Turn flow (conceptual)
 
 ingest input → interoception → prediction state → activate memory / working memory /

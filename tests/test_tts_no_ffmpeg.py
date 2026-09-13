@@ -136,6 +136,7 @@ async def test_tts_payload_requests_pcm_format() -> None:
     with patch("familiar_agent.tools.tts._play_local", new=AsyncMock(return_value=True)):
         with patch("aiohttp.ClientSession", return_value=FakeSession()):
             await tool.say("テスト")
+            await tool.wait_idle(timeout=1.0)
 
     assert "output_format=pcm_16000" in captured_url, (
         f"Expected output_format=pcm_16000 in URL, got: {captured_url}"

@@ -31,6 +31,19 @@ _USAGE_FIELDS: tuple[tuple[str, str], ...] = (
 )
 
 
+TOP_LEVEL_BUCKETS: tuple[str, ...] = ("prepare", "react_loop", "finalize")
+"""The buckets that partition a turn's critical path. ``model_call`` /
+``tool:*`` / ``retry:*`` are nested inside ``react_loop`` and must not be
+summed again."""
+
+
+def _total_seconds(buckets: dict[str, float]) -> float:
+    top = [buckets[name] for name in TOP_LEVEL_BUCKETS if name in buckets]
+    if top:
+        return sum(top)
+    return sum(buckets.values())
+
+
 class LatencyRecorder:
     """Named wall-clock buckets for one turn at a time."""
 
@@ -102,7 +115,7 @@ class LatencyRecorder:
         record: dict[str, Any] = {
             "ts": time.time(),
             "turn": turn,
-            "total_sec": round(sum(buckets.values()), 4),
+            "total_sec": round(_total_seconds(buckets), 4),
             "buckets_sec": {k: round(v, 4) for k, v in buckets.items()},
             "counts": counts,
         }

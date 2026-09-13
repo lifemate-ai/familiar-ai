@@ -93,6 +93,7 @@ async def test_say_calls_elevenlabs_api():
         mock_tmp.return_value = tmp_file
 
         await tool.say("hello world")
+        await tool.wait_idle(timeout=1.0)
 
     # Verify ElevenLabs API was called
     mock_session.post.assert_called_once()
@@ -146,6 +147,7 @@ async def test_say_truncates_long_text():
         mock_tmp.return_value = tmp_file
 
         await tool.say(long_text)
+        await tool.wait_idle(timeout=1.0)
 
     assert posted_payloads, "API was never called"
     sent_text = posted_payloads[0]["text"]
@@ -204,6 +206,8 @@ async def test_say_notifies_voice_guard_on_success():
         mock_tmp.return_value = tmp_file
 
         await tool.say("hello world")
+        # Guard hooks fire from the playback worker, not at enqueue time.
+        assert await tool.wait_idle(timeout=1.0) is True
 
     tool._voice_guard.on_tts_start.assert_called_once_with("hello world")
     tool._voice_guard.on_tts_end.assert_called_once_with("hello world", played=True)
@@ -242,6 +246,7 @@ async def test_say_serializes_concurrent_calls():
             tool.say("first"),
             tool.say("second"),
         )
+        await tool.wait_idle(timeout=1.0)
 
     # Both should succeed (no exception)
     assert len(results) == 2
