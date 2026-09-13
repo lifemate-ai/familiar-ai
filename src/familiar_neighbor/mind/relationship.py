@@ -13,8 +13,11 @@ import sqlite3
 import time
 from datetime import date, datetime
 from pathlib import Path
+from typing import Any
 
 from familiar_agent.sqlite_migrations import apply_migrations, default_migration_dir
+
+from .social_events import emit_social_event
 
 logger = logging.getLogger(__name__)
 
@@ -59,6 +62,9 @@ class RelationshipTracker:
         else:
             self._db_path = Path(db_path)
         self._db: sqlite3.Connection | None = None
+        # Optional social event ledger (duck-typed: ``append(kind, **kw)``).
+        # None keeps every write path byte-stable; emission never raises.
+        self.event_log: Any = None
         self._state: dict = self._load()
 
     def close(self) -> None:
@@ -195,12 +201,20 @@ class RelationshipTracker:
     def intimacy(self) -> float:
         return self._current_metric("intimacy_trajectory", 0.4)
 
+    def _emit(self, kind: str, **kwargs: Any) -> None:
+        emit_social_event(self.event_log, kind, source="relationship", **kwargs)
+
     def note_trust_shift(self, value: float, evidence: str, confidence: float = 0.6) -> None:
         self._append_evidence(
             "trust_trajectory",
             value=value,
             evidence=evidence,
             confidence=confidence,
+        )
+        self._emit(
+            "trust_shift",
+            confidence=confidence,
+            payload={"value": float(value), "evidence": evidence},
         )
 
     def note_intimacy_shift(self, value: float, evidence: str, confidence: float = 0.6) -> None:
@@ -209,6 +223,11 @@ class RelationshipTracker:
             value=value,
             evidence=evidence,
             confidence=confidence,
+        )
+        self._emit(
+            "intimacy_shift",
+            confidence=confidence,
+            payload={"value": float(value), "evidence": evidence},
         )
 
     @property
@@ -277,9 +296,14 @@ class RelationshipTracker:
                 boundary["severity"] = severity
                 boundary["observed_at"] = time.time()
                 self._save()
+                self._emit(
+                    "boundary_added",
+                    payload={"text": text, "severity": int(severity), "updated": True},
+                )
                 return
         bounds.append({"text": text, "severity": severity, "observed_at": time.time()})
         self._save()
+        self._emit("boundary_added", payload={"text": text, "severity": int(severity)})
 
     def record_support_preference(
         self,
@@ -335,6 +359,9 @@ class RelationshipTracker:
             confidence=confidence,
             extra={"text": text, "caution": caution},
         )
+        self._emit(
+            "sensitive_topic", confidence=confidence, payload={"text": text, "caution": caution}
+        )
 
     def record_repair(
         self,
@@ -348,6 +375,9 @@ class RelationshipTracker:
             evidence=text,
             confidence=confidence,
             extra={"text": text, "resolved": bool(resolved)},
+        )
+        self._emit(
+            "repair", confidence=confidence, payload={"text": text, "resolved": bool(resolved)}
         )
 
     def set_permission(
@@ -367,9 +397,73 @@ class RelationshipTracker:
             "recency": time.time(),
         }
         self._save()
+        self._emit(
+            "permission_set",
+            confidence=confidence,
+            payload={"permission": permission, "allowed": bool(allowed), "evidence": evidence},
+        )
 
     def permission(self, permission: str) -> dict | None:
         return self._state.get("permission_model", {}).get(permission)
+
+    def record_consent(
+        self,
+        person: str,
+        consent_type: str,
+        value: bool,
+        source: str = "explicit",
+    ) -> None:
+        """Record one person's consent (or its withdrawal) for one thing.
+
+        Finer than the coarse ``permission_model``: keyed by (person,
+        consent_type), case-insensitive on both, latest record replaces the
+        previous one. Persists through the same state save as everything
+        else on the tracker and mirrors onto the ledger as ``consent_recorded``.
+        """
+        person_clean = (person or "").strip()
+        type_clean = (consent_type or "").strip()
+        if not person_clean or not type_clean:
+            raise ValueError("person and consent_type are required")
+        source_clean = (source or "").strip() or "explicit"
+        consents = self._state.setdefault("consents", [])
+        person_key = person_clean.lower()
+        type_key = type_clean.lower()
+        kept = [
+            item
+            for item in consents
+            if not (
+                str(item.get("person", "")).lower() == person_key
+                and str(item.get("consent_type", "")).lower() == type_key
+            )
+        ]
+        kept.append(
+            {
+                "person": person_clean,
+                "consent_type": type_clean,
+                "value": bool(value),
+                "source": source_clean,
+                "recorded_at": time.time(),
+            }
+        )
+        self._state["consents"] = kept
+        self._save()
+        self._emit(
+            "consent_recorded",
+            person_key=person_clean,
+            payload={
+                "person": person_clean,
+                "consent_type": type_clean,
+                "value": bool(value),
+                "source": source_clean,
+            },
+        )
+
+    def consents(self, person: str | None = None) -> list[dict]:
+        rows = list(self._state.get("consents", []))
+        if person is None:
+            return rows
+        key = person.strip().lower()
+        return [r for r in rows if str(r.get("person", "")).lower() == key]
 
     def get_tendencies(self, min_confidence: float = 0.3) -> list[dict]:
         return [
@@ -454,6 +548,13 @@ class RelationshipTracker:
                 parts.append(f"(permissions-allowed: {'; '.join(allowed)})")
             if blocked:
                 parts.append(f"(permissions-blocked: {'; '.join(blocked)})")
+        consents = self.consents()
+        if consents:
+            items = "; ".join(
+                f"{c.get('person')}/{c.get('consent_type')}={'yes' if c.get('value') else 'no'}"
+                for c in consents[:6]
+            )
+            parts.append(f"(consents: {items})")
         return "\n".join(parts)
 
     def context_for_prompt(self) -> str:

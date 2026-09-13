@@ -9,6 +9,7 @@ neighbour's observation/memory DB.
 from __future__ import annotations
 
 import json
+import logging
 import sqlite3
 import threading
 import time
@@ -17,6 +18,8 @@ from pathlib import Path
 from typing import Any
 
 from .model import Commitment, CommitmentKind, CommitmentStatus
+
+logger = logging.getLogger(__name__)
 
 
 def _sort_key(c: Commitment) -> tuple[int, float, int, float]:
@@ -43,7 +46,32 @@ class SQLiteCommitmentStore:
         self._conn.row_factory = sqlite3.Row
         self._conn.execute("PRAGMA busy_timeout = 5000")
         self._lock = threading.Lock()
+        # Optional social event ledger, duck-typed (``append(kind, **kw)``)
+        # so the runtime stays persona-free. None keeps every path byte-stable.
+        self.event_log: Any = None
         self._init_schema()
+
+    def _emit(self, kind: str, commitment: Commitment, **payload: Any) -> None:
+        """Best-effort emission: a ledger fault never rolls back a commitment."""
+        log = self.event_log
+        if log is None:
+            return
+        try:
+            log.append(
+                kind,
+                source="commitments",
+                person_key=commitment.person,
+                correlation_id=commitment.id,
+                payload={
+                    "summary": commitment.summary,
+                    "kind": commitment.kind.value,
+                    "priority": int(commitment.priority),
+                    "due_at": commitment.due_at,
+                    **payload,
+                },
+            )
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("commitment event emission failed (%s): %s", kind, exc)
 
     def _init_schema(self) -> None:
         self._conn.executescript(
@@ -115,6 +143,7 @@ class SQLiteCommitmentStore:
             metadata=metadata or {},
         )
         self.save(commitment)
+        self._emit("commitment_added", commitment, created_by=created_by)
         return commitment
 
     def save(self, commitment: Commitment) -> None:
@@ -164,6 +193,7 @@ class SQLiteCommitmentStore:
         commitment.completed_at = now
         commitment.updated_at = now
         self.save(commitment)
+        self._emit("commitment_completed", commitment, completed_at=now)
         return commitment
 
     def cancel(self, commitment_id: str) -> Commitment:
@@ -182,6 +212,7 @@ class SQLiteCommitmentStore:
         commitment.last_reminded_at = None
         commitment.updated_at = time.time()
         self.save(commitment)
+        self._emit("commitment_snoozed", commitment, until=float(until))
         return commitment
 
     def mark_reminded(self, commitment_ids: list[str], *, at: float) -> None:
