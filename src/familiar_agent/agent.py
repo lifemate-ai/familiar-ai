@@ -88,9 +88,11 @@ from .tools.identity import IdentityTool
 from .tools.routines_tool import RoutineTool
 from .tools.self_ledger import SelfLedgerTool
 from .tools.social_timeline import SocialTimelineTool
+from .tools.narrative import NarrativeTool
 from familiar_neighbor.mind.identity import IdentityCore
 from familiar_neighbor.mind.reality import GroundingTracker
 from familiar_neighbor.mind.social_events import SocialEventLog
+from familiar_neighbor.mind.narrative import Daybook, NarrativeStore
 from .tools.memory import MemoryTool, ObservationMemory
 from .tools.tom import ToMTool
 from .tools.mobility import MobilityTool
@@ -101,6 +103,7 @@ from ._ui_helpers import night_key_for
 from .mcp_client import MCPClientManager, _resolve_config_path
 from familiar_capabilities.self_ledger import DEFAULT_SELF_LEDGER_TOOLS
 from familiar_capabilities.social_timeline import SocialTimelineCapability
+from familiar_capabilities.narrative import NarrativeCapability
 from familiar_capabilities import (
     CameraCapability,
     CodingCapability,
@@ -689,6 +692,8 @@ class EmbodiedAgent:
         self._init_social_events()
         self._self_state = SelfState()
         self._self_narrative = SelfNarrative()
+        # Life arcs + daybook (Phase 2): mirrors arc changes onto the ledger.
+        self._init_narrative()
         self._concerns = ConcernEngine()
         self._workspace = GlobalWorkspace()
         self._workspace.register_broadcast_listener(self._self_state.on_broadcast)
@@ -1099,6 +1104,57 @@ class EmbodiedAgent:
             if emitter is not None and hasattr(emitter, "event_log"):
                 emitter.event_log = log
 
+    def _init_narrative(self) -> None:
+        """Construct the arc store, the daybook and the narrative tool.
+
+        Failure leaves all three None — the ``[Life arcs]`` block renders as
+        ``""`` (byte-stable prompt) and the arc tools stay unregistered.
+        """
+        self._narrative_store: NarrativeStore | None = None
+        self._daybook: Daybook | None = None
+        self._narrative_tool: NarrativeTool | None = None
+        self._arcs_block: str | None = None  # rendered once per session, like lessons
+        try:
+            store = NarrativeStore(event_log=getattr(self, "_social_events", None))
+            daybook = Daybook()
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("NarrativeStore init failed (life arcs dormant): %s", exc)
+            return
+        self._narrative_store = store
+        self._daybook = daybook
+        self._narrative_tool = NarrativeTool(
+            store,
+            daybook,
+            narrative=getattr(self, "_self_narrative", None),
+            on_change=self._invalidate_arcs_block,
+        )
+
+    def _invalidate_arcs_block(self) -> None:
+        """Drop the cached ``[Life arcs]`` block after the agent itself edits an arc."""
+        self._arcs_block = None
+
+    def _life_arcs_block(self) -> str:
+        """Render active arcs for the stable half, cached per session.
+
+        Same idiom as the experience lessons: lazy render, process-lifetime
+        cache — except the agent's OWN arc_commit / arc_close invalidates it
+        (``_invalidate_arcs_block``), since a storyline it just named should
+        be in view. Empty store → ``""`` so existing prompt pins hold.
+        """
+        cached = getattr(self, "_arcs_block", None)
+        if cached is not None:
+            return cached
+        store = getattr(self, "_narrative_store", None)
+        block = ""
+        if store is not None:
+            try:
+                block = str(store.context_block() or "")
+            except Exception as exc:  # noqa: BLE001
+                logger.warning("life arcs block failed: %s", exc)
+                block = ""
+        self._arcs_block = block
+        return block
+
     def _build_tool_registry(self) -> ToolRegistry:
         """Build the per-turn tool registry from configured providers."""
         registry = ToolRegistry()
@@ -1136,6 +1192,9 @@ class EmbodiedAgent:
         social_timeline_tool = getattr(self, "_social_timeline_tool", None)
         if social_timeline_tool is not None:
             registry.register(SocialTimelineCapability(social_timeline_tool))
+        narrative_tool = getattr(self, "_narrative_tool", None)
+        if narrative_tool is not None:
+            registry.register(NarrativeCapability(narrative_tool))
         self_ledger_tool = getattr(self, "_self_ledger_tool", None)
         if self_ledger_tool is not None:
             ledger_names = set(DEFAULT_SELF_LEDGER_TOOLS)
@@ -1504,7 +1563,8 @@ class EmbodiedAgent:
         # dissonance state stays in the variable half via mental_ctx).
         constitution = self._identity_constitution_block()
         lessons = self._experience_lessons_block()
-        stable_parts = [p for p in [self._me_md, base, constitution, lessons] if p]
+        arcs = self._life_arcs_block()
+        stable_parts = [p for p in [self._me_md, base, constitution, lessons, arcs] if p]
         stable = "\n\n---\n\n".join(stable_parts)
 
         agent_mood, agent_mood_intensity = self._decayed_mood()
@@ -3286,14 +3346,15 @@ class EmbodiedAgent:
         """Return True once the embedding model has finished loading."""
         return self._memory.is_embedding_ready()
 
-    async def _write_today_narrative(self) -> None:
+    async def _write_today_narrative(self) -> str | None:
         """Write a one-sentence self-description for today's session.
 
         This is Kokone's diary entry — "who I was today." Read back next session
         as the felt thread of temporal continuity: ウチはここにいた、今もいる.
+        Returns the sentence written (or None) so the daybook can record it.
         """
         if self._turn_count == 0:
-            return  # No conversation happened — nothing to narrate
+            return None  # No conversation happened — nothing to narrate
         try:
             today_memories = await self._memory.recall_day_summaries_async(n=1)
             if today_memories:
@@ -3317,8 +3378,41 @@ class EmbodiedAgent:
             if text and text.strip():
                 self._self_narrative.write(text.strip(), mood=mood)
                 logger.info("Self-narrative written: %s", text.strip()[:60])
+                return text.strip()
         except Exception as e:
             logger.warning("Could not write today's self narrative: %s", e)
+        return None
+
+    async def _write_today_daybook(self, narrative_text: str | None) -> None:
+        """Merge this session into today's daybook record (never raises).
+
+        Events: the session's self-narrative sentence. Open loops: unfinished
+        business, when the memory store exposes it cheaply. Everything else in
+        the record is the agent's to fill from its own tools later.
+        """
+        if getattr(self, "_turn_count", 0) == 0:
+            return
+        daybook = getattr(self, "_daybook", None)
+        if daybook is None:
+            return
+        events = [narrative_text.strip()] if narrative_text and narrative_text.strip() else []
+        open_loops: list[str] = []
+        lister = getattr(getattr(self, "_memory", None), "list_unfinished_business_async", None)
+        if callable(lister):
+            try:
+                items = await lister(limit=5)
+                for item in items or []:
+                    text = str(item.get("thread") or item.get("content") or "").strip()
+                    if text:
+                        open_loops.append(text)
+            except Exception as exc:  # noqa: BLE001
+                logger.debug("daybook: open loops unavailable: %s", exc)
+        if not events and not open_loops:
+            return
+        try:
+            daybook.append_today(events=events, open_loops=open_loops)
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("Could not write today's daybook record: %s", exc)
 
     async def close(self) -> None:
         """Clean up resources. Bounded by timeouts to avoid hanging on exit."""
@@ -3327,8 +3421,12 @@ class EmbodiedAgent:
 
         await self._drain_background_tasks()
 
-        # Write today's self-narrative before shutting down.
-        await self._write_today_narrative()
+        # Write today's self-narrative before shutting down, then the daybook.
+        narrative_text = await self._write_today_narrative()
+        try:
+            await self._write_today_daybook(narrative_text)
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("daybook write skipped: %s", exc)
 
         # Generate (or refresh) today's day summary before shutting down.
         # Skipped when no separate utility backend is configured.

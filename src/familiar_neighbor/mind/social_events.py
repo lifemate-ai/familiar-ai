@@ -52,6 +52,7 @@ SOCIAL_EVENT_KINDS: frozenset[str] = frozenset(
         "person_inference",
         "repair",
         "sensitive_topic",
+        "arc_updated",
     }
 )
 

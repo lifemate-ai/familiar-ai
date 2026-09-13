@@ -14,6 +14,7 @@ from .identity import IdentityCapability
 from .mcp import MCPCapability
 from .memory import MemoryCapability
 from .mobility import MobilityCapability
+from .narrative import NarrativeCapability
 from .routines import RoutineCapability
 from .self_ledger import SelfLedgerCapability
 from .social_timeline import SocialTimelineCapability
@@ -29,6 +30,7 @@ __all__ = [
     "MCPCapability",
     "MemoryCapability",
     "MobilityCapability",
+    "NarrativeCapability",
     "RoutineCapability",
     "SelfLedgerCapability",
     "SocialTimelineCapability",

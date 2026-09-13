@@ -218,6 +218,17 @@ Invariants to preserve when touching these loops:
   byte-stable); `agent._init_social_events()` attaches the single
   `SocialEventLog`. Emission is best-effort (never raises); kinds are the
   closed `SOCIAL_EVENT_KINDS` frozenset. Read-only tool: `social_timeline`.
+- **Narrative arcs + daybook** (`familiar_neighbor/mind/narrative.py`,
+  `narrative_arcs` table, migration 014; `~/.familiar_ai/daybook.jsonl`): the
+  plot layer of selfhood. `NarrativeStore` holds at most 7 active arcs (an 8th
+  demotes the lowest-importance one to `dormant`); active arcs render as a
+  `[Life arcs]` block in the STABLE prompt half next to the experience lessons
+  (cached per session, invalidated only by the agent's own `arc_commit` /
+  `arc_close`; empty → `""`, byte-stable). `Daybook.append_today` merges one
+  record per day, written at session end after the self-narrative
+  (`_write_today_daybook`). Arc changes mirror onto the ledger as
+  `arc_updated`. Tools: `arc_commit` / `arc_review` / `arc_close` /
+  `self_summary` (`build_self_summary`: arcs + latest daybook + narrative).
 
 ### Identity layer: values, boundaries, and self-commitments
 
@@ -306,10 +317,13 @@ Primary stores under `~/.familiar_ai/`:
   revisions, episodes + membership, memory activation, unfinished business,
   relationship state, memory graph, person inferences, identity assertions,
   experience lessons (self-authored standing context, migration 012),
-  social events (append-only relational timeline, migration 013)
+  social events (append-only relational timeline, migration 013),
+  narrative arcs (bounded life storylines, migration 014)
 - `commitments.db` — secretary commitments (self-init schema, outside the
   `migration/` runner)
 - `mental_state.jsonl` — append-only mental-state snapshots
+- `daybook.jsonl` — one merged record per day (events, boundary moments, open
+  loops, private reflections, next actions); written at session end
 - `heartbeat_state.json` — continuation / carryover status
 - `consolidation_state.json` — sleep-consolidation once-per-night marker
 - `desires.json` — drive levels
