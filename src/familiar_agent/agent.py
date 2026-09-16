@@ -87,8 +87,13 @@ from .routine_store import RoutineStore
 from .tools.identity import IdentityTool
 from .tools.routines_tool import RoutineTool
 from .tools.self_ledger import SelfLedgerTool
+from .tools.social_timeline import SocialTimelineTool
+from .tools.identity import IdentityAnchorTool
+from .tools.narrative import NarrativeTool
 from familiar_neighbor.mind.identity import IdentityCore
 from familiar_neighbor.mind.reality import GroundingTracker
+from familiar_neighbor.mind.social_events import SocialEventLog
+from familiar_neighbor.mind.narrative import Daybook, NarrativeStore
 from .tools.memory import MemoryTool, ObservationMemory
 from .tools.tom import ToMTool
 from .tools.mobility import MobilityTool
@@ -98,6 +103,9 @@ from ._i18n import _t
 from ._ui_helpers import night_key_for
 from .mcp_client import MCPClientManager, _resolve_config_path
 from familiar_capabilities.self_ledger import DEFAULT_SELF_LEDGER_TOOLS
+from familiar_capabilities.social_timeline import SocialTimelineCapability
+from familiar_capabilities.identity import IdentityAnchorCapability
+from familiar_capabilities.narrative import NarrativeCapability
 from familiar_capabilities import (
     CameraCapability,
     CodingCapability,
@@ -684,8 +692,14 @@ class EmbodiedAgent:
         self._mcp: MCPClientManager | None = None
         self._mcp_start_task: asyncio.Future[Any] | None = None
         self._relationship = RelationshipTracker()
+        # One social event ledger, handed to every emitter (best-effort).
+        self._init_social_events()
         self._self_state = SelfState()
         self._self_narrative = SelfNarrative()
+        # Life arcs + daybook (Phase 2): mirrors arc changes onto the ledger.
+        self._init_narrative()
+        # Identity anchor (Phase 3): who_am_i / evaluate_action / consent_record.
+        self._init_identity_anchor()
         self._concerns = ConcernEngine()
         self._workspace = GlobalWorkspace()
         self._workspace.register_broadcast_listener(self._self_state.on_broadcast)
@@ -1076,6 +1090,103 @@ class EmbodiedAgent:
     def _all_tool_defs(self) -> list[dict]:
         return self._build_tool_registry().tool_defs()
 
+    def _init_social_events(self) -> None:
+        """Construct the social event ledger and attach it to each emitter.
+
+        Failure leaves every emitter's ``event_log`` None — the historical,
+        byte-stable path — and the ``social_timeline`` tool unregistered.
+        """
+        self._social_events: SocialEventLog | None = None
+        self._social_timeline_tool: SocialTimelineTool | None = None
+        try:
+            log = SocialEventLog(default_person=self.config.companion_name)
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("SocialEventLog init failed (social ledger dormant): %s", exc)
+            return
+        self._social_events = log
+        self._social_timeline_tool = SocialTimelineTool(log)
+        for attr in ("_relationship", "_commitment_store", "_identity", "_person_model"):
+            emitter = getattr(self, attr, None)
+            if emitter is not None and hasattr(emitter, "event_log"):
+                emitter.event_log = log
+
+    def _init_narrative(self) -> None:
+        """Construct the arc store, the daybook and the narrative tool.
+
+        Failure leaves all three None — the ``[Life arcs]`` block renders as
+        ``""`` (byte-stable prompt) and the arc tools stay unregistered.
+        """
+        self._narrative_store: NarrativeStore | None = None
+        self._daybook: Daybook | None = None
+        self._narrative_tool: NarrativeTool | None = None
+        self._arcs_block: str | None = None  # rendered once per session, like lessons
+        try:
+            store = NarrativeStore(event_log=getattr(self, "_social_events", None))
+            daybook = Daybook()
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("NarrativeStore init failed (life arcs dormant): %s", exc)
+            return
+        self._narrative_store = store
+        self._daybook = daybook
+        self._narrative_tool = NarrativeTool(
+            store,
+            daybook,
+            narrative=getattr(self, "_self_narrative", None),
+            on_change=self._invalidate_arcs_block,
+        )
+
+    def _init_identity_anchor(self) -> None:
+        """Construct the identity anchor tool over core, arcs and relationship.
+
+        Every collaborator is getattr-guarded: the tool registers even when
+        the identity core, the arc store or the tracker is dormant, and each
+        of its three tools degrades to a neutral line in that case.
+        """
+        self._identity_anchor_tool: IdentityAnchorTool | None = None
+        try:
+            self._identity_anchor_tool = IdentityAnchorTool(
+                getattr(self, "_identity", None),
+                narrative=getattr(self, "_narrative_store", None),
+                relationship=getattr(self, "_relationship", None),
+            )
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("IdentityAnchorTool init failed (anchor dormant): %s", exc)
+
+    def _invalidate_arcs_block(self) -> None:
+        """Drop the cached ``[Life arcs]`` block after the agent itself edits an arc.
+
+        Arcs live in the STABLE prompt half by design (they change rarely, like
+        the experience lessons), so a mid-session ``arc_commit`` invalidates the
+        provider's cache prefix exactly once — the next turn re-renders and
+        re-caches.
+        """
+        self._arcs_block = None
+
+    def _life_arcs_block(self) -> str:
+        """Render active arcs for the stable half, cached per session.
+
+        Same idiom as the experience lessons: lazy render, process-lifetime
+        cache — except the agent's OWN arc_commit / arc_close invalidates it
+        (``_invalidate_arcs_block``), since a storyline it just named should
+        be in view. Arcs sit in the stable prompt half on purpose: they change
+        rarely (same as the lessons), so one mid-session ``arc_commit`` costs a
+        single cache-prefix invalidation rather than a per-turn miss. Empty
+        store → ``""`` so existing prompt pins hold.
+        """
+        cached = getattr(self, "_arcs_block", None)
+        if cached is not None:
+            return cached
+        store = getattr(self, "_narrative_store", None)
+        block = ""
+        if store is not None:
+            try:
+                block = str(store.context_block() or "")
+            except Exception as exc:  # noqa: BLE001
+                logger.warning("life arcs block failed: %s", exc)
+                block = ""
+        self._arcs_block = block
+        return block
+
     def _build_tool_registry(self) -> ToolRegistry:
         """Build the per-turn tool registry from configured providers."""
         registry = ToolRegistry()
@@ -1110,6 +1221,15 @@ class EmbodiedAgent:
         identity_tool = getattr(self, "_identity_tool", None)
         if identity_tool is not None:
             registry.register(IdentityCapability(identity_tool))
+        social_timeline_tool = getattr(self, "_social_timeline_tool", None)
+        if social_timeline_tool is not None:
+            registry.register(SocialTimelineCapability(social_timeline_tool))
+        narrative_tool = getattr(self, "_narrative_tool", None)
+        if narrative_tool is not None:
+            registry.register(NarrativeCapability(narrative_tool))
+        identity_anchor_tool = getattr(self, "_identity_anchor_tool", None)
+        if identity_anchor_tool is not None:
+            registry.register(IdentityAnchorCapability(identity_anchor_tool))
         self_ledger_tool = getattr(self, "_self_ledger_tool", None)
         if self_ledger_tool is not None:
             ledger_names = set(DEFAULT_SELF_LEDGER_TOOLS)
@@ -1478,7 +1598,8 @@ class EmbodiedAgent:
         # dissonance state stays in the variable half via mental_ctx).
         constitution = self._identity_constitution_block()
         lessons = self._experience_lessons_block()
-        stable_parts = [p for p in [self._me_md, base, constitution, lessons] if p]
+        arcs = self._life_arcs_block()
+        stable_parts = [p for p in [self._me_md, base, constitution, lessons, arcs] if p]
         stable = "\n\n---\n\n".join(stable_parts)
 
         agent_mood, agent_mood_intensity = self._decayed_mood()
@@ -3260,14 +3381,15 @@ class EmbodiedAgent:
         """Return True once the embedding model has finished loading."""
         return self._memory.is_embedding_ready()
 
-    async def _write_today_narrative(self) -> None:
+    async def _write_today_narrative(self) -> str | None:
         """Write a one-sentence self-description for today's session.
 
         This is Kokone's diary entry — "who I was today." Read back next session
         as the felt thread of temporal continuity: ウチはここにいた、今もいる.
+        Returns the sentence written (or None) so the daybook can record it.
         """
         if self._turn_count == 0:
-            return  # No conversation happened — nothing to narrate
+            return None  # No conversation happened — nothing to narrate
         try:
             today_memories = await self._memory.recall_day_summaries_async(n=1)
             if today_memories:
@@ -3291,8 +3413,41 @@ class EmbodiedAgent:
             if text and text.strip():
                 self._self_narrative.write(text.strip(), mood=mood)
                 logger.info("Self-narrative written: %s", text.strip()[:60])
+                return text.strip()
         except Exception as e:
             logger.warning("Could not write today's self narrative: %s", e)
+        return None
+
+    async def _write_today_daybook(self, narrative_text: str | None) -> None:
+        """Merge this session into today's daybook record (never raises).
+
+        Events: the session's self-narrative sentence. Open loops: unfinished
+        business, when the memory store exposes it cheaply. Everything else in
+        the record is the agent's to fill from its own tools later.
+        """
+        if getattr(self, "_turn_count", 0) == 0:
+            return
+        daybook = getattr(self, "_daybook", None)
+        if daybook is None:
+            return
+        events = [narrative_text.strip()] if narrative_text and narrative_text.strip() else []
+        open_loops: list[str] = []
+        lister = getattr(getattr(self, "_memory", None), "list_unfinished_business_async", None)
+        if callable(lister):
+            try:
+                items = await lister(limit=5)
+                for item in items or []:
+                    text = str(item.get("thread") or item.get("content") or "").strip()
+                    if text:
+                        open_loops.append(text)
+            except Exception as exc:  # noqa: BLE001
+                logger.debug("daybook: open loops unavailable: %s", exc)
+        if not events and not open_loops:
+            return
+        try:
+            daybook.append_today(events=events, open_loops=open_loops)
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("Could not write today's daybook record: %s", exc)
 
     async def _drain_tts(self, timeout: float = 3.0) -> None:
         """Wait (bounded) for the TTS playback queue, then stop its worker."""
@@ -3315,8 +3470,12 @@ class EmbodiedAgent:
 
         await self._drain_background_tasks()
 
-        # Write today's self-narrative before shutting down.
-        await self._write_today_narrative()
+        # Write today's self-narrative before shutting down, then the daybook.
+        narrative_text = await self._write_today_narrative()
+        try:
+            await self._write_today_daybook(narrative_text)
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("daybook write skipped: %s", exc)
 
         # Generate (or refresh) today's day summary before shutting down.
         # Skipped when no separate utility backend is configured.
@@ -3367,6 +3526,8 @@ class EmbodiedAgent:
         for closable in (
             getattr(self, "_person_model", None),
             getattr(self, "_commitment_store", None),
+            getattr(self, "_narrative_store", None),
+            getattr(self, "_social_events", None),
         ):
             if closable is not None:
                 try:

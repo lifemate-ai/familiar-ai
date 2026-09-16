@@ -19,8 +19,11 @@ import sqlite3
 import uuid
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
+from typing import Any
 
 from familiar_agent.sqlite_migrations import apply_migrations, default_migration_dir
+
+from .social_events import emit_social_event
 
 logger = logging.getLogger(__name__)
 
@@ -61,6 +64,8 @@ class PersonModelTracker:
     def __init__(self, db_path: str | Path | None = None) -> None:
         self._db_path = Path(db_path) if db_path is not None else DEFAULT_PERSON_MODEL_DB_PATH
         self._db: sqlite3.Connection | None = None
+        # Optional social event ledger (duck-typed); None is byte-stable.
+        self.event_log: Any = None
 
     def _ensure_db(self) -> sqlite3.Connection:
         if self._db is None:
@@ -98,6 +103,7 @@ class PersonModelTracker:
         db = self._ensure_db()
         created_at = datetime.now(timezone.utc).isoformat()
         evidence_json = json.dumps(evidence, ensure_ascii=False)
+        stored: list[tuple[str, float]] = []
         for state, confidence in states:
             state = str(state).strip()
             if not state:
@@ -120,7 +126,22 @@ class PersonModelTracker:
                     created_at,
                 ),
             )
+            stored.append((state, float(confidence)))
         db.commit()
+        if stored:
+            emit_social_event(
+                self.event_log,
+                "person_inference",
+                source="person_model",
+                person_key=person,
+                confidence=max(c for _, c in stored),
+                payload={
+                    "states": [[s, c] for s, c in stored],
+                    "evidence": list(evidence),
+                    "policy": policy,
+                    "inference_source": source,
+                },
+            )
 
     # ── reads ──
 

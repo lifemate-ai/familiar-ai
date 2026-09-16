@@ -30,6 +30,8 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
+from .social_events import emit_social_event
+
 if TYPE_CHECKING:
     from .workspace import Coalition
 
@@ -88,6 +90,25 @@ class IdentityViolation:
     severity: float
     reason: str
     repair_text: str = ""
+
+
+@dataclass(slots=True)
+class ActionVerdict:
+    """Pre-action reading: may I do this, given what I hold?
+
+    ``verdict`` is ``"allow"`` (nothing held is touched), ``"deny"`` (a
+    negotiable boundary / value / self-commitment is at stake) or
+    ``"override"`` (a non-negotiable boundary is at stake — the action must
+    not happen as proposed). ``safer_alternative`` is derived from the
+    implicated row (its ``repair_text`` or its statement), never from code.
+    """
+
+    verdict: str = "allow"
+    reasons: list[str] = field(default_factory=list)
+    confidence: float = 1.0
+    safer_alternative: str | None = None
+    action_kind: str = ""
+    implicated_keys: tuple[str, ...] = ()
 
 
 # Guard rails for seed/agent-supplied patterns. Syntax errors are caught by
@@ -199,6 +220,8 @@ class IdentityCore:
         self._last_violation: dict[str, Any] | None = None
         self._recent: list[dict[str, Any]] = []
         self._last_threat = IdentityThreat()
+        # Optional social event ledger (duck-typed); None is byte-stable.
+        self.event_log: Any = None
         self._load_state()
         self._load_seed()
 
@@ -354,6 +377,72 @@ class IdentityCore:
         violations.sort(key=lambda v: v.severity, reverse=True)
         return violations
 
+    # ── pre-action evaluation (no state change) ──
+
+    def evaluate_action(self, action_kind: str, text: str) -> ActionVerdict:
+        """Grade a *proposed* action against everything held, before it happens.
+
+        Reuses the checker library: an action text that matches either side
+        of an assertion's patterns (the request side, the response side, or a
+        ``topic_relevance`` topic) implicates that assertion. Unlike
+        :meth:`assess` / :meth:`check_response` this touches no dissonance,
+        threat or violation state — it is a pure reading plus one
+        ``action_evaluated`` ledger event.
+        """
+        kind = (action_kind or "").strip()[:64]
+        probe = (text or "").strip().lower()[:_MAX_MATCH_INPUT_CHARS]
+        if not probe:
+            return ActionVerdict(action_kind=kind)
+        implicated: list[tuple[IdentityAssertion, _CompiledChecker]] = []
+        for assertion in self.assertions():
+            checker = self._checker_for(assertion)
+            if checker.disabled:
+                continue
+            if _matches_any(probe, checker.user_side) or _matches_any(probe, checker.response_side):
+                implicated.append((assertion, checker))
+        if not implicated:
+            verdict = ActionVerdict(action_kind=kind)
+        else:
+            # Non-negotiable boundaries decide first, then by weight.
+            implicated.sort(
+                key=lambda pair: (
+                    pair[0].kind == "boundary" and pair[0].non_negotiable,
+                    pair[0].weight,
+                ),
+                reverse=True,
+            )
+            lead, lead_checker = implicated[0]
+            override = lead.kind == "boundary" and lead.non_negotiable
+            alternative = lead_checker.repair_text.strip() or (
+                f"Act in a way that keeps this true: {lead.statement}"
+            )
+            verdict = ActionVerdict(
+                verdict="override" if override else "deny",
+                reasons=[
+                    f"{a.kind} at stake: {a.statement}"
+                    + (" (non-negotiable)" if a.non_negotiable else "")
+                    for a, _ in implicated
+                ],
+                confidence=min(1.0, max(a.weight for a, _ in implicated)),
+                safer_alternative=alternative,
+                action_kind=kind,
+                implicated_keys=tuple(a.assertion_key for a, _ in implicated),
+            )
+        emit_social_event(
+            self.event_log,
+            "action_evaluated",
+            source="identity",
+            correlation_id=verdict.implicated_keys[0] if verdict.implicated_keys else None,
+            confidence=verdict.confidence,
+            payload={
+                "action_kind": kind,
+                "verdict": verdict.verdict,
+                "implicated_keys": list(verdict.implicated_keys),
+                "text": probe[:200],
+            },
+        )
+        return verdict
+
     # ── dissonance ledger ──
 
     def dissonance(self) -> float:
@@ -379,6 +468,19 @@ class IdentityCore:
             except Exception as exc:  # noqa: BLE001
                 logger.warning("record_identity_violation failed: %s", exc)
         self.invalidate()
+        emit_social_event(
+            self.event_log,
+            "identity_violation",
+            source="identity",
+            correlation_id=violation.assertion_key,
+            confidence=violation.severity,
+            payload={
+                "key": violation.assertion_key,
+                "reason": violation.reason,
+                "severity": float(violation.severity),
+                "turn_index": int(turn_index),
+            },
+        )
 
     def resolve_reflection(self) -> None:
         """A reflection turn addressed the dissonance: sharp relief + evidence."""
@@ -399,6 +501,16 @@ class IdentityCore:
             except Exception as exc:  # noqa: BLE001
                 logger.warning("resolve_reflection store update failed: %s", exc)
             self.invalidate()
+        emit_social_event(
+            self.event_log,
+            "identity_reflection",
+            source="identity",
+            correlation_id=str(last.get("key", "")) if last else None,
+            payload={
+                "key": str(last.get("key", "")) if last else "",
+                "dissonance": float(self._dissonance),
+            },
+        )
 
     # ── surfacing ──
 

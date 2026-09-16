@@ -10,12 +10,14 @@ from .camera import CameraCapability
 from .coding import CodingCapability
 from .commitments import CommitmentCapability
 from .delegation import DelegationCapability
-from .identity import IdentityCapability
+from .identity import IdentityAnchorCapability, IdentityCapability
 from .mcp import MCPCapability
 from .memory import MemoryCapability
 from .mobility import MobilityCapability
+from .narrative import NarrativeCapability
 from .routines import RoutineCapability
 from .self_ledger import SelfLedgerCapability
+from .social_timeline import SocialTimelineCapability
 from .tom import ToMCapability
 from .voice import VoiceCapability
 
@@ -24,12 +26,15 @@ __all__ = [
     "CodingCapability",
     "CommitmentCapability",
     "DelegationCapability",
+    "IdentityAnchorCapability",
     "IdentityCapability",
     "MCPCapability",
     "MemoryCapability",
     "MobilityCapability",
+    "NarrativeCapability",
     "RoutineCapability",
     "SelfLedgerCapability",
+    "SocialTimelineCapability",
     "ToMCapability",
     "VoiceCapability",
 ]

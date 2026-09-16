@@ -24,7 +24,13 @@ uv run familiar
 # Discover ONVIF/Tapo cameras on the LAN
 uv run familiar-discover-cameras
 
-# Tests (pytest-asyncio; ~1300 tests)
+# Body daemon (separate process; see "Body daemon" below)
+uv run familiard
+
+# Desktop GUI launchers (TUI stays the default — never change `familiar`'s default surface)
+./run-gui.sh   # run-gui.bat on Windows
+
+# Tests (pytest-asyncio; ~1500 tests, no pytest.ini — config lives in pyproject)
 uv run pytest -q
 uv run pytest -q tests/test_runtime_hooks.py            # one file
 uv run pytest -q tests/test_runtime_hooks.py::test_name # one test
@@ -219,6 +225,26 @@ Invariants to preserve when touching these loops:
   `embodied_hook.prepare_turn` via `relationship_learning_inputs`): distress
   acts surface the relational memory and soften; explicit advice requests force
   ToM on with gentler delivery. Defaults keep historical decisions byte-stable.
+- **Social event ledger** (`familiar_neighbor/mind/social_events.py`,
+  `social_events` table, migration 013): one append-only relational timeline.
+  `RelationshipTracker`, `SQLiteCommitmentStore`, `IdentityCore` and
+  `PersonModelTracker` each carry a duck-typed `event_log` (default None →
+  byte-stable); `agent._init_social_events()` attaches the single
+  `SocialEventLog`. Emission is best-effort (never raises); kinds are the
+  closed `SOCIAL_EVENT_KINDS` frozenset; retention is bounded (every 100
+  appends: drop rows older than `retention_days`=180, cap at `max_rows`=20000).
+  Read-only tool: `social_timeline`.
+- **Narrative arcs + daybook** (`familiar_neighbor/mind/narrative.py`,
+  `narrative_arcs` table, migration 014; `~/.familiar_ai/daybook.jsonl`): the
+  plot layer of selfhood. `NarrativeStore` holds at most 7 active arcs (an 8th
+  demotes the lowest-importance one to `dormant`); active arcs render as a
+  `[Life arcs]` block in the STABLE prompt half next to the experience lessons
+  (cached per session, invalidated only by the agent's own `arc_commit` /
+  `arc_close`; empty → `""`, byte-stable). `Daybook.append_today` merges one
+  record per day, written at session end after the self-narrative
+  (`_write_today_daybook`). Arc changes mirror onto the ledger as
+  `arc_updated`. Tools: `arc_commit` / `arc_review` / `arc_close` /
+  `self_summary` (`build_self_summary`: arcs + latest daybook + narrative).
 
 ### Identity layer: values, boundaries, and self-commitments
 
@@ -251,10 +277,63 @@ first-person `statement`, `non_negotiable`, `confidence`, and a `checker_id`.
   enforcement-critical fields on update). A background honor-check
   (`_maybe_update_identity`) nudges *value* conviction with revision-audited
   evidence.
+- **Anchor + pre-action check + consent** (selfhood/sociality Phase 3):
+  `IdentityCore.evaluate_action(action_kind, text) -> ActionVerdict` grades a
+  *proposed* action with the same checker library (`override` = non-negotiable
+  boundary at stake, `deny` = negotiable boundary/value, `allow` otherwise; the
+  safer alternative is the row's `repair_text` or statement) and emits
+  `action_evaluated` without touching `assess()`/gate state. `IdentityAnchorTool`
+  (`who_am_i` / `evaluate_action` / `consent_record`, `IdentityAnchorCapability`)
+  renders held rows + active arcs; `RelationshipTracker.record_consent` /
+  `consents()` keep per-person consent next to the permission model and add a
+  `(consents: …)` line to the relationship context only when one exists.
 - **Seeding**: persona content loads from `~/.familiar_ai/identity_seed.json`
   (insert-if-missing by key; `FAMILIAR_AI_IDENTITY_SEED` override;
   `identity.sample.json` is the shipped template). The generic repo carries no
   persona strings — identity lives in the seed/config, not the code.
+
+### Self-model and reality layers (mostly dark by default)
+
+These modules live in `familiar_neighbor/mind/` and are wired through
+`embodied_hook.py` / `agent.py`. All are getattr-guarded: an absent or
+disabled layer must leave prompts and decisions byte-stable.
+
+- **Consciousness profile** (`consciousness.py`, `FAMILIAR_CONSCIOUSNESS_PROFILE`,
+  default OFF): six graded dimensions computed in `_build_mental_snapshot`,
+  clamped to [0,1]. **Instrumentation only** — it lands in diagnostics and
+  `mental_state.jsonl`, never in the prompt.
+- **Reality monitor** (`reality.py`, `FAMILIAR_REALITY_GATE`, default OFF): a
+  perception-claim gate. A final reply asserting a fresh observation without a
+  present-turn `see()` gets one `[REALITY]` `RetryDecision` re-ask. Pattern
+  library is fixed and ReDoS-guarded; it is deliberately conservative (false
+  negatives over false positives).
+- **Voice gate** (`FAMILIAR_VOICE_GATE`): one in-loop re-ask when a
+  conversational turn ends without `say()`. Independent of `auto_say`; aimed at
+  small local models.
+- **Sleep consolidation**: `should_run_sleep_consolidation()` in
+  `_ui_helpers.py` gates `consolidate_memories_async(threshold=0.97)` from the
+  TUI/GUI idle paths; once-per-night via `consolidation_state.json`.
+- **Self-narrative** (`self_narrative.py`, `~/.familiar_ai/self_narrative.jsonl`):
+  one first-person sentence per session, appended post-turn.
+- **Concern engine** (`concern_engine.py`, `~/.familiar_ai/active_concerns.json`):
+  at most 5 active concerns, decayed every turn, surfaced above a threshold
+  with a 2-turn cooldown after prompting.
+- **Default-mode wander** (`default_mode.py`): spontaneous memory wandering
+  in the inner loop's non-cheap cycles; near-duplicate hits (>0.85) fold.
+- **Deferral detector** (`deferral.py`): fixed JA/EN "talk later" patterns
+  that become unfinished business; no env gate.
+- **Meta-monitor** (`meta_monitor.py`): session-scoped HOT layer recording the
+  winning coalition per step and inconsistencies vs. the self-narrative; sync,
+  no LLM; only the distilled summary persists (`meta_state.json`).
+- **Attention schema** (`attention_schema.py`, `attention_state.json`):
+  focus-history self-model; `context_for_prompt()` yields the compact block.
+- **Auto-ToM** (`embodied_hook._should_auto_tom` / `_run_auto_tom_background`):
+  deterministic cooldown, runs ToM in a background task (<12s) and persists
+  structured inferences to the person model.
+- **Compact prompt profile** (`PROMPT_PROFILE=compact`, `config.py`): trimmed
+  framework for gemma-class local models; long social guidance is dropped
+  because the deterministic layers carry it. `<think>` blocks from local
+  models are scrubbed in `familiar_runtime/models/openai_compat.py`.
 
 ## Persistence
 
@@ -263,15 +342,20 @@ Primary stores under `~/.familiar_ai/`:
 - `observations.db` — observations, embeddings, semantic facts, behavior policies,
   revisions, episodes + membership, memory activation, unfinished business,
   relationship state, memory graph, person inferences, identity assertions,
-  experience lessons (self-authored standing context, migration 012)
+  experience lessons (self-authored standing context, migration 012),
+  social events (append-only relational timeline, migration 013),
+  narrative arcs (bounded life storylines, migration 014)
 - `commitments.db` — secretary commitments (self-init schema, outside the
   `migration/` runner)
 - `mental_state.jsonl` — append-only mental-state snapshots
+- `daybook.jsonl` — one merged record per day (events, boundary moments, open
+  loops, private reflections, next actions); written at session end
 - `heartbeat_state.json` — continuation / carryover status
 - `consolidation_state.json` — sleep-consolidation once-per-night marker
 - `desires.json` — drive levels
 - `self_state.json` — latent bodily carryover
 - `identity_state.json` — identity dissonance ledger (decay + reflection relief)
+- `self_narrative.jsonl` / `active_concerns.json` — self-narrative diary and concern engine state
 - `identity_seed.json` — persona identity seed (operator-supplied; insert-if-missing)
 - `attention_state.json` — attention-schema focus history (survives restarts)
 - `meta_state.json` — previous session's distilled metacognitive summary (the raw
