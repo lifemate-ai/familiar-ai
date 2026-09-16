@@ -12,7 +12,9 @@ from collections.abc import Callable, Coroutine, Mapping
 from datetime import datetime
 from typing import Any
 
+from . import social_reflex
 from .backend import create_backend, create_scene_backend, create_utility_backend
+from .prompt_profiles import compact_prompt, resolve_profile
 from .config import AgentConfig
 from .desires import DesireSystem, detect_worry_signal
 from .relationship import RelationshipTracker
@@ -613,6 +615,13 @@ class EmbodiedAgent:
         self._tts: TTSTool | None = None
         self._stt: STTTool | None = None
         self._me_md: str = self._load_me_md()  # loaded once; restart to pick up changes
+        # Prompt profile: "compact" for small local models, "full" for frontier models.
+        self._prompt_profile: str = resolve_profile(config.platform, config.base_url)
+        # Social reflex guards (tool withholding on social turns, text cleanup, auto-speak).
+        _reflex_env = os.environ.get("SOCIAL_REFLEX", "auto").strip().lower()
+        self._social_reflex: bool = _reflex_env in ("1", "on", "true") or (
+            _reflex_env == "auto" and self._prompt_profile == "compact"
+        )
         self._memory = ObservationMemory()
         self._memory_worker = MemoryJobWorker(self._memory)
         self._memory_tool = MemoryTool(self._memory)
@@ -1064,6 +1073,23 @@ class EmbodiedAgent:
         body_inner = "\n".join(parts)
         return f"(body\n{body_inner})"
 
+    def _get_body_description_compact(self) -> str:
+        """Plain-language body description for the compact prompt profile."""
+        lines = ["- Eyes: see() captures what the camera sees right now. No permission needed."]
+        if self._camera and self._camera.is_pan_tilt_available:
+            lines.append("- Neck: look() turns left/right/up/down. look() alone shows nothing.")
+        else:
+            lines.append("- Neck: fixed. You cannot turn your gaze.")
+        if self._mobility:
+            lines.append(
+                "- Legs: walk() moves the robot-vacuum body. The camera is a separate device, "
+                "so walking does not change what you see."
+            )
+        else:
+            lines.append("- Legs: none. You cannot move your location.")
+        lines.append("- Voice: only say() reaches the person. Text is a silent monologue.")
+        return "\n".join(lines)
+
     def _system_prompt(
         self,
         feelings_ctx: str = "",
@@ -1080,10 +1106,13 @@ class EmbodiedAgent:
                   AnthropicBackend marks this block with cache_control.
         variable — interoception, feelings, inner voice, plan; changes every turn.
         """
-        base = SYSTEM_PROMPT.format(max_steps=MAX_ITERATIONS)
-        # Dynamically replace (body ...) block based on actual hardware
-        body_desc = self._get_body_description()
-        base = re.sub(r"\(body.*?\)", body_desc, base, flags=re.DOTALL)
+        if getattr(self, "_prompt_profile", "full") == "compact":
+            base = compact_prompt(self._get_body_description_compact())
+        else:
+            base = SYSTEM_PROMPT.format(max_steps=MAX_ITERATIONS)
+            # Dynamically replace (body ...) block based on actual hardware
+            body_desc = self._get_body_description()
+            base = re.sub(r"\(body.*?\)", body_desc, base, flags=re.DOTALL)
 
         stable_parts = [p for p in [self._me_md, base] if p]
         stable = "\n\n---\n\n".join(stable_parts)
@@ -2101,6 +2130,22 @@ class EmbodiedAgent:
         if on_phase and startup_phase:
             on_phase("thinking")
 
+        # Social reflex: on social utterances (venting, greeting, indirect request…)
+        # withhold perception tools so a small model cannot answer feelings with the camera.
+        reflex_on = bool(getattr(self, "_social_reflex", False))
+        social_turn = (
+            social_reflex.classify_turn(user_input) if (reflex_on and not is_desire_turn) else None
+        )
+        turn_tools = (
+            social_reflex.allowed_tools(self._all_tool_defs, social_turn)
+            if social_turn is not None
+            else self._all_tool_defs
+        )
+        if social_turn is not None and social_turn.is_social:
+            logger.debug(
+                "Social reflex: kind=%s camera_ok=%s", social_turn.kind, social_turn.camera_ok
+            )
+
         camera_used = False
         say_used = False
         final_text = "(no response)"
@@ -2124,7 +2169,7 @@ class EmbodiedAgent:
                     workspace_ctx=workspace_ctx,
                 ),
                 messages=self.messages,
-                tools=self._all_tool_defs,
+                tools=turn_tools,
                 max_tokens=self.config.max_tokens,
                 on_text=on_text,
             )
@@ -2144,6 +2189,11 @@ class EmbodiedAgent:
             if result.stop_reason == "end_turn":
                 self.messages.append(self.backend.make_assistant_message(result, raw_content))
                 final_text = result.text or "(no response)"
+                if reflex_on and final_text != "(no response)":
+                    # Small models leak pseudo tool syntax / stage directions into prose.
+                    final_text = (
+                        social_reflex.strip_hallucinated_tool_text(final_text) or "(no response)"
+                    )
 
                 # Coherence gate: ask utility backend whether the response contains
                 # a logical error (e.g. shiritori word ending in 'ん').  If a
@@ -2172,7 +2222,11 @@ class EmbodiedAgent:
 
                 # Auto-say: if the model wrote text but never called say(), speak it aloud.
                 # Gated by config.auto_say (default OFF).
-                _auto_say_enabled = getattr(self.config, "auto_say", False)
+                _auto_say_enabled = getattr(self.config, "auto_say", False) or (
+                    reflex_on
+                    and os.environ.get("FAMILIAR_AUTO_SAY", "").strip().lower()
+                    not in ("0", "false", "no")
+                )
                 if (
                     _auto_say_enabled
                     and self._tts

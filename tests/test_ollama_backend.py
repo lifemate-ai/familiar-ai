@@ -2,7 +2,8 @@
 
 from __future__ import annotations
 
-import asyncio
+
+import pytest
 
 from familiar_agent.backend import ToolCall
 from familiar_agent.ollama_backend import (
@@ -36,10 +37,11 @@ def test_think_flag_defaults_off_for_auto() -> None:
     assert think_flag("extended") is True
 
 
-def test_request_carries_think_num_ctx_and_native_tools() -> None:
+@pytest.mark.asyncio
+async def test_request_carries_think_num_ctx_and_native_tools() -> None:
     be, seen = _backend([{"message": {"content": "hi"}, "done": True}], think=False, num_ctx=8192)
     tools = [{"name": "say", "description": "speak", "input_schema": {"type": "object"}}]
-    asyncio.run(be.stream_turn(("stable", "variable"), [be.make_user_message("yo")], tools, 100))
+    await be.stream_turn(("stable", "variable"), [be.make_user_message("yo")], tools, 100)
     body = seen[0]
     assert body["think"] is False
     assert body["options"] == {"num_ctx": 8192, "num_predict": 100}
@@ -48,7 +50,8 @@ def test_request_carries_think_num_ctx_and_native_tools() -> None:
     assert body["messages"][1] == {"role": "user", "content": "yo"}
 
 
-def test_stream_turn_collects_text_and_usage() -> None:
+@pytest.mark.asyncio
+async def test_stream_turn_collects_text_and_usage() -> None:
     be, _ = _backend(
         [
             {"message": {"content": "おか"}, "done": False},
@@ -57,7 +60,7 @@ def test_stream_turn_collects_text_and_usage() -> None:
         ]
     )
     got: list[str] = []
-    result, raw = asyncio.run(be.stream_turn("s", [], [], 50, on_text=got.append))
+    result, raw = await be.stream_turn("s", [], [], 50, on_text=got.append)
     assert result.stop_reason == "end_turn"
     assert result.text == "おかえり"
     assert got == ["おか", "えり"]
@@ -65,7 +68,8 @@ def test_stream_turn_collects_text_and_usage() -> None:
     assert raw == {"role": "assistant", "content": "おかえり"}
 
 
-def test_stream_turn_parses_tool_calls_and_keeps_thinking_in_raw() -> None:
+@pytest.mark.asyncio
+async def test_stream_turn_parses_tool_calls_and_keeps_thinking_in_raw() -> None:
     be, _ = _backend(
         [
             {"message": {"thinking": "hmm"}, "done": False},
@@ -79,14 +83,15 @@ def test_stream_turn_parses_tool_calls_and_keeps_thinking_in_raw() -> None:
             {"message": {"content": ""}, "done": True},
         ]
     )
-    result, raw = asyncio.run(be.stream_turn("s", [], [], 50))
+    result, raw = await be.stream_turn("s", [], [], 50)
     assert result.stop_reason == "tool_use"
     assert [(tc.name, tc.input) for tc in result.tool_calls] == [("say", {"text": "やあ"})]
     assert raw["thinking"] == "hmm"
     assert raw["tool_calls"][0]["function"]["name"] == "say"
 
 
-def test_tool_call_arguments_may_arrive_as_json_string() -> None:
+@pytest.mark.asyncio
+async def test_tool_call_arguments_may_arrive_as_json_string() -> None:
     be, _ = _backend(
         [
             {
@@ -99,7 +104,7 @@ def test_tool_call_arguments_may_arrive_as_json_string() -> None:
             }
         ]
     )
-    result, _ = asyncio.run(be.stream_turn("s", [], [], 50))
+    result, _ = await be.stream_turn("s", [], [], 50)
     assert result.tool_calls[0].input == {"direction": "left"}
 
 
@@ -122,26 +127,28 @@ def test_user_message_from_blocks_extracts_images() -> None:
     assert msg == {"role": "user", "content": "見て", "images": ["QUJD"]}
 
 
-def test_error_chunk_raises() -> None:
+@pytest.mark.asyncio
+async def test_error_chunk_raises() -> None:
     be, _ = _backend([{"error": "model not found"}])
     try:
-        asyncio.run(be.stream_turn("s", [], [], 10))
+        await be.stream_turn("s", [], [], 10)
     except RuntimeError as e:
         assert "model not found" in str(e)
     else:  # pragma: no cover
         raise AssertionError("expected RuntimeError")
 
 
-def test_complete_returns_joined_text_and_swallows_errors() -> None:
+@pytest.mark.asyncio
+async def test_complete_returns_joined_text_and_swallows_errors() -> None:
     be, seen = _backend([{"message": {"content": "happy"}, "done": True}])
-    assert asyncio.run(be.complete("label this", 20)) == "happy"
+    assert await be.complete("label this", 20) == "happy"
     assert seen[0]["messages"] == [{"role": "user", "content": "label this"}]
 
     async def boom(body):
         raise RuntimeError("down")
         yield  # pragma: no cover
 
-    assert asyncio.run(OllamaBackend("m", stream_factory=boom).complete("x", 5)) == ""
+    assert await OllamaBackend("m", stream_factory=boom).complete("x", 5) == ""
 
 
 # ── factory wiring ────────────────────────────────────────────────────────────
