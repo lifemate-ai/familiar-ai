@@ -229,6 +229,9 @@ class ObservationMemory:
         self._db_path = db_path
         self._db: sqlite3.Connection | None = None
         self._db_lock = threading.Lock()  # serialize concurrent thread-pool access
+        # Separate lock for the one-time connect+migrate. Callers already hold
+        # _db_lock in places, so reusing it here would deadlock.
+        self._connect_lock = threading.Lock()
         self._embedder = _EmbeddingModel(model_name)
         if _embedding_prewarm_enabled():
             self._embedder.pre_warm()  # start loading in background immediately
@@ -250,15 +253,23 @@ class ObservationMemory:
                     self._db = None
 
     def _ensure_connected(self) -> sqlite3.Connection:
-        if self._db is None:
-            Path(self._db_path).parent.mkdir(parents=True, exist_ok=True)
-            self._db = sqlite3.connect(self._db_path, check_same_thread=False)
-            self._db.row_factory = sqlite3.Row
-            self._db.execute("PRAGMA journal_mode = WAL")
-            self._db.execute("PRAGMA synchronous = NORMAL")
-            self._db.execute("PRAGMA foreign_keys = ON")
-            apply_migrations(self._db, default_migration_dir())
-            self._db.commit()
+        if self._db is not None:
+            return self._db
+        # Double-checked: the memory worker thread and the agent's thread-pool
+        # calls race here on a fresh DB. Without this lock two connections were
+        # opened and migrations ran twice ("cannot start a transaction within a
+        # transaction"), leaving one connection without the tables.
+        with self._connect_lock:
+            if self._db is None:
+                Path(self._db_path).parent.mkdir(parents=True, exist_ok=True)
+                db = sqlite3.connect(self._db_path, check_same_thread=False)
+                db.row_factory = sqlite3.Row
+                db.execute("PRAGMA journal_mode = WAL")
+                db.execute("PRAGMA synchronous = NORMAL")
+                db.execute("PRAGMA foreign_keys = ON")
+                apply_migrations(db, default_migration_dir())
+                db.commit()
+                self._db = db
         return self._db
 
     @staticmethod

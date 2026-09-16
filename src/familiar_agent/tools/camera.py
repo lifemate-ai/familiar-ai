@@ -92,6 +92,21 @@ class CameraTool:
         cv2.destroyAllWindows()
         logger.info("Camera resources released.")
 
+    async def aclose(self) -> None:
+        """Close the ONVIF (PTZ) transports as well.
+
+        ``close()`` only releases the RTSP capture; the ONVIF client keeps aiohttp
+        sessions open and asyncio reports them as "Unclosed client session" at exit.
+        """
+        cam = getattr(self, "_cam_onvif", None)
+        self._cam_onvif = None
+        self._ptz = None
+        if cam is not None:
+            try:
+                await cam.close()
+            except Exception as e:  # noqa: BLE001
+                logger.debug("ONVIF close failed: %s", e)
+
     def _capture_loop(self):
         """Background thread to keep camera buffer fresh and optionally show preview."""
         source = self._get_stream_url()
@@ -166,6 +181,7 @@ class CameraTool:
 
         last_error: Exception | None = None
         for try_port in ports_to_try:
+            cam = None
             try:
                 cam = ONVIFCamera(hostname, try_port, username, password, wsdl_dir=wsdl_dir)
                 await cam.update_xaddrs()
@@ -179,6 +195,12 @@ class CameraTool:
             except Exception as e:
                 logger.debug("ONVIF PTZ port %d failed for %s: %s", try_port, hostname, e)
                 last_error = e
+                # A failed probe still opened transports; release them.
+                if cam is not None:
+                    try:
+                        await cam.close()
+                    except Exception:  # noqa: BLE001
+                        pass
 
         logger.warning(
             "ONVIF PTZ unavailable for %s (tried ports %s). "
