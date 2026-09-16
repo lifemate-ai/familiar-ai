@@ -120,6 +120,7 @@ from familiar_capabilities import (
     RoutineCapability,
     SelfLedgerCapability,
     ToMCapability,
+    TextOnlyVoiceCapability,
     VoiceCapability,
 )
 from familiar_neighbor.embodied_hook import EmbodiedAgentHook
@@ -1250,6 +1251,9 @@ class EmbodiedAgent:
             registry.register(MobilityCapability(self._mobility))
         if self._tts:
             registry.register(VoiceCapability(self._tts))
+        else:
+            # Keep the voice channel present: say() delivers text when no TTS exists.
+            registry.register(TextOnlyVoiceCapability())
         registry.register(
             MemoryCapability(
                 self._memory_tool,

@@ -289,6 +289,35 @@ def turn_kind(user_input: str) -> SocialTurn:
     return classify_turn(user_input)
 
 
+# Body-part ids from the prompt that small models sometimes call as if they were tools.
+BODY_PART_ALIASES = {
+    "neck": "look",
+    "eyes": "see",
+    "eye": "see",
+    "legs": "walk",
+    "leg": "walk",
+    "voice": "say",
+    "mouth": "say",
+}
+
+
+def resolve_body_part_alias(tool_call: "ToolCall") -> bool:
+    """Rename ``neck({"look": "down"})``-style calls to the real tool. Returns True if changed."""
+    target = BODY_PART_ALIASES.get(tool_call.name)
+    if target is None:
+        return False
+    inp = dict(tool_call.input or {})
+    if target == "look" and "direction" not in inp:
+        direction = next((v for v in inp.values() if isinstance(v, str)), None)
+        inp = {"direction": direction} if direction else {}
+    if target == "say" and "text" not in inp:
+        text = next((v for v in inp.values() if isinstance(v, str)), "")
+        inp = {"text": text}
+    tool_call.name = target
+    tool_call.input = inp
+    return True
+
+
 class SocialReflexHook(RuntimeHookBase):
     """Deterministic guards for small local models, run inside the ReAct loop.
 
@@ -337,6 +366,9 @@ class SocialReflexHook(RuntimeHookBase):
         user_input = ctx.user_input
 
         if result.stop_reason == "tool_use":
+            for tc in result.tool_calls:
+                if resolve_body_part_alias(tc):
+                    logger.info("Social reflex: aliased body-part call → %s", tc.name)
             says = [tc for tc in result.tool_calls if tc.name == "say"]
             for tc in says:
                 if isinstance(tc.input, dict):

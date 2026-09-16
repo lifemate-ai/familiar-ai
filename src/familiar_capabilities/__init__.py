@@ -19,7 +19,7 @@ from .routines import RoutineCapability
 from .self_ledger import SelfLedgerCapability
 from .social_timeline import SocialTimelineCapability
 from .tom import ToMCapability
-from .voice import VoiceCapability
+from .voice import TextOnlyVoiceCapability, VoiceCapability
 
 __all__ = [
     "CameraCapability",
@@ -36,5 +36,6 @@ __all__ = [
     "SelfLedgerCapability",
     "SocialTimelineCapability",
     "ToMCapability",
+    "TextOnlyVoiceCapability",
     "VoiceCapability",
 ]

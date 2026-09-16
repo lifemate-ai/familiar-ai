@@ -215,3 +215,29 @@ def test_tool_adapter_caps_perception_after_two_sees() -> None:
     assert [t["name"] for t in _TurnToolAdapter(agent, defs, prep).tool_defs()] == ["say"]
     prep.perception_calls = 1
     assert _TurnToolAdapter(agent, defs, prep).tool_defs() is defs
+
+
+def test_body_part_aliases_resolve_to_real_tools() -> None:
+    neck = ToolCall("1", "neck", {"look": "down"})
+    assert sr.resolve_body_part_alias(neck) and (neck.name, neck.input) == (
+        "look",
+        {"direction": "down"},
+    )
+    eyes = ToolCall("2", "eyes", {})
+    assert sr.resolve_body_part_alias(eyes) and eyes.name == "see"
+    voice = ToolCall("3", "voice", {"words": "やあ"})
+    assert sr.resolve_body_part_alias(voice) and voice.input == {"text": "やあ"}
+    real = ToolCall("4", "see", {})
+    assert not sr.resolve_body_part_alias(real) and real.name == "see"
+
+
+@pytest.mark.asyncio
+async def test_text_only_voice_capability_delivers_say_without_tts() -> None:
+    from familiar_capabilities.voice import TextOnlyVoiceCapability
+
+    cap = TextOnlyVoiceCapability()
+    assert [s.name for s in cap.specs()] == ["say"]
+    ok = await cap.call("say", {"text": "おかえり。"})
+    assert ok.success and "text" in ok.text
+    empty = await cap.call("say", {"text": ""})
+    assert "Nothing was spoken" in empty.text
