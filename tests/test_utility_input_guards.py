@@ -86,17 +86,17 @@ async def test_ollama_complete_ignores_blank_prompt() -> None:
 # ── memory path, day-summary grounding, session cleanup ──────────────────────
 
 
-def test_memory_db_path_resolution(monkeypatch) -> None:
+def test_memory_db_path_resolution(monkeypatch, tmp_path) -> None:
     from pathlib import Path
 
     from familiar_agent.config import MemoryConfig, resolve_memory_db_path
 
-    assert resolve_memory_db_path("/tmp/x").endswith("/tmp/x/observations.db")
-    assert resolve_memory_db_path("/tmp/x/custom.db").endswith("/tmp/x/custom.db")
-    monkeypatch.setenv("MEMORY_DB_PATH", "/tmp/fa-test-dir")
-    assert MemoryConfig().db_path == "/tmp/fa-test-dir/observations.db"
+    assert Path(resolve_memory_db_path(str(tmp_path))) == tmp_path / "observations.db"
+    assert Path(resolve_memory_db_path(str(tmp_path / "custom.db"))) == tmp_path / "custom.db"
+    monkeypatch.setenv("MEMORY_DB_PATH", str(tmp_path))
+    assert Path(MemoryConfig().db_path) == tmp_path / "observations.db"
     monkeypatch.delenv("MEMORY_DB_PATH")
-    assert MemoryConfig().db_path == str(Path.home() / ".familiar_ai" / "observations.db")
+    assert Path(MemoryConfig().db_path) == Path.home() / ".familiar_ai" / "observations.db"
 
 
 @pytest.mark.asyncio
