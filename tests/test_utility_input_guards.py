@@ -129,3 +129,32 @@ async def test_ollama_stream_closes_generator_on_error_chunk() -> None:
     with pytest.raises(RuntimeError):
         await be.stream_turn("s", [], [], 10)
     assert closed["n"] == 1
+
+
+def test_memory_first_connect_is_thread_safe(tmp_path, monkeypatch) -> None:
+    """Concurrent first access must open one connection and run migrations once."""
+    import threading
+
+    monkeypatch.setenv("FAMILIAR_EMBEDDING_PREWARM", "0")
+    from familiar_agent.tools.memory import ObservationMemory
+
+    mem = ObservationMemory(db_path=str(tmp_path / "observations.db"))
+    seen: list[int] = []
+    errors: list[str] = []
+
+    def go() -> None:
+        try:
+            seen.append(id(mem._ensure_connected()))
+        except Exception as e:  # noqa: BLE001
+            errors.append(repr(e))
+
+    threads = [threading.Thread(target=go) for _ in range(8)]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join()
+    assert errors == []
+    assert len(set(seen)) == 1
+    tables = {r[0] for r in mem._ensure_connected().execute("select name from sqlite_master")}
+    assert "observations" in tables
+    mem.close()
