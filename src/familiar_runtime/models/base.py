@@ -25,6 +25,10 @@ class ModelTurnResult:
     tool_calls: list[ToolCall] = field(default_factory=list)
     input_tokens: int = 0
     output_tokens: int = 0
+    # Prompt-cache usage; only adapters that report it set these (others
+    # rely on the defaults so their results stay byte-stable).
+    cache_read_tokens: int = 0
+    cache_creation_tokens: int = 0
     raw: Any = None
 
 

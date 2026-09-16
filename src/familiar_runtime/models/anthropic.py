@@ -210,6 +210,10 @@ class AnthropicBackend:
         stop = "end_turn" if response.stop_reason == "end_turn" else "tool_use"
         in_tok = getattr(response.usage, "input_tokens", 0) if response.usage else 0
         out_tok = getattr(response.usage, "output_tokens", 0) if response.usage else 0
+        cache_read = getattr(response.usage, "cache_read_input_tokens", 0) if response.usage else 0
+        cache_create = (
+            getattr(response.usage, "cache_creation_input_tokens", 0) if response.usage else 0
+        )
         return (
             ModelTurnResult(
                 stop_reason=stop,
@@ -217,6 +221,8 @@ class AnthropicBackend:
                 tool_calls=tool_calls,
                 input_tokens=in_tok,
                 output_tokens=out_tok,
+                cache_read_tokens=int(cache_read or 0),
+                cache_creation_tokens=int(cache_create or 0),
             ),
             response.content,
         )

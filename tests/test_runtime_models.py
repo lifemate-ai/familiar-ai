@@ -344,3 +344,54 @@ def test_create_backend_dispatches_by_platform(monkeypatch: pytest.MonkeyPatch) 
     assert isinstance(create_backend(FakeConfig("glm")), GLMBackend)
     cli_backend = create_backend(FakeConfig("cli", model="echo {}"))
     assert isinstance(cli_backend, CLIBackend)
+
+
+@pytest.mark.asyncio
+async def test_anthropic_stream_turn_carries_cache_usage() -> None:
+    """Prompt-cache usage from ``response.usage`` rides ``ModelTurnResult``."""
+    pytest.importorskip("anthropic")
+    from types import SimpleNamespace
+
+    from familiar_runtime.models import AnthropicBackend, ModelTurnResult
+
+    class _Stream:
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *exc):
+            return None
+
+        @property
+        def text_stream(self):
+            async def _gen():
+                yield "hi"
+
+            return _gen()
+
+        async def get_final_message(self):
+            return SimpleNamespace(
+                content=[SimpleNamespace(type="text", text="hi")],
+                stop_reason="end_turn",
+                usage=SimpleNamespace(
+                    input_tokens=12,
+                    output_tokens=3,
+                    cache_read_input_tokens=1000,
+                    cache_creation_input_tokens=7,
+                ),
+            )
+
+    backend = AnthropicBackend(api_key="x", model="claude-sonnet-4-6")
+    backend.client = SimpleNamespace(messages=SimpleNamespace(stream=lambda **kwargs: _Stream()))
+    result, _raw = await backend.stream_turn(
+        system="sys",
+        messages=[{"role": "user", "content": "hi"}],
+        tools=[],
+        max_tokens=10,
+        on_text=None,
+    )
+    assert result.input_tokens == 12
+    assert result.output_tokens == 3
+    assert result.cache_read_tokens == 1000
+    assert result.cache_creation_tokens == 7
+    # Other adapters rely on the defaults.
+    assert ModelTurnResult(stop_reason="end_turn", text="").cache_read_tokens == 0

@@ -73,6 +73,113 @@ async def test_run_flushes_latency_when_enabled(tmp_path: Path):
     assert record["total_sec"] >= 0
 
 
+@pytest.mark.asyncio
+async def test_run_records_loop_buckets_when_enabled(tmp_path: Path, monkeypatch):
+    """Inside the react loop: one ``model_call`` per backend call, one
+    ``tool:<name>`` per tool execution, and a counted ``retry:<kind>`` per
+    re-ask — plus per-turn token sums in the flushed record."""
+    from familiar_runtime.models.base import ToolCall
+
+    monkeypatch.setenv("FAMILIAR_COHERENCE_CHECK", "1")
+    path = tmp_path / "latency.jsonl"
+    agent = _make_agent()
+    agent._latency = LatencyRecorder(enabled=True, path=path)
+    agent._check_response_coherence = AsyncMock(side_effect=["contradiction", None])
+
+    tc = ToolCall(id="tc1", name="remember", input={"content": "x"})
+    turn1 = _turn("tool_use", tool_calls=[tc])
+    turn1.cache_read_tokens = 40
+    turn1.cache_creation_tokens = 5
+    agent.backend.stream_turn = AsyncMock(
+        side_effect=[
+            (turn1, None),
+            (_turn("end_turn", text="draft"), "draft"),
+            (_turn("end_turn", text="fixed"), "fixed"),
+        ]
+    )
+
+    ps = _patch_heavy()
+    for p in ps:
+        p.start()
+    try:
+        result = await agent.run("hello")
+    finally:
+        for p in ps:
+            p.stop()
+
+    assert result == "fixed"
+    record = json.loads(path.read_text().splitlines()[0])
+    counts = record["counts"]
+    assert counts["model_call"] == 3
+    assert counts["tool:remember"] == 1
+    assert counts["retry:coherence"] == 1
+    assert record["buckets_sec"]["model_call"] >= 0
+    assert record["buckets_sec"]["tool:remember"] >= 0
+    assert record["model_calls"] == 3
+    assert record["input_tokens"] == 300
+    assert record["output_tokens"] == 150
+    assert record["cache_read_tokens"] == 40
+    assert record["cache_creation_tokens"] == 5
+
+
+@pytest.mark.asyncio
+async def test_run_disabled_recorder_passes_backend_through(tmp_path: Path):
+    """With the recorder off, the loop sees the raw backend (no proxy) and
+    nothing is written."""
+    from unittest.mock import patch
+
+    from familiar_agent import agent as agent_mod
+
+    path = tmp_path / "latency.jsonl"
+    agent = _make_agent()
+    agent._latency = LatencyRecorder(enabled=False, path=path)
+    agent.backend.stream_turn = AsyncMock(return_value=(_turn("end_turn", text="ok"), "ok"))
+
+    seen: list[object] = []
+    real_loop = agent_mod.ReActLoop
+
+    def _spy(*args, **kwargs):
+        seen.append(kwargs["backend"])
+        return real_loop(*args, **kwargs)
+
+    ps = _patch_heavy()
+    for p in ps:
+        p.start()
+    try:
+        with patch.object(agent_mod, "ReActLoop", _spy):
+            await agent.run("hello")
+    finally:
+        for p in ps:
+            p.stop()
+
+    assert seen == [agent.backend]
+    assert not path.exists()
+
+
+@pytest.mark.asyncio
+async def test_retry_kinds_are_counted(tmp_path: Path):
+    """Each RetryDecision site records its own zero-duration bucket."""
+    from familiar_agent.latency import record_retry
+
+    recorder = LatencyRecorder(enabled=True, path=tmp_path / "latency.jsonl")
+
+    class _Agent:
+        _latency = recorder
+
+    for kind in ("identity", "reality", "voice", "coherence"):
+        record_retry(_Agent(), kind)
+    record_retry(object(), "identity")  # no recorder attribute: silently ignored
+
+    recorder.flush_turn(turn=1)
+    record = json.loads((tmp_path / "latency.jsonl").read_text().splitlines()[0])
+    assert record["counts"] == {
+        "retry:identity": 1,
+        "retry:reality": 1,
+        "retry:voice": 1,
+        "retry:coherence": 1,
+    }
+
+
 # ---------------------------------------------------------------------------
 # Anti-templating metric
 # ---------------------------------------------------------------------------
@@ -143,3 +250,32 @@ def test_full_selfhood_report(tmp_path: Path, monkeypatch):
     markdown = report.to_markdown()
     assert "boundary_respect" in markdown
     assert "continuity_across_restart" in markdown
+
+
+def test_total_sec_counts_top_level_buckets_only(tmp_path: Path):
+    """``model_call`` / ``tool:*`` live inside ``react_loop`` — nested spans
+    must not inflate ``total_sec`` (it is the sum of the three top-level
+    buckets, per-bucket fields kept as-is)."""
+    path = tmp_path / "latency.jsonl"
+    recorder = LatencyRecorder(enabled=True, path=path)
+    recorder.record("prepare", 1.0)
+    recorder.record("react_loop", 10.0)
+    recorder.record("model_call", 4.0)
+    recorder.record("tool:say", 5.0)
+    recorder.record("retry:coherence", 0.0)
+    recorder.record("finalize", 0.5)
+    recorder.flush_turn(turn=1)
+
+    record = json.loads(path.read_text().splitlines()[0])
+    assert record["total_sec"] == pytest.approx(11.5)
+    assert record["buckets_sec"]["model_call"] == pytest.approx(4.0)
+    assert record["buckets_sec"]["tool:say"] == pytest.approx(5.0)
+
+
+def test_total_sec_falls_back_to_all_buckets_without_top_level(tmp_path: Path):
+    path = tmp_path / "latency.jsonl"
+    recorder = LatencyRecorder(enabled=True, path=path)
+    recorder.record("model_call", 2.0)
+    recorder.flush_turn(turn=1)
+    record = json.loads(path.read_text().splitlines()[0])
+    assert record["total_sec"] == pytest.approx(2.0)

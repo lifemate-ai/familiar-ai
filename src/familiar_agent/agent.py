@@ -82,7 +82,7 @@ from .tools.commitments import (
     format_commitments_for_context,
 )
 from .tools.delegation import DelegatedTaskRunner, DelegationTool
-from .latency import LatencyRecorder
+from .latency import LatencyRecorder, instrument_backend
 from .routine_store import RoutineStore
 from .tools.identity import IdentityTool
 from .tools.routines_tool import RoutineTool
@@ -537,7 +537,9 @@ class _TurnToolAdapter:
 
     async def call(self, name: str, tool_input: dict) -> ToolExecutionResult:
         logger.info("Tool call: %s(%s)", name, tool_input)
-        text, image = await self._agent._execute_tool(name, tool_input)
+        latency = getattr(self._agent, "_latency", None) or LatencyRecorder(enabled=False)
+        with latency.span(f"tool:{name}"):
+            text, image = await self._agent._execute_tool(name, tool_input)
         logger.info("Tool result: %s", text[:100])
         return ToolExecutionResult(text=text, image_b64=image)
 
@@ -3447,10 +3449,24 @@ class EmbodiedAgent:
         except Exception as exc:  # noqa: BLE001
             logger.warning("Could not write today's daybook record: %s", exc)
 
+    async def _drain_tts(self, timeout: float = 3.0) -> None:
+        """Wait (bounded) for the TTS playback queue, then stop its worker."""
+        tts = getattr(self, "_tts", None)
+        close = getattr(tts, "close", None)
+        if close is None:
+            return
+        try:
+            await asyncio.wait_for(close(timeout=timeout), timeout=timeout + 0.5)
+        except (asyncio.TimeoutError, Exception):  # noqa: BLE001
+            pass
+
     async def close(self) -> None:
         """Clean up resources. Bounded by timeouts to avoid hanging on exit."""
         if self._camera:
             self._camera.close()
+
+        # Let queued speech finish first (bounded) so a goodbye is not cut off.
+        await self._drain_tts()
 
         await self._drain_background_tasks()
 
@@ -3580,7 +3596,7 @@ class EmbodiedAgent:
                 _TOOL_TIMEOUTS
             )
             loop = ReActLoop(
-                backend=cast("RuntimeModelBackend", self.backend),
+                backend=cast("RuntimeModelBackend", instrument_backend(self.backend, latency)),
                 tools=cast(ToolRegistry, _TurnToolAdapter(self, prep.turn_tools)),
                 max_iterations=prep.turn_max_iterations,
                 default_tool_timeout=self._tool_timeout_seconds(""),
