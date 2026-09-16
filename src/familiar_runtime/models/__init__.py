@@ -14,6 +14,7 @@ from .cli import CLIBackend
 from .gemini import GeminiBackend
 from .glm import GLMBackend
 from .kimi import KimiBackend
+from .ollama import OllamaBackend
 from .openai_compat import OpenAICompatibleBackend
 
 __all__ = [
@@ -24,6 +25,7 @@ __all__ = [
     # providers
     "AnthropicBackend",
     "OpenAICompatibleBackend",
+    "OllamaBackend",
     "KimiBackend",
     "GLMBackend",
     "GeminiBackend",

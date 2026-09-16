@@ -335,6 +335,26 @@ disabled layer must leave prompts and decisions byte-stable.
   because the deterministic layers carry it. `<think>` blocks from local
   models are scrubbed in `familiar_runtime/models/openai_compat.py`.
 
+### Local models: Ollama, prompt profiles, social reflex
+
+- `PLATFORM=ollama` uses `familiar_runtime/models/ollama.py` (native `/api/chat`), not `/v1`:
+  `/v1` cannot set `num_ctx` (4096 default → HTTP 500 "EOF" on the full prompt), qwen3.x
+  always thinks there unless `reasoning_effort=none` is sent, and prompt-mode `<tool_call>`
+  JSON collides with Ollama's built-in qwen tool parser. Default model `gemma4:12b-it-qat`;
+  `THINKING_MODE=auto` means *no* thinking for local models. `UTILITY_PLATFORM=ollama` etc.
+  need no API key.
+- `PROMPT_PROFILE=auto` (default) → `compact` for ollama/cli/local URLs, `full` otherwise
+  (`prompt_profiles.resolve_profile`). The compact template is
+  `familiar_neighbor/prompts/embodied_compact.md`.
+- `SOCIAL_REFLEX` (auto-on with compact) = `social_reflex.SocialReflexHook`, registered after
+  `EmbodiedAgentHook`: language-drift and empty-`say()` re-asks (`RetryDecision`), prose
+  normalisation (replaced `ModelTurnResult`), stop nudge once spoken. Tool withholding lives
+  in `EmbodiedAgent._tool_defs_for_turn` (lexical `classify_turn` + social-policy act) and
+  the two-`see()` cap in `_TurnToolAdapter.tool_defs()`. These are code guards because 9B
+  models do not follow abstract prompt constraints.
+- Measure prompt/reflex changes with `uv run python benchmarks/social_eval.py --profile
+  compact --reflex on` (deterministic checks; any `PLATFORM`).
+
 ## Persistence
 
 Primary stores under `~/.familiar_ai/`:

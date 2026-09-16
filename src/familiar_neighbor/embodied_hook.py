@@ -231,6 +231,7 @@ class PreparedTurn:
     voice_retried: bool = False
     reality_retried: bool = False
     see_succeeded: bool = False
+    perception_calls: int = 0
     observation_action_name: str | None = None
     observation_action_input: dict | None = None
     pending_view_action_name: str | None = None
@@ -722,7 +723,11 @@ class EmbodiedAgentHook(RuntimeHookBase):
             on_phase("thinking")
 
         # ── Loop dispatch config ──
-        turn_tools = agent._tool_defs_for_turn(brief_reply_mode=brief_reply_turn)
+        turn_tools = agent._tool_defs_for_turn(
+            brief_reply_mode=brief_reply_turn,
+            user_input=user_input,
+            social_policy=social_policy,
+        )
         turn_max_tokens = (
             min(agent.config.max_tokens, _BRIEF_REPLY_MAX_TOKENS)
             if brief_reply_turn
@@ -1028,6 +1033,8 @@ class EmbodiedAgentHook(RuntimeHookBase):
         elif call.name in {"look", "walk"}:
             prep.pending_view_action_name = call.name
             prep.pending_view_action_input = dict(call.input)
+        if call.name == "see":
+            prep.perception_calls += 1
         if call.name == "say":
             prep.say_used = True
             prep.non_say_streak = 0

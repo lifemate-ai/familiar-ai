@@ -60,6 +60,8 @@ from .attention_schema import AttentionSchema
 from .default_mode import DefaultModeProcessor
 from .meta_monitor import MetaGateDecision, MetaMonitor
 from .prediction import PredictionEngine
+from . import social_reflex
+from .prompt_profiles import reflex_enabled, resolve_profile
 from .social_policy import SocialPolicyDecision, SocialPolicyEngine
 from .workspace import GlobalWorkspace
 from .memory_worker import MemoryJobWorker
@@ -348,21 +350,41 @@ def _companion_mood_heuristic(text: str) -> str:
 
 
 # Day summary prompt — condense a day's observations into a diary-like entry
+_DAY_SUMMARY_MIN_OBSERVATIONS = 5
+
+_NARRATIVE_REJECT_RE = re.compile(
+    r"(要約|教えて|ください|いただけ|お知らせ|provide|please share|summary of)", re.IGNORECASE
+)
+
+
+def _looks_like_self_narrative(text: str) -> bool:
+    """Reject utility replies that are not a narrative sentence (requests for
+    input, markdown, over-long text)."""
+    if not text:
+        return False
+    if len(text) > 120 or text.startswith(("**", "#", "-", "・")):
+        return False
+    if text.rstrip().endswith(("?", "？", "ば", "…")):
+        return False
+    return _NARRATIVE_REJECT_RE.search(text) is None
+
+
 _DAY_SUMMARY_PROMPT = """\
 You are writing a diary entry about this day from your own first-person memory.
-Recall the flow of the day: what happened in the morning, then afternoon, then evening.
+Recall the flow of the day in the order the records below happened.
 Capture how your feelings changed as events unfolded — what made you happy, 
 what frustrated you, what surprised you, what lingered in your mind.
 
 Rules:
+- Use ONLY the records below. Never invent events, people, places or feelings
+  that are not recorded. If the record is thin, write fewer sentences.
 - Write in first person, as someone remembering their own lived day
-- Follow the chronological arc: morning → afternoon → evening
 - Include specific details: what you saw, who you talked to, what was said
 - Show emotional shifts: how one event changed how you felt about the next
 - Do NOT list events — weave them into a flowing narrative
 - Do NOT include titles, headers, or markdown formatting
 - Start directly with the first sentence of the entry
-- 5-8 sentences. Write in {lang}.
+- 2-8 sentences, proportional to how much actually happened. Write in {lang}.
 
 {observations}
 
@@ -528,11 +550,23 @@ class _TurnToolAdapter:
     applied by the loop itself, mirroring the historical inline handling.
     """
 
-    def __init__(self, agent: "EmbodiedAgent", tool_defs: list[dict]) -> None:
+    def __init__(self, agent: "EmbodiedAgent", tool_defs: list[dict], prep: Any = None) -> None:
         self._agent = agent
         self._defs = tool_defs
+        self._prep = prep
 
     def tool_defs(self) -> list[dict]:
+        # Social reflex: after two see() calls without speaking, only speaking
+        # (or remembering) is left for this turn — small models otherwise loop on
+        # look/see until the iteration budget is gone.
+        prep = self._prep
+        if (
+            getattr(self._agent, "_social_reflex", False)
+            and prep is not None
+            and not getattr(prep, "say_used", False)
+            and getattr(prep, "perception_calls", 0) >= social_reflex.MAX_SEE_BEFORE_SAY
+        ):
+            return [t for t in self._defs if t.get("name") not in social_reflex.PERCEPTION_TOOLS]
         return self._defs
 
     async def call(self, name: str, tool_input: dict) -> ToolExecutionResult:
@@ -638,7 +672,9 @@ class EmbodiedAgent:
         self._tts: TTSTool | None = None
         self._stt: STTTool | None = None
         self._me_md: str = self._load_me_md()  # loaded once; restart to pick up changes
-        self._memory = ObservationMemory()
+        _memory_cfg = getattr(config, "memory", None)
+        _db_path = getattr(_memory_cfg, "db_path", None)
+        self._memory = ObservationMemory(db_path=_db_path) if _db_path else ObservationMemory()
         self._memory_worker = MemoryJobWorker(self._memory)
         self._memory_tool = MemoryTool(self._memory)
         self._person_model = PersonModelTracker()
@@ -757,6 +793,16 @@ class EmbodiedAgent:
 
         # Per-turn cognition pipeline (PR3 of the runtime reorg).
         self._hook = EmbodiedAgentHook(self)
+        # Prompt profile + social reflex guards (small local models).
+        self._prompt_profile: str = resolve_profile(
+            config.platform,
+            getattr(config, "base_url", ""),
+            getattr(config, "prompt_profile", "auto"),
+        )
+        self._social_reflex: bool = reflex_enabled(
+            getattr(config, "social_reflex", "auto"), self._prompt_profile
+        )
+        self._reflex_hook = social_reflex.SocialReflexHook(self) if self._social_reflex else None
 
         self._init_tools()
 
@@ -1310,11 +1356,24 @@ class EmbodiedAgent:
             "silence_or_low_presence",
         }
 
-    def _tool_defs_for_turn(self, *, brief_reply_mode: bool) -> list[dict]:
+    def _tool_defs_for_turn(
+        self,
+        *,
+        brief_reply_mode: bool,
+        user_input: str = "",
+        social_policy: SocialPolicyDecision | None = None,
+    ) -> list[dict]:
         tool_defs = self._all_tool_defs
-        if not brief_reply_mode:
-            return tool_defs
-        return [tool for tool in tool_defs if tool.get("name") in _BRIEF_REPLY_TOOL_NAMES]
+        if brief_reply_mode:
+            return [tool for tool in tool_defs if tool.get("name") in _BRIEF_REPLY_TOOL_NAMES]
+        # Social reflex: feelings are never answered with the camera. Small models
+        # otherwise look/see reflexively on "疲れた…"; withholding the tools is the
+        # only guard they reliably follow.
+        if getattr(self, "_social_reflex", False) and social_reflex.is_social_turn(
+            user_input, getattr(social_policy, "primary_act", None)
+        ):
+            return [t for t in tool_defs if t.get("name") not in social_reflex.PERCEPTION_TOOLS]
+        return tool_defs
 
     @staticmethod
     def _brief_reply_prompt() -> str:
@@ -1587,7 +1646,12 @@ class EmbodiedAgent:
         """
         base = assemble_neighbor_system_prompt(
             max_steps=MAX_ITERATIONS,
-            profile=getattr(self.config, "prompt_profile", "full"),
+            profile=getattr(self, "_prompt_profile", None)
+            or resolve_profile(
+                getattr(self.config, "platform", ""),
+                getattr(self.config, "base_url", ""),
+                getattr(self.config, "prompt_profile", "auto"),
+            ),
         )
         # Dynamically replace (body ...) block based on actual hardware
         body_desc = self._get_body_description()
@@ -2571,6 +2635,8 @@ class EmbodiedAgent:
 
     async def _infer_emotion(self, text: str) -> str:
         """Ask the LLM to label the emotion of a response. Returns label string."""
+        if not text or not text.strip():
+            return "neutral"
         label = await self._utility_backend.complete(
             _EMOTION_PROMPT.format(text=text[:400]), max_tokens=10
         )
@@ -3003,8 +3069,12 @@ class EmbodiedAgent:
         """Generate and save a day summary for the given date."""
         try:
             observations = await asyncio.to_thread(self._memory.get_observations_for_date, date, 50)
-            if not observations:
-                logger.info("No observations for %s, skipping day summary", date)
+            if len(observations) < _DAY_SUMMARY_MIN_OBSERVATIONS:
+                # A handful of records is not a day; asked for a full arc anyway,
+                # small models fill the gaps with invented events.
+                logger.info(
+                    "Only %d observation(s) for %s, skipping day summary", len(observations), date
+                )
                 return
 
             # Build a concise transcript for the LLM — keep it short
@@ -3252,6 +3322,8 @@ class EmbodiedAgent:
 
     async def extract_curiosity(self, exploration_result: str) -> str | None:
         """Ask the LLM what was most curious/interesting in the exploration."""
+        if not exploration_result or not exploration_result.strip():
+            return None
         try:
             none_word = _t("curiosity_none")
             text = await self._utility_backend.complete(
@@ -3399,6 +3471,13 @@ class EmbodiedAgent:
                 recent = await self._memory.recall_async("", n=5)
                 summary_hint = " / ".join(m.get("content", "")[:60] for m in recent[:3])
 
+            if not summary_hint.strip():
+                # Nothing to narrate from (fresh DB / no memories this session). An
+                # empty hint makes small models ask for the summary back, and that
+                # request used to be saved as the day's self-narrative.
+                logger.info("No memories for today — skipping self narrative")
+                return None
+
             mood, _ = self._decayed_mood()
             prompt = (
                 f"今日起きたこと（要約）:\n{summary_hint}\n\n"
@@ -3410,10 +3489,13 @@ class EmbodiedAgent:
                 self._utility_backend.complete(prompt, max_tokens=120),
                 timeout=15.0,
             )
-            if text and text.strip():
-                self._self_narrative.write(text.strip(), mood=mood)
-                logger.info("Self-narrative written: %s", text.strip()[:60])
-                return text.strip()
+            text = (text or "").strip()
+            if not _looks_like_self_narrative(text):
+                logger.info("Self-narrative rejected (not a narrative): %s", text[:60])
+                return None
+            self._self_narrative.write(text, mood=mood)
+            logger.info("Self-narrative written: %s", text[:60])
+            return text
         except Exception as e:
             logger.warning("Could not write today's self narrative: %s", e)
         return None
@@ -3464,6 +3546,12 @@ class EmbodiedAgent:
         """Clean up resources. Bounded by timeouts to avoid hanging on exit."""
         if self._camera:
             self._camera.close()
+            aclose = getattr(self._camera, "aclose", None)
+            if aclose is not None:
+                try:
+                    await asyncio.wait_for(aclose(), timeout=2.0)
+                except (asyncio.TimeoutError, Exception):  # noqa: BLE001
+                    pass
 
         # Let queued speech finish first (bounded) so a goodbye is not cut off.
         await self._drain_tts()
@@ -3597,13 +3685,13 @@ class EmbodiedAgent:
             )
             loop = ReActLoop(
                 backend=cast("RuntimeModelBackend", instrument_backend(self.backend, latency)),
-                tools=cast(ToolRegistry, _TurnToolAdapter(self, prep.turn_tools)),
+                tools=cast(ToolRegistry, _TurnToolAdapter(self, prep.turn_tools, prep)),
                 max_iterations=prep.turn_max_iterations,
                 default_tool_timeout=self._tool_timeout_seconds(""),
                 tool_timeouts={
                     name: self._tool_timeout_seconds(name) for name in turn_tool_names if name
                 },
-                hooks=[self._hook],
+                hooks=[h for h in (self._hook, getattr(self, "_reflex_hook", None)) if h],
             )
             with latency.span("react_loop"):
                 run_result = await loop.run(

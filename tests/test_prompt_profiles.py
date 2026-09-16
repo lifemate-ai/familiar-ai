@@ -87,7 +87,7 @@ def test_config_default_and_env(monkeypatch):
     from familiar_agent.config import AgentConfig
 
     monkeypatch.delenv("PROMPT_PROFILE", raising=False)
-    assert AgentConfig().prompt_profile == "full"
+    assert AgentConfig().prompt_profile == "auto"  # resolved per platform, see prompt_profiles
     monkeypatch.setenv("PROMPT_PROFILE", "Compact")
     assert AgentConfig().prompt_profile == "compact"
 

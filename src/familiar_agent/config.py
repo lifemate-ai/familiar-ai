@@ -114,12 +114,22 @@ class TTSConfig:
     output: str = field(default_factory=lambda: os.environ.get("TTS_OUTPUT", "local"))
 
 
+def resolve_memory_db_path(raw: str) -> str:
+    """Normalise MEMORY_DB_PATH: a directory (or a path without .db) means
+    ``<dir>/observations.db``; an explicit file path is used as-is."""
+    path = Path(raw).expanduser()
+    if path.suffix != ".db":
+        path = path / "observations.db"
+    return str(path)
+
+
 @dataclass
 class MemoryConfig:
+    # SQLite file for observations/feelings/conversations. Accepts a directory
+    # or a file path; defaults to ~/.familiar_ai/observations.db.
     db_path: str = field(
-        default_factory=lambda: os.environ.get(
-            "MEMORY_DB_PATH",
-            str(Path.home() / ".claude" / "memories"),
+        default_factory=lambda: resolve_memory_db_path(
+            os.environ.get("MEMORY_DB_PATH", str(Path.home() / ".familiar_ai"))
         )
     )
 
@@ -169,13 +179,26 @@ class AgentConfig:
     )
     tools_mode: str = field(default_factory=lambda: os.environ.get("TOOLS_MODE", "prompt"))
 
-    # System prompt profile: "full" | "compact".
+    # Ollama native backend only: context window requested at load time.
+    ollama_num_ctx: int = field(
+        default_factory=lambda: int(os.environ.get("OLLAMA_NUM_CTX", "16384"))
+    )
+
+    # System prompt profile: "auto" | "full" | "compact".
+    # "auto" resolves to "compact" for local platforms (ollama, cli, local
+    # OpenAI-compatible URLs) and "full" otherwise — see prompt_profiles.resolve_profile.
     # "compact" is a trimmed framework prompt for small local models (Ollama
     # gemma-class): only critical operational constraints, voice rule last.
     # The long-form social/cognitive guidance it drops is carried by the
     # deterministic mind layers (auto-ToM, social policy, meta-gate, identity).
     prompt_profile: str = field(
-        default_factory=lambda: os.environ.get("PROMPT_PROFILE", "full").strip().lower() or "full"
+        default_factory=lambda: os.environ.get("PROMPT_PROFILE", "auto").strip().lower() or "auto"
+    )
+
+    # Social reflex guards for small models: "auto" (on when the resolved
+    # profile is compact) | "on" | "off". See familiar_agent.social_reflex.
+    social_reflex: str = field(
+        default_factory=lambda: os.environ.get("SOCIAL_REFLEX", "auto").strip().lower() or "auto"
     )
 
     # Thinking mode: "auto" | "adaptive" | "extended" | "disabled"

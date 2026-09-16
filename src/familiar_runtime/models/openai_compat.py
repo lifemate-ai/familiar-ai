@@ -56,13 +56,26 @@ def _strip_think_blocks(text: str) -> str:
 class OpenAICompatibleBackend:
     """Backend for any OpenAI-compatible endpoint: Ollama, vllm, lm-studio, etc."""
 
-    def __init__(self, api_key: str, model: str, base_url: str, tools_mode: str = "prompt") -> None:
+    def __init__(
+        self,
+        api_key: str,
+        model: str,
+        base_url: str,
+        tools_mode: str = "prompt",
+        reasoning_effort: str | None = None,
+    ) -> None:
         from openai import AsyncOpenAI
 
         self.client = AsyncOpenAI(api_key=api_key or "local", base_url=base_url)
         self.model = model
         self.tools_mode = tools_mode  # "native" | "prompt"
         self._use_completion_tokens = "api.openai.com" in base_url
+        # Reasoning models on local servers (qwen3.x via Ollama) otherwise spend the
+        # whole max_tokens budget thinking and return empty content; "none" disables it.
+        self.reasoning_effort = reasoning_effort
+
+    def _extra_kwargs(self) -> dict[str, Any]:
+        return {"reasoning_effort": self.reasoning_effort} if self.reasoning_effort else {}
 
     # ── message factories ─────────────────────────────────────────
 
@@ -194,6 +207,7 @@ class OpenAICompatibleBackend:
         tokens_key = "max_completion_tokens" if self._use_completion_tokens else "max_tokens"
         stream = await self.client.chat.completions.create(  # type: ignore[call-overload]
             model=self.model,
+            **self._extra_kwargs(),
             **{tokens_key: max_tokens},
             messages=flat,
             stream=True,
@@ -249,6 +263,7 @@ class OpenAICompatibleBackend:
         tokens_key = "max_completion_tokens" if self._use_completion_tokens else "max_tokens"
         kwargs: dict[str, Any] = {
             "model": self.model,
+            **self._extra_kwargs(),
             tokens_key: max_tokens,
             "messages": flat,
             "stream": True,
@@ -355,6 +370,7 @@ class OpenAICompatibleBackend:
         try:
             resp = await self.client.chat.completions.create(  # type: ignore[call-overload]
                 model=self.model,
+                **self._extra_kwargs(),
                 **{tokens_key: max_tokens},
                 messages=[{"role": "user", "content": prompt}],
             )

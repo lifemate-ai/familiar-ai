@@ -35,10 +35,10 @@ sys.path.insert(0, str(ROOT / "src"))
 from benchmarks.scenarios import TOOL_LOOK, TOOL_REMEMBER, TOOL_SAY, TOOL_SEE  # noqa: E402
 from benchmarks.social_scenarios import SCENARIOS, SocialScenario  # noqa: E402
 from familiar_agent import social_reflex as sr  # noqa: E402
-from familiar_agent.agent import MAX_ITERATIONS, SYSTEM_PROMPT, _interoception  # noqa: E402
+from familiar_agent.agent import MAX_ITERATIONS, _interoception  # noqa: E402
 from familiar_agent.backend import create_backend  # noqa: E402
 from familiar_agent.config import AgentConfig  # noqa: E402
-from familiar_agent.prompt_profiles import compact_prompt  # noqa: E402
+from familiar_neighbor.prompts import assemble_neighbor_system_prompt  # noqa: E402
 
 TOOLS = [TOOL_SAY, TOOL_SEE, TOOL_LOOK, TOOL_REMEMBER]
 MAX_STEPS = 4
@@ -49,9 +49,6 @@ _BODY_BLOCK = (
     '  (part :id eyes :tool see :desc "Your vision. Calling see() means YOU ARE LOOKING.")\n'
     '  (part :id neck :tool look :desc "Rotate gaze left/right/up/down.")\n'
     '  (part :id legs :status absent :desc "You have no legs."))'
-)
-_BODY_COMPACT = (
-    "- 目・首：see() で見る、look() で向きを変える。\n- 足：なし。\n- 声：say() だけが相手に届く。"
 )
 
 
@@ -95,15 +92,12 @@ class Report:
 
 
 def build_system(profile: str, persona: str) -> str:
-    if profile == "compact":
-        body = compact_prompt(_BODY_COMPACT)
-    else:
-        body = re.sub(
-            r"\(body.*?\)\)",
-            _BODY_BLOCK,
-            SYSTEM_PROMPT.format(max_steps=MAX_ITERATIONS),
-            flags=re.DOTALL,
-        )
+    body = re.sub(
+        r"\(body.*?\)\)",
+        _BODY_BLOCK,
+        assemble_neighbor_system_prompt(max_steps=MAX_ITERATIONS, profile=profile),
+        flags=re.DOTALL,
+    )
     intero = _interoception(time.time() - 600, 3, "engaged")
     return "\n\n---\n\n".join(p for p in (persona, body, intero) if p)
 

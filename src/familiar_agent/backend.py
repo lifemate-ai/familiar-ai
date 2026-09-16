@@ -25,9 +25,11 @@ from familiar_runtime.models import (
     GLMBackend,
     KimiBackend,
     ModelTurnResult,
+    OllamaBackend,
     OpenAICompatibleBackend,
     ToolCall,
 )
+from familiar_runtime.models.ollama import think_flag
 
 if TYPE_CHECKING:
     from .config import AgentConfig
@@ -45,6 +47,7 @@ __all__ = [
     # provider adapters
     "AnthropicBackend",
     "OpenAICompatibleBackend",
+    "OllamaBackend",
     "KimiBackend",
     "GLMBackend",
     "GeminiBackend",
@@ -64,11 +67,23 @@ __all__ = [
 ]
 
 
+def _ollama_backend(model: str, base_url: str, thinking_mode: str, num_ctx: int) -> OllamaBackend:
+    return OllamaBackend(
+        model=model, base_url=base_url, think=think_flag(thinking_mode), num_ctx=num_ctx
+    )
+
+
+def _local_reasoning_effort(config: AgentConfig) -> str | None:
+    """OpenAI-compatible local servers: disable reasoning unless explicitly enabled."""
+    return None if config.thinking_mode in ("adaptive", "extended") else "none"
+
+
 def create_backend(
     config: AgentConfig,
 ) -> (
     AnthropicBackend
     | OpenAICompatibleBackend
+    | OllamaBackend
     | KimiBackend
     | GLMBackend
     | GeminiBackend
@@ -80,6 +95,7 @@ def create_backend(
       anthropic  — Anthropic Claude (default)
       gemini     — Google Gemini via native google-genai SDK
       openai     — OpenAI API (or compatible via BASE_URL)
+      ollama     — Ollama native /api/chat (BASE_URL=http://localhost:11434, MODEL=gemma4:12b-it-qat)
       kimi       — Moonshot AI Kimi K2.5 (api.moonshot.ai/v1)
       glm        — Z.AI GLM API (api.z.ai/api/paas/v4); set ZAI_API_KEY
       cli        — any CLI LLM tool via stdin/stdout (MODEL = the command)
@@ -89,6 +105,12 @@ def create_backend(
         model = config.model or "gemini-2.5-flash"
         logger.info("Using Gemini backend: %s", model)
         return GeminiBackend(api_key=config.api_key, model=model)
+    if config.platform == "ollama":
+        model = config.model or "gemma4:12b-it-qat"
+        logger.info("Using Ollama backend: %s @ %s", model, config.base_url)
+        return _ollama_backend(
+            model, config.base_url, config.thinking_mode, getattr(config, "ollama_num_ctx", 16384)
+        )
     if config.platform == "openai":
         model = config.model or "gpt-4o-mini"
         base_url = config.base_url
@@ -111,6 +133,7 @@ def create_backend(
             model=model,
             base_url=base_url,
             tools_mode=tools_mode,
+            reasoning_effort=None if is_real_openai else _local_reasoning_effort(config),
         )
     if config.platform == "kimi":
         model = config.model or "kimi-k2.5"
@@ -138,12 +161,26 @@ def create_backend(
 
 def create_utility_backend(
     config: AgentConfig,
-) -> AnthropicBackend | OpenAICompatibleBackend | KimiBackend | GLMBackend | GeminiBackend | None:
+) -> (
+    AnthropicBackend
+    | OpenAICompatibleBackend
+    | OllamaBackend
+    | KimiBackend
+    | GLMBackend
+    | GeminiBackend
+    | None
+):
     """Create a separate backend for utility LLM calls (summaries, emotion, etc.).
 
     Returns None if UTILITY_PLATFORM is not configured — caller should
     fall back to the main conversation backend.
     """
+    if config.utility_platform == "ollama":
+        model = config.utility_model or config.model or "gemma4:12b-it-qat"
+        logger.info("Using Ollama utility backend: %s", model)
+        return _ollama_backend(
+            model, config.base_url, "disabled", getattr(config, "ollama_num_ctx", 16384)
+        )
     if not config.utility_platform or not config.utility_api_key:
         return None
 
@@ -179,7 +216,15 @@ def create_utility_backend(
 
 def create_inner_backend(
     config: AgentConfig,
-) -> AnthropicBackend | OpenAICompatibleBackend | KimiBackend | GLMBackend | GeminiBackend | None:
+) -> (
+    AnthropicBackend
+    | OpenAICompatibleBackend
+    | OllamaBackend
+    | KimiBackend
+    | GLMBackend
+    | GeminiBackend
+    | None
+):
     """Create a separate backend for inner-loop micro-thoughts.
 
     One short completion per crystallized idle thought — the natural fit is a
@@ -191,6 +236,15 @@ def create_inner_backend(
     """
     if not config.inner_platform:
         return None
+    if config.inner_platform == "ollama":
+        model = config.inner_model or config.model or "gemma4:12b-it-qat"
+        logger.info("Using Ollama inner backend: %s", model)
+        return _ollama_backend(
+            model,
+            config.inner_base_url or config.base_url,
+            "disabled",
+            getattr(config, "ollama_num_ctx", 16384),
+        )
 
     platform = config.inner_platform
     api_key = config.inner_api_key
@@ -234,12 +288,26 @@ def create_inner_backend(
 
 def create_scene_backend(
     config: AgentConfig,
-) -> AnthropicBackend | OpenAICompatibleBackend | KimiBackend | GLMBackend | GeminiBackend | None:
+) -> (
+    AnthropicBackend
+    | OpenAICompatibleBackend
+    | OllamaBackend
+    | KimiBackend
+    | GLMBackend
+    | GeminiBackend
+    | None
+):
     """Create a separate backend for scene entity extraction (cheap/local model).
 
     Returns None if SCENE_PLATFORM is not configured — caller should fall back
     to the utility backend or main backend.
     """
+    if config.scene_platform == "ollama":
+        model = config.scene_model or config.model or "gemma4:12b-it-qat"
+        logger.info("Using Ollama scene backend: %s", model)
+        return _ollama_backend(
+            model, config.base_url, "disabled", getattr(config, "ollama_num_ctx", 16384)
+        )
     if not config.scene_platform or not config.scene_api_key:
         return None
 
