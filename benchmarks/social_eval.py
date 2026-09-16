@@ -126,6 +126,7 @@ async def run_scenario(backend, system: str, sc: SocialScenario, reflex: bool) -
     messages = [backend.make_user_message(sc.user)]
     steps: list[Step] = []
     spoken_parts: list[str] = []
+    language_retried = False
     t0 = time.time()
     error = ""
     try:
@@ -141,6 +142,26 @@ async def run_scenario(backend, system: str, sc: SocialScenario, reflex: bool) -
             messages.append(backend.make_assistant_message(result, raw))
             if result.stop_reason != "tool_use":
                 break
+            if (
+                reflex
+                and not language_retried
+                and any(
+                    tc.name == "say"
+                    and sr.language_mismatch(sc.user, str(tc.input.get("text", "")))
+                    for tc in result.tool_calls
+                )
+            ):
+                language_retried = True
+                nudge = (
+                    "Not spoken: wrong language. Reply in the same language the person used, "
+                    "then call say() again."
+                )
+                messages.extend(
+                    backend.make_tool_results(
+                        result.tool_calls, [(nudge, None)] * len(result.tool_calls)
+                    )
+                )
+                continue
             outs = []
             for tc in result.tool_calls:
                 if tc.name == "say":
@@ -178,6 +199,7 @@ def evaluate(
         checks["no_camera_on_social_turn"] = not (set(tools_used) & sr.PERCEPTION_TOOLS)
     checks["length_ok"] = 0 < sr.count_sentences(spoken) <= sc.max_sentences if spoken else False
     checks["questions_ok"] = sr.count_questions(spoken) <= sc.max_questions
+    checks["language_ok"] = not sr.language_mismatch(sc.user, spoken)
     for i, pat in enumerate(sc.forbid_regex):
         checks[f"forbid_{i}"] = re.search(pat, spoken + "\n" + final_text) is None
     if sc.require_regex:

@@ -2148,6 +2148,7 @@ class EmbodiedAgent:
 
         camera_used = False
         say_used = False
+        language_retried = False
         final_text = "(no response)"
         non_say_streak = 0  # consecutive tool calls without say()
         observation_action_name: str | None = None
@@ -2190,10 +2191,22 @@ class EmbodiedAgent:
                 self.messages.append(self.backend.make_assistant_message(result, raw_content))
                 final_text = result.text or "(no response)"
                 if reflex_on and final_text != "(no response)":
-                    # Small models leak pseudo tool syntax / stage directions into prose.
+                    # Small models leak pseudo tool syntax / stage directions into prose,
+                    # or write say("…") literally instead of calling the tool.
                     final_text = (
                         social_reflex.normalize_small_model_text(final_text) or "(no response)"
                     )
+                    if not language_retried and social_reflex.language_mismatch(
+                        user_input, final_text
+                    ):
+                        language_retried = True
+                        logger.info("Social reflex: reply language mismatch, asking for a redo")
+                        self.messages.append(
+                            self.backend.make_user_message(
+                                "Reply in the same language the person used. Say it again."
+                            )
+                        )
+                        continue
 
                 # Coherence gate: ask utility backend whether the response contains
                 # a logical error (e.g. shiritori word ending in 'ん').  If a
@@ -2256,6 +2269,32 @@ class EmbodiedAgent:
                 return final_text
 
             if result.stop_reason == "tool_use":
+                # Social reflex: a say() in the wrong language is not spoken; ask once for a redo.
+                if (
+                    reflex_on
+                    and not language_retried
+                    and any(
+                        tc.name == "say"
+                        and social_reflex.language_mismatch(
+                            user_input, str(tc.input.get("text", ""))
+                        )
+                        for tc in result.tool_calls
+                    )
+                ):
+                    language_retried = True
+                    logger.info("Social reflex: say() language mismatch, asking for a redo")
+                    self.messages.append(self.backend.make_assistant_message(result, raw_content))
+                    nudge = (
+                        "Not spoken: wrong language. Reply in the same language the person "
+                        "used, then call say() again."
+                    )
+                    self.messages.append(
+                        self.backend.make_tool_results(
+                            result.tool_calls, [(nudge, None)] * len(result.tool_calls)
+                        )
+                    )
+                    continue
+
                 collected: list[tuple[str, str | None]] = []
                 for tc in result.tool_calls:
                     if tc.name == "see":

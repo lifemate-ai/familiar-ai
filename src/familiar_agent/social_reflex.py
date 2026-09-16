@@ -178,6 +178,26 @@ def normalize_small_model_text(text: str) -> str:
     return unwrap_textual_say(strip_hallucinated_tool_text(text))
 
 
+_KANA_RE = re.compile(r"[\u3040-\u30ff]")
+_HAN_RE = re.compile(r"[\u4e00-\u9fff]")
+_LATIN_WORD_RE = re.compile(r"[A-Za-z]{2,}")
+
+
+def language_mismatch(user_text: str, reply: str) -> bool:
+    """True when a Japanese utterance got a reply that is not Japanese.
+
+    Multilingual small models (qwen) drift into Chinese or English mid-conversation.
+    Heuristic: the person used kana; the reply has Han characters or Latin words but
+    no kana at all.  Only Japanese is guarded — other languages pass through.
+    """
+    if not _KANA_RE.search(user_text or ""):
+        return False
+    body = (reply or "").strip()
+    if not body or _KANA_RE.search(body):
+        return False
+    return bool(_HAN_RE.search(body) or _LATIN_WORD_RE.search(body))
+
+
 _SENTENCE_SPLIT = re.compile(r"(?<=[。！？!?])\s*|\n+")
 
 
