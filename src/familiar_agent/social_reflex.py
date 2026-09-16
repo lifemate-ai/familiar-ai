@@ -183,19 +183,44 @@ _HAN_RE = re.compile(r"[\u4e00-\u9fff]")
 _LATIN_WORD_RE = re.compile(r"[A-Za-z]{2,}")
 
 
+# Simplified-Chinese-only characters that never occur in Japanese text.  A single one
+# inside an otherwise Japanese reply means the model slipped into Chinese mid-sentence.
+_SIMPLIFIED_ONLY = set(
+    "说们这个时会过还没对开关见现经给让从应该问题样们种为发点说话长间东西边儿电脑"
+)
+_SIMPLIFIED_RE = re.compile("[" + "".join(sorted(_SIMPLIFIED_ONLY)) + "]")
+
+
 def language_mismatch(user_text: str, reply: str) -> bool:
-    """True when a Japanese utterance got a reply that is not Japanese.
+    """True when a Japanese utterance got a reply that is not (entirely) Japanese.
 
     Multilingual small models (qwen) drift into Chinese or English mid-conversation.
-    Heuristic: the person used kana; the reply has Han characters or Latin words but
-    no kana at all.  Only Japanese is guarded — other languages pass through.
+    Heuristics, only when the person used kana:
+    - the reply has no kana at all but has Han characters or Latin words, or
+    - the reply contains simplified-Chinese-only characters (mixed-script drift).
+    Other languages pass through unguarded.
     """
     if not _KANA_RE.search(user_text or ""):
         return False
     body = (reply or "").strip()
-    if not body or _KANA_RE.search(body):
+    if not body:
+        return False
+    if _SIMPLIFIED_RE.search(body):
+        return True
+    if _KANA_RE.search(body):
         return False
     return bool(_HAN_RE.search(body) or _LATIN_WORD_RE.search(body))
+
+
+def trim_spoken(text: str, user_text: str, max_sentences: int) -> str:
+    """Keep a social reply short: drop an echo of the person's own line and cut to
+    ``max_sentences``.  Deterministic brevity for TTS — small models ramble."""
+    parts = [p.strip() for p in _SENTENCE_SPLIT.split(text or "") if p and p.strip()]
+    user_norm = re.sub(r"[\s。．!！?？、,]", "", user_text or "")
+    kept = [p for p in parts if user_norm and re.sub(r"[\s。．!！?？、,]", "", p) != user_norm]
+    if not kept:
+        kept = parts
+    return "".join(kept[: max(1, max_sentences)]) if kept else (text or "")
 
 
 _SENTENCE_SPLIT = re.compile(r"(?<=[。！？!?])\s*|\n+")

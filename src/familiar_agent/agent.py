@@ -2207,6 +2207,13 @@ class EmbodiedAgent:
                             )
                         )
                         continue
+                    if social_turn is not None and social_turn.is_social:
+                        final_text = (
+                            social_reflex.trim_spoken(
+                                final_text, user_input, social_turn.max_sentences
+                            )
+                            or final_text
+                        )
 
                 # Coherence gate: ask utility backend whether the response contains
                 # a logical error (e.g. shiritori word ending in 'ん').  If a

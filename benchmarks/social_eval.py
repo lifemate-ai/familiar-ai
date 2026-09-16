@@ -133,6 +133,22 @@ async def run_scenario(backend, system: str, sc: SocialScenario, reflex: bool) -
         for _ in range(MAX_STEPS):
             result, raw = await backend.stream_turn(system, messages, tools, 300, None)
             text = sr.normalize_small_model_text(result.text) if reflex else result.text
+            if (
+                reflex
+                and result.stop_reason != "tool_use"
+                and not language_retried
+                and sr.language_mismatch(sc.user, text)
+            ):
+                language_retried = True
+                messages.append(backend.make_assistant_message(result, raw))
+                messages.append(
+                    backend.make_user_message(
+                        "Reply in the same language the person used. Say it again."
+                    )
+                )
+                continue
+            if reflex and result.stop_reason != "tool_use" and turn.is_social and text:
+                text = sr.trim_spoken(text, sc.user, turn.max_sentences) or text
             steps.append(
                 Step(
                     text=text,

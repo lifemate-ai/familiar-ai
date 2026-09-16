@@ -234,3 +234,19 @@ async def test_agent_asks_for_redo_when_say_is_in_wrong_language() -> None:
     agent._execute_tool.assert_awaited_once()  # the Chinese say() was never spoken
     flat = [m for item in agent.messages for m in (item if isinstance(item, list) else [item])]
     assert any("wrong language" in m.get("content", "") for m in flat)
+
+
+def test_language_mismatch_catches_mixed_simplified_chinese() -> None:
+    assert sr.language_mismatch("疲れた", "へぇ…同じこと又被说了一遍か。")
+    assert not sr.language_mismatch("疲れた", "同じこと、また言われたんか。")
+
+
+def test_trim_spoken_drops_echo_and_cuts_length() -> None:
+    user = "明日、転職の面接なんよ。"
+    text = "明日、転職の面接なんよ。\n\n緊張するね。私、明日は外に出てみるから、何かあれば見せて。\n\n応援してるよ。"
+    assert (
+        sr.trim_spoken(text, user, 2)
+        == "緊張するね。私、明日は外に出てみるから、何かあれば見せて。"
+    )
+    assert sr.trim_spoken("おかえり。", "ただいま", 1) == "おかえり。"
+    assert sr.trim_spoken("", "x", 2) == ""
