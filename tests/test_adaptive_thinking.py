@@ -190,7 +190,7 @@ class TestStreamTurnThinkingIntegration:
             )
 
     def _run(self, coro):
-        return asyncio.get_event_loop().run_until_complete(coro)
+        return asyncio.run(coro)
 
     def test_adaptive_thinking_passes_thinking_kwarg(self):
         backend = self._make_backend("claude-sonnet-4-6", "adaptive")
@@ -392,6 +392,38 @@ class TestAgentConfig:
 
         config = AgentConfig()
         assert config.thinking_effort == "low"
+
+    def test_proactive_reminders_default_on(self, monkeypatch):
+        monkeypatch.delenv("FAMILIAR_PROACTIVE_REMINDERS", raising=False)
+        import importlib
+
+        import familiar_agent.config as cfg_mod
+
+        importlib.reload(cfg_mod)
+        assert cfg_mod.AgentConfig().proactive_reminders is True
+
+    def test_proactive_reminders_env_disables(self, monkeypatch):
+        monkeypatch.setenv("FAMILIAR_PROACTIVE_REMINDERS", "0")
+        import importlib
+
+        import familiar_agent.config as cfg_mod
+
+        importlib.reload(cfg_mod)
+        assert cfg_mod.AgentConfig().proactive_reminders is False
+
+    def test_proactive_reminders_independent_of_auto_desire(self, monkeypatch):
+        # auto_desire off, but reminders still on by default
+        monkeypatch.delenv("FAMILIAR_AUTO", raising=False)
+        monkeypatch.delenv("FAMILIAR_AUTO_DESIRE", raising=False)
+        monkeypatch.delenv("FAMILIAR_PROACTIVE_REMINDERS", raising=False)
+        import importlib
+
+        import familiar_agent.config as cfg_mod
+
+        importlib.reload(cfg_mod)
+        config = cfg_mod.AgentConfig()
+        assert config.auto_desire is False
+        assert config.proactive_reminders is True
 
 
 # ── helpers ────────────────────────────────────────────────────────────────

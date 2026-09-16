@@ -13,8 +13,19 @@ code, around the model:
 
 from __future__ import annotations
 
+import logging
 import re
 from dataclasses import dataclass, field
+from typing import TYPE_CHECKING, Any
+
+from familiar_runtime.runtime import RetryDecision, RuntimeHookBase
+
+if TYPE_CHECKING:
+    from familiar_runtime.models.base import ModelTurnResult, ToolCall
+    from familiar_runtime.runtime import TurnContext
+    from familiar_runtime.tools.base import ToolExecutionResult
+
+logger = logging.getLogger(__name__)
 
 # Tools that move or use the body's senses.  Withheld on social turns.
 PERCEPTION_TOOLS = frozenset({"see", "look", "walk"})
@@ -248,3 +259,189 @@ def count_sentences(text: str) -> int:
 
 def count_questions(text: str) -> int:
     return (text or "").count("？") + (text or "").count("?")
+
+
+# Speech acts from SocialPolicyEngine that are about the person, not the world:
+# the camera is never the right reply to them.
+SOCIAL_ACTS = frozenset(
+    {
+        "venting",
+        "fatigue_signal",
+        "grief_signal",
+        "conflict_signal",
+        "bid_for_connection",
+        "delight_share",
+        "boundary_assertion",
+        "greeting",
+        "acknowledgement",
+    }
+)
+
+
+def is_social_turn(user_input: str, primary_act: str | None = None) -> bool:
+    """Combine the lexical classifier with the social-policy speech act."""
+    if primary_act in SOCIAL_ACTS and not _SHARE_VISUAL.search(user_input or ""):
+        return True
+    return classify_turn(user_input).is_social
+
+
+def turn_kind(user_input: str) -> SocialTurn:
+    return classify_turn(user_input)
+
+
+# Body-part ids from the prompt that small models sometimes call as if they were tools.
+BODY_PART_ALIASES = {
+    "neck": "look",
+    "eyes": "see",
+    "eye": "see",
+    "legs": "walk",
+    "leg": "walk",
+    "voice": "say",
+    "mouth": "say",
+}
+
+
+def resolve_body_part_alias(tool_call: "ToolCall") -> bool:
+    """Rename ``neck({"look": "down"})``-style calls to the real tool. Returns True if changed."""
+    target = BODY_PART_ALIASES.get(tool_call.name)
+    if target is None:
+        return False
+    inp = dict(tool_call.input or {})
+    if target == "look" and "direction" not in inp:
+        direction = next((v for v in inp.values() if isinstance(v, str)), None)
+        inp = {"direction": direction} if direction else {}
+    if target == "say" and "text" not in inp:
+        text = next((v for v in inp.values() if isinstance(v, str)), "")
+        inp = {"text": text}
+    tool_call.name = target
+    tool_call.input = inp
+    return True
+
+
+class SocialReflexHook(RuntimeHookBase):
+    """Deterministic guards for small local models, run inside the ReAct loop.
+
+    - a say() in the wrong language is not spoken; one re-ask
+    - say("") is silence: one re-ask for the words
+    - say() arguments are stripped of leaked tool syntax
+    - end-turn prose is normalised (pseudo tool blocks, stage directions,
+      literal say("…")), checked for language drift (one re-ask), asked once
+      if empty, and trimmed on social turns
+    - once say() has been called on a social turn, the model is told to stop
+    """
+
+    STATE_KEY = "social_reflex"
+
+    def __init__(self, agent: Any) -> None:
+        self._agent = agent
+
+    # ── per-turn state ────────────────────────────────────────────
+    def _state(self, ctx: "TurnContext") -> dict[str, Any]:
+        state = ctx.metadata.get(self.STATE_KEY)
+        if state is None:
+            state = {
+                "turn": classify_turn(ctx.user_input),
+                "language_retried": False,
+                "empty_retried": False,
+                "say_used": False,
+                "stop_nudged": False,
+            }
+            ctx.metadata[self.STATE_KEY] = state
+        return state
+
+    @staticmethod
+    def _is_desire_turn(ctx: "TurnContext") -> bool:
+        prep = ctx.metadata.get("prep")
+        return bool(getattr(prep, "is_desire_turn", False))
+
+    # ── hooks ─────────────────────────────────────────────────────
+    async def after_model_result(
+        self,
+        ctx: "TurnContext",
+        result: "ModelTurnResult",
+    ) -> "ModelTurnResult | RetryDecision | None":
+        if self._is_desire_turn(ctx):
+            return None
+        state = self._state(ctx)
+        user_input = ctx.user_input
+
+        if result.stop_reason == "tool_use":
+            for tc in result.tool_calls:
+                if resolve_body_part_alias(tc):
+                    logger.info("Social reflex: aliased body-part call → %s", tc.name)
+            says = [tc for tc in result.tool_calls if tc.name == "say"]
+            for tc in says:
+                if isinstance(tc.input, dict):
+                    tc.input["text"] = clean_say_text(str(tc.input.get("text", "")))
+            if says and all(not str(tc.input.get("text", "")).strip() for tc in says):
+                if not state["empty_retried"]:
+                    state["empty_retried"] = True
+                    logger.info("Social reflex: empty say(), asking for the words")
+                    return RetryDecision(
+                        retry=True,
+                        inject_user_message=(
+                            "Nothing was spoken: say() needs the words as text. "
+                            "Call say() again with one or two sentences."
+                        ),
+                    )
+            if not state["language_retried"] and any(
+                language_mismatch(user_input, str(tc.input.get("text", ""))) for tc in says
+            ):
+                state["language_retried"] = True
+                logger.info("Social reflex: say() language mismatch, asking for a redo")
+                return RetryDecision(
+                    retry=True,
+                    inject_user_message=(
+                        "Not spoken: wrong language. Reply in the same language the person "
+                        "used, then call say() again."
+                    ),
+                )
+            return None
+
+        # end_turn: normalise prose
+        text = normalize_small_model_text(result.text or "")
+        if not text.strip() and not state["say_used"] and not state["empty_retried"]:
+            state["empty_retried"] = True
+            logger.info("Social reflex: empty reply, asking for one short say()")
+            return RetryDecision(
+                retry=True,
+                inject_user_message=(
+                    "You said nothing. Reply to the person with one short say() now."
+                ),
+            )
+        if not state["language_retried"] and language_mismatch(user_input, text):
+            state["language_retried"] = True
+            logger.info("Social reflex: reply language mismatch, asking for a redo")
+            return RetryDecision(
+                retry=True,
+                inject_user_message="Reply in the same language the person used. Say it again.",
+            )
+        turn: SocialTurn = state["turn"]
+        if turn.is_social and text:
+            text = trim_spoken(text, user_input, turn.max_sentences) or text
+        if text != (result.text or ""):
+            from dataclasses import replace
+
+            return replace(result, text=text)
+        return None
+
+    async def after_tool_result(
+        self,
+        ctx: "TurnContext",
+        call: "ToolCall",
+        result: "ToolExecutionResult",
+    ) -> "ToolExecutionResult | None":
+        state = self._state(ctx)
+        if call.name == "say" and str((call.input or {}).get("text", "")).strip():
+            state["say_used"] = True
+        return None
+
+    async def mid_turn_user_messages(self, ctx: "TurnContext", iteration: int) -> list[str]:
+        if iteration == 0 or self._is_desire_turn(ctx):
+            return []
+        state = self._state(ctx)
+        turn: SocialTurn = state["turn"]
+        if turn.is_social and state["say_used"] and not state["stop_nudged"]:
+            state["stop_nudged"] = True
+            return ["You already spoke. End your turn now without further tools."]
+        return []

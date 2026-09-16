@@ -23,6 +23,7 @@
   "desire_label_worry_companion": "Worry Companion",
   "desire_label_rest": "Rest",
   "desire_pending_note": "(companion said: {note}) {prompt}",
+  "reminder_impulse": "(internal impulse) You promised to remind about these, and they are due now:\n{items}\nBring it up naturally, in your own voice — don't read it like a list. After they react, call complete_commitment if it's handled, or snooze_commitment if they want it later.",
   "desire_prompt_curiosity_target": "Something caught my attention earlier. Take a closer look at {target}. Point the camera and check it.",
   "desire_prompt_look_around": "(internal impulse) I'm getting curious about outside. Use see(). If the camera fails, try one different direction once. If it still fails, stop and either review memories or do something else. Do not repeat the same action.",
   "desire_prompt_explore": "(internal impulse) I want to wander a little. Move with walk(), then use see() to confirm where I am. Even if the camera fails, I can still enjoy the movement itself.",

@@ -14,6 +14,7 @@ class _ManualRealtimeStt:
     def __init__(self) -> None:
         self.on_partial = None
         self.on_committed = None
+        self.on_restart = None
         self._queue: asyncio.Queue[str | None] | None = None
         self.started = False
 
@@ -23,6 +24,12 @@ class _ManualRealtimeStt:
 
     async def stop(self) -> None:
         self.started = False
+
+    async def restart(self, reason: str = "manual") -> bool:
+        if self.on_restart:
+            self.on_restart(reason)
+        self.started = True
+        return True
 
     async def emit_committed(self, text: str) -> None:
         assert self._queue is not None

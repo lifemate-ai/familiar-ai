@@ -1,0 +1,35 @@
+name: Rust (familiard)
+
+on:
+  push:
+    branches: [main, develop]
+    paths:
+      - "familiard-rs/**"
+      - ".github/workflows/rust.yml"
+  pull_request:
+    paths:
+      - "familiard-rs/**"
+      - ".github/workflows/rust.yml"
+
+jobs:
+  familiard:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: familiard-rs
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: familiard-rs
+      - name: Format
+        run: cargo fmt --check
+      - name: Clippy
+        run: cargo clippy --all-targets -- -D warnings
+      - name: Test
+        run: cargo test
+      - name: Build release
+        run: cargo build --release

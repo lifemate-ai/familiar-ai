@@ -1,159 +1,347 @@
 # Technical Background
 
-familiar-ai is an experiment in giving a language model a body, senses, and autonomous drives — using consumer hardware costing less than a typical API bill.
+familiar-ai is an embodied companion architecture. The goal is not prompt-only roleplay, but a closed loop where perception, memory, appraisal, relationship state, drives, and response policy update one another over time.
 
-This document covers the research and design decisions behind it.
+The current implementation keeps the original async ReAct core and extends it with deterministic state layers.
 
 ---
 
-## Core loop: ReAct
+## Turn architecture
 
-The agent follows the **ReAct** pattern ([Yao et al., 2022](https://arxiv.org/abs/2210.03629)):
+The main turn loop lives in `src/familiar_agent/agent.py`.
 
-```
-Thought → Act (tool call) → Observe (tool result) → Thought → …
-```
+The pre-response pipeline now follows this order:
 
-The LLM generates text freely between tool calls. This text is a visible scratchpad — the model reasons about what it sees before deciding what to do next. Compared to a pure tool-calling loop, the reasoning trace dramatically improves multi-step reliability.
+1. ingest user input and current scene/tool context
+2. collect interoception (`interoception.py`)
+3. read prediction state (`prediction.py`)
+4. activate memory via semantic recall, associative expansion, and working memory (`tools/memory.py`)
+5. update provisional relationship signals (`relationship.py`)
+6. appraise low-dimensional affect (`appraisal.py`)
+7. choose social policy (`social_policy.py`)
+8. regulate drives (`desires.py`)
+9. run workspace competition (`workspace.py`)
+10. plan and execute the ReAct loop
+11. gate the candidate response (`meta_monitor.py`)
+12. finalize the reply
+13. persist post-turn traces, memories, and mental-state snapshots
 
-Implementation: `src/familiar_agent/agent.py`
+The response loop is still ReAct:
 
 ```python
-for i in range(MAX_ITERATIONS):          # up to 50 steps
-    response = await backend.stream_turn(...)
-    if response.stop_reason == "end_turn":
-        break                            # task complete
-    # execute ALL tool calls, then append assistant + results atomically
-    results = [await execute(tc) for tc in response.tool_calls]
-    messages.append(make_assistant_message(...))
-    messages.append(make_tool_results(...))
+for i in range(MAX_ITERATIONS):
+    result, raw = await backend.stream_turn(...)
+    if result.stop_reason == "end_turn":
+        ...
+    if result.stop_reason == "tool_use":
+        ...
 ```
 
-The atomic append (assistant + results together) is important: if a tool fails mid-loop and only the assistant message is appended, the message history becomes malformed and the next API call errors.
+What changed is the state preparation around that loop.
 
 ---
 
-## Affordance grounding: SayCan
+## Mental State Bus
 
-[SayCan (Ahn et al., 2022)](https://say-can.github.io/) showed that an LLM alone cannot reliably choose *feasible* actions — it needs to know what is possible *right now* given the physical situation.
+`src/familiar_agent/mental_state.py`
 
-familiar-ai addresses this by:
+The mental-state bus is an append-only JSONL trace at:
 
-1. **Passing a camera image every step** — the model sees the current state of the world before deciding what to do next.
-2. **System prompt grounding** — the prompt explicitly describes what each tool does and what the model *cannot* do (e.g., walking the vacuum does not move the camera).
+`~/.familiar_ai/mental_state.jsonl`
 
-The camera image is the affordance signal. Without it, the model hallucinates plausible-sounding but physically impossible actions.
+It stores typed snapshots rather than raw prompt blobs:
 
----
+- `InteroceptiveSignal`
+- `AffectiveState`
+- `SocialState`
+- `DriveVector`
+- `WorkingMemoryItem`
+- `MentalStateSnapshot`
 
-## Memory and reflection: Reflexion
-
-[Reflexion (Shinn et al., 2023)](https://arxiv.org/abs/2303.11366) showed that storing failure traces as natural language memory enables an LLM agent to improve across episodes without weight updates.
-
-familiar-ai stores every completed turn in a local SQLite memory store (with vector embeddings):
-
-- Observations → stored as `observation` memories
-- Conversations → stored as `conversation` memories
-- Self-reflections → stored as `self_model` memories
-- Curiosity targets → stored as `curiosity` memories
-
-At the start of each session, relevant past memories are retrieved by semantic similarity and injected into the system prompt with evidence metadata (memory id, source kind, confidence). Low-confidence recalls are treated as uncertain context rather than hard facts.
-
-Schema changes are applied automatically at startup through timestamped migration scripts under `migration/`, tracked by `schema_migrations`.
-
-Projected semantic/policy memories keep a revision chain (`memory_revisions`) when they are updated, so older interpretations are not silently overwritten.
-
-Implementation: `src/familiar_agent/tools/memory.py`
+Snapshots are persisted for continuity and debugging, but prompt injection uses only compact summaries. Raw JSON and raw body metrics are intentionally kept out of normal prompt text.
 
 ---
 
-## Skill reuse: Voyager-inspired curiosity
+## Interoception
 
-[Voyager (Wang et al., 2023)](https://arxiv.org/abs/2305.16291) built a Minecraft agent that accumulates a library of reusable skills over time.
+`src/familiar_agent/interoception.py`
 
-familiar-ai takes a lighter version of this idea: the `curiosity_target` field. When the agent notices something it wants to investigate further, it stores it as an explicit open question. The next idle cycle picks it up and acts on it autonomously — without the user needing to ask.
+Interoception is provider-based:
 
-```python
-# At end of turn: extract a curiosity target if the model mentioned one
-curiosity = await self._extract_curiosity(final_text)
-if curiosity:
-    self.curiosity_target = curiosity
-    await self._memory.save_async(curiosity, kind="curiosity", emotion="curious")
-```
+- `NoopInteroceptionProvider`
+- `RuntimeInteroceptionProvider`
+- `MCPInteroceptionProvider`
 
----
+`MCPInteroceptionProvider` accepts either a single JSON payload or an append-only
+JSONL stream. It reads the freshest valid sample, honors `observed_at` / `timestamp`,
+and drops stale payloads instead of recycling old body state.
 
-## Autonomous drives: the desire system
+The provider output is converted into coarse behavioral pressure:
 
-Most AI assistants wait passively for input. familiar-ai has internal drives that trigger behavior when idle.
+- `need_rest`
+- `caution`
+- `expressivity`
+- `social_receptivity`
+- `frustration_bias`
+- `quiet_mode`
 
-The desire system (`src/familiar_agent/desires.py`) maintains four drives:
-
-| Drive | What triggers it | Resulting action |
-|-------|-----------------|-----------------|
-| `look_around` | Long stillness | Camera scan of the environment |
-| `greet_companion` | Companion detected nearby | say() a greeting |
-| `explore` | Time elapsed | Walk the robot somewhere new |
-| `rest` | High recent activity | Enter a quiet observation state |
-
-Drives decay over time and are satisfied by the corresponding action. The model never sees drive levels — the desire is translated into a natural-language inner voice prompt before being passed to the agent:
-
-```
-"feeling curious about outside…" → agent looks around and describes what it sees
-```
-
-This keeps the autonomy invisible to the user. The agent just *does* things.
+This pressure modifies affect, social policy, and drive selection. Raw values such as heart rate or CPU usage are internal-only and must not leak into ordinary user-facing text.
 
 ---
 
-## Theory of Mind
+## Appraisal
 
-Before responding to emotionally loaded messages, the agent can call a Theory of Mind (ToM) tool that:
+`src/familiar_agent/appraisal.py`
 
-1. Retrieves relevant memories about the person
-2. Projects: *what is this person feeling right now?*
-3. Substitutes: *if I were in their situation, what would I want?*
-4. Returns a response framing that accounts for both
+Appraisal is a deterministic low-dimensional update step. It integrates:
 
-Implementation: `src/familiar_agent/tools/tom.py`
+- user text
+- companion mood
+- relationship trust/intimacy
+- recalled memory salience
+- prediction error and agency error
+- interoceptive pressure
+- blocked drives
+- unfinished business load
 
-This is adapted from cognitive science research on how humans understand others' mental states. The key insight is that good social response requires modeling the *person*, not just parsing their words.
+The affect vector includes:
 
----
+- `valence`
+- `arousal`
+- `dominance`
+- `uncertainty`
+- `attachment_pull`
+- `threat`
+- `tenderness`
+- `frustration`
+- `loneliness`
 
-## Why physical hardware?
-
-The core claim of familiar-ai is that **a cheap camera + robot vacuum is enough to make grounding real**.
-
-Without hardware, an AI assistant responds to text and generates text. It has no way to verify its own claims about the world. With even a single camera:
-
-- The model is *wrong sometimes* — and can notice that ("I thought there was a car, but looking again, it's gone")
-- Time has texture — morning light is different from evening light
-- Presence becomes meaningful — seeing the person come home is different from being told they came home
-
-The robot vacuum adds movement, but the camera alone changes the character of the agent substantially.
-
----
-
-## Multi-platform LLM support
-
-The agent loop is backend-agnostic. `src/familiar_agent/backend.py` defines a protocol:
-
-```python
-class Backend(Protocol):
-    async def stream_turn(self, system, messages, tools, max_tokens, on_text) -> TurnResult: ...
-```
-
-Current implementations: `AnthropicBackend`, `GeminiBackend`, `OpenAICompatibleBackend`, `KimiBackend`.
-
-**Kimi K2.5** requires special handling: it returns `reasoning_content` in tool-call turns that must be round-tripped in subsequent messages, or the API returns an error. This is similar to Claude's extended thinking, but it applies to every tool-call step.
+`AffectiveState.as_coalition()` lets strong affective shifts compete in the global workspace.
 
 ---
 
-## Further reading
+## Social policy
 
-- [ReAct: Synergizing Reasoning and Acting in Language Models](https://arxiv.org/abs/2210.03629)
-- [Do As I Can, Not As I Say: Grounding Language in Robotic Affordances (SayCan)](https://say-can.github.io/)
-- [Reflexion: Language Agents with Verbal Reinforcement Learning](https://arxiv.org/abs/2303.11366)
-- [Voyager: An Open-Ended Embodied Agent with Large Language Models](https://arxiv.org/abs/2305.16291)
-- [Language Models as Zero-Shot Planners (SAYPLAN)](https://arxiv.org/abs/2206.10498)
+`src/familiar_agent/social_policy.py`
+
+Social behavior is no longer left to a single persona prompt. The social-policy layer classifies the current interaction into a small speech-act taxonomy:
+
+- `bid_for_connection`
+- `venting`
+- `grief_signal`
+- `fatigue_signal`
+- `delight_share`
+- `request_for_advice`
+- `request_for_action`
+- `playful_probe`
+- `boundary_assertion`
+- `conflict_signal`
+- `repair_attempt`
+- `silence_or_low_presence`
+- `meta_conversation`
+
+The engine returns a `SocialPolicyDecision` with:
+
+- response mode
+- validation vs problem-solving bias
+- whether ToM should be used
+- whether relational memory is relevant
+- softness / directness / initiative
+- memory mention permission
+- explicit prohibition on raw interoception leakage
+
+This decision is summarized into the prompt and also consumed by the meta gate.
+
+---
+
+## Relationship model
+
+`src/familiar_agent/relationship.py`
+`migration/2026-04-15-009_relationship_state.py`
+
+Relationship state is now stored in SQLite inside the primary observations database.
+Legacy `~/.familiar_ai/relationship.json` files are imported on first load for backward
+compatibility, but SQLite is the authoritative store.
+
+New state includes:
+
+- trust trajectory
+- intimacy trajectory
+- repair history
+- support preferences
+- failed support patterns
+- shared rituals
+- sensitive topics
+- permission model
+
+Each record stores evidence plus confidence and recency metadata where applicable.
+
+---
+
+## Memory graph
+
+`src/familiar_agent/tools/memory.py`
+`migration/2026-04-15-008_memory_graph_runtime.py`
+
+SQLite remains the primary memory store.
+
+The memory layer already had:
+
+- observations
+- embeddings
+- memory events/jobs
+- semantic facts
+- behavior policies
+- revision history
+- associative links
+
+The current graph upgrade adds:
+
+- `episodes`
+- `episode_memories`
+- `memory_activation`
+- `unfinished_business`
+
+Implemented APIs include:
+
+- `create_episode`
+- `append_to_episode`
+- `link_memories`
+- `recall_divergent`
+- `refresh_working_memory`
+- `get_working_memory`
+- `consolidate_memories`
+- `open_unfinished_business`
+- `resolve_unfinished_business`
+
+Recall is now multi-stage:
+
+1. semantic recall
+2. associative expansion over linked memories
+3. episode compression
+
+Projected semantic/policy memories still keep revision history in `memory_revisions`, so conflicting facts are not silently overwritten.
+
+---
+
+## Desire system 2.0
+
+`src/familiar_agent/desires.py`
+
+The original scalar drive system is preserved, but extended.
+
+Legacy drives remain:
+
+- `look_around`
+- `explore`
+- `greet_companion`
+- `rest`
+- `worry_companion`
+- `share_memory`
+
+Higher-level drives were added:
+
+- `curiosity`
+- `attachment`
+- `care`
+- `reflect`
+- `consolidate`
+- `repair`
+- `play`
+- `self_protect`
+
+Selection now considers more than raw level:
+
+- base level
+- context affordance
+- schedule multiplier
+- social permission
+- energy budget
+- unfinished business bonus
+- per-drive minimum interval
+
+External drive config is supported through a pipe-delimited format inspired by `desires.sample.conf`:
+
+`name | growth_rate_per_second | prompt_text | tags | min_interval_seconds`
+
+---
+
+## Heartbeat and routines
+
+`src/familiar_agent/heartbeat.py`
+`src/familiar_agent/routines.py`
+
+Heartbeat runtime provides lightweight session-time autonomy control:
+
+- quiet-hours state
+- schedule multiplier
+- morning reconstruction notes from optional `SOUL.md`, `TODO.md`, `ROUTINES.md`
+- continuation protocol
+- unfinished business carryover
+- persisted continuation state in `~/.familiar_ai/heartbeat_state.json`
+
+Internal continuation statuses are:
+
+- `DONE`
+- `CONTINUE:reason`
+- `DEFER:reason`
+
+Continuation depth is capped at 3. Overflow is persisted into unfinished business instead of being allowed to recurse forever.
+
+Example operator-facing config files live at the repository root:
+
+- `desires.sample.conf`
+- `schedule.sample.conf`
+- `autonomous-action.sample.sh`
+
+---
+
+## Meta-monitor gating
+
+`src/familiar_agent/meta_monitor.py`
+
+The meta monitor still records step-level metacognitive traces, but now also performs deterministic response gating.
+
+Current checks include:
+
+- validation-before-advice violations
+- boundary overreach
+- contradiction risk
+- raw interoception leakage
+- emotional mismatch after distress / repair messages
+
+This gate is intentionally lightweight and synchronous. It is a guardrail layer, not another generative planner.
+
+---
+
+## Why this architecture
+
+The guiding idea is simple:
+
+- prompt text can express a personality
+- closed-loop state lets that personality become consistent over time
+
+The system now preserves a stronger separation between:
+
+- hidden numeric/internal state
+- compact prompt summaries
+- user-facing language
+
+That separation matters for both safety and realism. For example, interoception should change behavior, but the agent should not blurt out raw internal metrics.
+
+---
+
+## Related modules still in use
+
+The upgrade preserves and reuses the strongest existing components:
+
+- `workspace.py` for coalition competition
+- `self_state.py` for latent bodily carryover
+- `self_narrative.py` for autobiographical continuity
+- `prediction.py` for surprise and agency error
+- `concern_engine.py` for unfinished salience
+- `attention_schema.py` for recent focus traces
+- `default_mode.py` for idle recall / consolidation
+- `tools/tom.py` for explicit Theory of Mind calls
+
+The architecture is still lightweight, local-first, and async-first. SQLite remains the authoritative store.

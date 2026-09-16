@@ -18,7 +18,10 @@ from familiar_agent.relationship import RelationshipTracker
 
 
 def _tracker(tmp_path: Path) -> RelationshipTracker:
-    return RelationshipTracker(state_path=tmp_path / "relationship.json")
+    return RelationshipTracker(
+        state_path=tmp_path / "relationship.json",
+        db_path=tmp_path / "relationship.db",
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -169,3 +172,49 @@ def test_context_for_prompt_includes_session_info(tmp_path) -> None:
     assert (
         "session" in result.lower() or "conversation" in result.lower() or "talk" in result.lower()
     )
+
+
+def test_relationship_tracks_trust_and_intimacy_trajectory(tmp_path) -> None:
+    t = _tracker(tmp_path)
+    t.note_trust_shift(0.7, "shared a vulnerable moment")
+    t.note_intimacy_shift(0.66, "celebrated together")
+
+    assert t.trust == 0.7
+    assert t.intimacy == 0.66
+
+
+def test_relationship_records_support_preferences_and_permissions(tmp_path) -> None:
+    t = _tracker(tmp_path)
+    t.record_support_preference("validate first before advice")
+    t.set_permission("offer_unsolicited_advice", False, evidence="asked to slow down")
+
+    ctx = t.relational_context_for_prompt()
+    assert "support-preferences" in ctx
+    assert "permissions-blocked" in ctx
+
+
+def test_relationship_imports_legacy_json_into_sqlite(tmp_path: Path) -> None:
+    legacy_path = tmp_path / "relationship.json"
+    legacy_path.write_text(
+        """
+        {
+          "first_session_date": "2026-04-01",
+          "session_count": 2,
+          "conversation_count": 4,
+          "trust_trajectory": [{"value": 0.81, "evidence": "legacy"}]
+        }
+        """.strip(),
+        encoding="utf-8",
+    )
+
+    tracker = RelationshipTracker(
+        state_path=legacy_path,
+        db_path=tmp_path / "relationship.db",
+    )
+    reloaded = RelationshipTracker(
+        state_path=legacy_path,
+        db_path=tmp_path / "relationship.db",
+    )
+
+    assert tracker.session_count == 2
+    assert reloaded.trust == 0.81

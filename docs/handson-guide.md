@@ -226,6 +226,8 @@ API_KEY=sk-ant-ここにPart0で取得したキーを貼り付け
 > **ポイント**: `.env.example` には色々な項目が書いてありますが、**今は `PLATFORM` と `API_KEY` の2つだけで十分**です。他の項目は後で必要になったら設定します。
 >
 > `.env.example` に `ANTHROPIC_API_KEY=` という古い形式の行がある場合は、代わりに上記の `PLATFORM=` と `API_KEY=` を使ってください。両方書いても動きますが、新しい形式を推奨します。
+>
+> GUI から始めたい場合は、`./run-gui.sh`（Windows は `run-gui.bat`）を起動すると、`API_KEY` 未設定時にセットアップダイアログから入力できます。
 
 ### Step 6: AI のパーソナリティを設定
 
@@ -374,12 +376,19 @@ PC のスピーカーから AI の声が聞こえたら成功です！
 >
 > WSL2 の場合は追加で:
 > ```bash
-> sudo apt install -y pulseaudio-utils
+> sudo apt install -y pulseaudio-utils libasound2-plugins
 > ```
 > `.env` に以下を追加:
 > ```env
 > PULSE_SERVER=unix:/mnt/wslg/PulseServer
 > ```
+> Realtime STT も使う場合は、さらに
+> ```bash
+> uv run python -m sounddevice
+> ```
+> で入力デバイスが見えていることを確認してください。ここで
+> `Error querying device -1` や入力デバイスなしになる場合、
+> familiar-ai からはマイクを使えません。
 
 ---
 
@@ -604,6 +613,15 @@ USB カメラは自動では WSL2 に見えません。[Step 3-1 の手順](#31-
    応答があれば接続できています。
 3. **ローカルアカウント** を使っているか確認（TP-Link クラウドアカウントでは接続できません）
 4. ONVIF ポートがデフォルトの `2020` でない場合、`.env` に `CAMERA_ONVIF_PORT=` を設定
+5. IP アドレスが分からない場合は discovery tool を試す:
+   ```bash
+   uv run familiar-discover-cameras
+   ```
+   見つからない場合は:
+   ```bash
+   uv run familiar-discover-cameras --scan
+   ```
+   で WS-Discovery / mDNS / SSDP に加えて、やや遅い TCP fallback scan も有効にできます。
 
 ### Q. 音が出ない（ElevenLabs）
 
@@ -624,6 +642,12 @@ USB カメラは自動では WSL2 に見えません。[Step 3-1 の手順](#31-
    ```env
    PULSE_SERVER=unix:/mnt/wslg/PulseServer
    ```
+   Realtime STT を使う場合は、追加で
+   ```bash
+   sudo apt install -y pulseaudio-utils libasound2-plugins
+   uv run python -m sounddevice
+   ```
+   を実行し、`sounddevice` から入力デバイスが見えていることを確認してください。
 
 ### Q. `./run.sh: Permission denied` と出る
 

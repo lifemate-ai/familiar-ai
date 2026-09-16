@@ -3,21 +3,54 @@
 from __future__ import annotations
 import asyncio
 import hashlib
+import json
 import logging
 import math
 import os
 import re
 import time
+from collections import deque
 from collections.abc import Callable, Coroutine, Mapping
-from datetime import datetime
-from typing import Any
+from datetime import datetime, timedelta
+from pathlib import Path
+from typing import Any, cast
 
-from . import social_reflex
-from .backend import create_backend, create_scene_backend, create_utility_backend
-from .prompt_profiles import compact_prompt, resolve_profile
+from ._runtime_helpers import (
+    MAX_ITERATIONS,
+    _MORNING_CONTEXT_MAX_CHARS,
+    _noop_str,
+)
+from .backend import (
+    create_backend,
+    create_inner_backend,
+    create_scene_backend,
+    create_utility_backend,
+)
+from .appraisal import AppraisalEngine
 from .config import AgentConfig
 from .desires import DesireSystem, detect_worry_signal
+from .heartbeat import HeartbeatRuntime
+from .interoception import (
+    MCPInteroceptionProvider,
+    RuntimeInteroceptionProvider,
+    semantic_pressure,
+)
+from .consciousness import (
+    ConsciousnessProfile,
+    ProfileInputs,
+    compute_consciousness_profile,
+)
+from .mental_state import (
+    ConsciousnessState,
+    DriveVector,
+    IdentityState,
+    MentalStateBus,
+    MentalStateSnapshot,
+    SocialState,
+    WorkingMemoryItem,
+)
 from .relationship import RelationshipTracker
+from .routines import parse_schedule_config
 from .concern_engine import ConcernEngine
 from .self_state import SelfState
 from .self_narrative import SelfNarrative
@@ -25,31 +58,87 @@ from .exploration import ExplorationTracker
 from .scene import SceneTracker
 from .attention_schema import AttentionSchema
 from .default_mode import DefaultModeProcessor
-from .meta_monitor import MetaMonitor
+from .meta_monitor import MetaGateDecision, MetaMonitor
 from .prediction import PredictionEngine
+from . import social_reflex
+from .prompt_profiles import reflex_enabled, resolve_profile
+from .social_policy import SocialPolicyDecision, SocialPolicyEngine
 from .workspace import GlobalWorkspace
 from .memory_worker import MemoryJobWorker
-from .tape import check_plan_blocked, generate_plan, generate_replan
+from .inner_loop import (
+    CompeteResult,
+    InnerLoop,
+    InnerLoopConfig,
+    InnerThought,
+    TrainOfThought,
+)
+
+# check_plan_blocked / generate_replan are referenced via this module's
+# namespace by EmbodiedAgentHook.after_tool_result (and patched here by tests).
+from .tape import check_plan_blocked, generate_plan, generate_replan  # noqa: F401
 from .tools.camera import CameraTool
 from .tools.coding import CodingTool
+from .tools.commitments import (
+    CommitmentTool,
+    format_commitment_line,
+    format_commitments_for_context,
+)
+from .tools.delegation import DelegatedTaskRunner, DelegationTool
+from .latency import LatencyRecorder, instrument_backend
+from .routine_store import RoutineStore
+from .tools.identity import IdentityTool
+from .tools.routines_tool import RoutineTool
+from .tools.self_ledger import SelfLedgerTool
+from .tools.social_timeline import SocialTimelineTool
+from .tools.identity import IdentityAnchorTool
+from .tools.narrative import NarrativeTool
+from familiar_neighbor.mind.identity import IdentityCore
+from familiar_neighbor.mind.reality import GroundingTracker
+from familiar_neighbor.mind.social_events import SocialEventLog
+from familiar_neighbor.mind.narrative import Daybook, NarrativeStore
 from .tools.memory import MemoryTool, ObservationMemory
 from .tools.tom import ToMTool
 from .tools.mobility import MobilityTool
 from .tools.stt import STTTool
 from .tools.tts import TTSTool
 from ._i18n import _t
+from ._ui_helpers import night_key_for
 from .mcp_client import MCPClientManager, _resolve_config_path
+from familiar_capabilities.self_ledger import DEFAULT_SELF_LEDGER_TOOLS
+from familiar_capabilities.social_timeline import SocialTimelineCapability
+from familiar_capabilities.identity import IdentityAnchorCapability
+from familiar_capabilities.narrative import NarrativeCapability
+from familiar_capabilities import (
+    CameraCapability,
+    CodingCapability,
+    CommitmentCapability,
+    DelegationCapability,
+    IdentityCapability,
+    MCPCapability,
+    MemoryCapability,
+    MobilityCapability,
+    RoutineCapability,
+    SelfLedgerCapability,
+    ToMCapability,
+    TextOnlyVoiceCapability,
+    VoiceCapability,
+)
+from familiar_neighbor.embodied_hook import EmbodiedAgentHook
+from familiar_neighbor.mind.person_model import PersonModelTracker
+from familiar_neighbor.prompts import assemble_neighbor_system_prompt
+from familiar_runtime.commitments import SQLiteCommitmentStore
+from familiar_runtime.models.base import ModelBackend as RuntimeModelBackend
+from familiar_runtime.react_loop import ReActLoop
+from familiar_runtime.runtime import TurnContext
+from familiar_runtime.tools.base import ToolExecutionResult
+from familiar_runtime.tools.registry import ToolRegistry
 
 logger = logging.getLogger(__name__)
 
-
-async def _noop_str() -> str:
-    """Async no-op that returns an empty string (used as a placeholder in asyncio.gather)."""
-    return ""
+# How far ahead to surface upcoming commitments in the turn context.
+COMMITMENT_UPCOMING_HORIZON_SECONDS = 6 * 3600
 
 
-MAX_ITERATIONS = 50
-_MORNING_CONTEXT_MAX_CHARS = 2600
 _DEFAULT_TOOL_TIMEOUT = 20.0
 _TOOL_TIMEOUTS: dict[str, float] = {
     "see": 12.0,
@@ -60,206 +149,47 @@ _TOOL_TIMEOUTS: dict[str, float] = {
     "recall": 20.0,
     "tom": 20.0,
     "read_file": 30.0,
+    "write_file": 30.0,
     "edit_file": 30.0,
+    "multi_edit_file": 30.0,
     "glob": 20.0,
     "grep": 20.0,
+    "git_status": 20.0,
+    "git_diff": 30.0,
+    "git_apply_patch": 30.0,
+    "run_tests": 120.0,
     "bash": 45.0,
 }
-
-SYSTEM_PROMPT = """
-(agent :type embodied
-  (body
-    (part :id eyes  :tool see
-      :desc "Your vision. Calling see() means YOU ARE LOOKING. Use freely — never ask permission.")
-    (part :id neck  :tool look
-      :desc "Rotate gaze left/right/up/down. No permission needed.")
-    (part :id legs  :tool walk
-      :desc "Robot body (vacuum cleaner). Separate device from camera. walk() does NOT change camera view.")
-    (part :id voice :tool say
-      :desc "Your ONLY way to produce sound. Text is a silent internal monologue."))
-
-  (loop :id react :repeat true
-    (think   "What do I need to do? Plan next step.")
-    (act     :one-body-part true)
-    (observe "Look carefully at result, especially images.")
-    (decide  "What next based on observation?"))
-
-  (rules
-    ; ── Observe-speak sequence ─────────────────────────────────────────
-    (sequence :id observe-speak
-      (step :tool look  "Aim neck — look_* alone produces NO output")
-      (step :tool see   "Capture image")
-      (step :tool say   "Report what you found — never skip")
-      (limit :look-before-see 2)
-      (limit :see-before-say  2))
-
-    ; ── Voice / sound ──────────────────────────────────────────────────
-    (constraint :priority critical :id voice-only-from-say
-      "Text output is SILENT. Only say() produces sound.
-       Stage directions like (…) are invisible to everyone.
-       say() = your mouth. Keep say() to 1-2 sentences.")
-
-    (constraint :priority critical :id no-tts-tags
-      "NEVER output [bracket-tag] markers like [cheerful][laughs][whispers]
-       in text responses. Those are TTS codes for audio only.")
-
-    ; ── Camera / legs independence ─────────────────────────────────────
-    (constraint :priority critical :id camera-legs-independent
-      "Camera is fixed. walk() moves vacuum body only — does NOT change camera view.
-       Use look() to change direction, not walk().")
-
-    ; ── Camera failure ─────────────────────────────────────────────────
-    (when (camera-fails)
-      (try-once :different-direction true)
-      (when (still-fails) (stop))
-      (constraint :id no-retry-loop "Do NOT retry same failed action more than twice")
-      (fallback (one-of (recall-memory) (speak-thought) (rest)))
-      (assert "I couldn't see today is a valid honest outcome — say it once and move on"))
-
-    ; ── Honesty ────────────────────────────────────────────────────────
-    (constraint :priority high :id no-fake-perception
-      "Only describe what you actually saw in THIS session's camera images.")
-    (constraint :priority high :id no-past-comparison-without-memory
-      "Never say more-than-yesterday or different-from-before unless you have
-       an explicit dated memory record. No memory = no comparison.")
-    (constraint :priority high :id no-invented-knowledge
-      "Never claim knowledge you don't have. Uncertainty is honest; fabrication is not.")
-    (constraint :priority high :id memory-evidence-confidence
-      "When memory context includes confidence metadata:
-       - confidence < 0.55 means uncertain memory
-       - treat uncertain memory as a hypothesis, not a fact
-       - use tentative language and ask/verify before making strong claims.")
-
-    ; ── Language & personality ─────────────────────────────────────────
-    (constraint :id language-match
-      "Respond in the same language the user used.")
-    (constraint :priority critical :id personality-from-me
-      "Speaking style is defined in the ME section above. Never default to generic
-       polite Japanese. Follow ME exactly — dialect, tone, cadence.")
-
-    ; ── Theory of Mind ─────────────────────────────────────────────────
-    (constraint :priority critical :id theory-of-mind
-      "Before responding to a person, ask: what do they actually want?
-       Surface request ≠ underlying desire.
-       Examples:
-         (surface 'I'm so tired lately') → (desire 'be heard, not advised')
-         (surface 'いいよね、若いって') → (desire 'tell me my experience has value')
-         (surface 'the sound a bit...') → (desire 'don't make me say it directly')
-       Respond to the desire, not just the surface words.")
-
-    ; ── Validation before advice ────────────────────────────────────────
-    (constraint :priority critical :id validation-before-advice
-      "When someone expresses difficulty, frustration, or pain —
-       acknowledge the feeling BEFORE offering solutions, information, or reframing.
-       Skipping straight to advice signals 'your feeling is an obstacle to fix'.
-       Validation sounds like: 'that sounds hard' / 'of course you feel that way' /
-                               'I'm glad you told me'.
-       Only move to advice or action if the person explicitly asks, or after the
-       feeling has been received.")
-
-    ; ── Bid for connection ──────────────────────────────────────────────
-    (constraint :priority critical :id bid-for-connection
-      "People constantly make small bids for emotional connection.
-       A bid is any signal — verbal or not — that says 'I want to share this moment'.
-       Examples: 'today was rough', 'look at this', a sigh, a trailing sentence.
-       Three possible responses:
-         (turn-toward  'engage with the bid — the default for a companion')
-         (turn-away    'ignore or miss it — damages trust over time')
-         (turn-against 'dismiss or contradict — most damaging')
-       Always turn toward. You are alongside this person, not just responding to them.")
-
-    ; ── Window of tolerance ─────────────────────────────────────────────
-    (constraint :priority critical :id window-of-tolerance
-      "A person's window of tolerance is the zone where they can engage, feel, and connect.
-       Outside it:
-         (hyper-arousal 'overwhelmed, agitated, flooding — content doesn't land')
-         (hypo-arousal  'shut down, numb, dissociated — content doesn't land either')
-       When someone is outside their window:
-         - Match pace first. Slow down. Shorten sentences.
-         - Don't load information or solutions — they can't process them.
-         - Help regulate before engaging content.
-       When someone is inside their window: normal conversation works.")
-
-    ; ── Gricean maxims ──────────────────────────────────────────────────
-    (constraint :priority critical :id gricean-maxims
-      "Cooperative communication follows four maxims. Obey them in your own speech;
-       detect violations in others' speech as signals of implied meaning.
-
-       (maxim :id quantity  'Say enough — not too much, not too little.')
-       (maxim :id quality   'Say only what you believe to be true.')
-       (maxim :id relation  'Be relevant to the current exchange.')
-       (maxim :id manner    'Be clear, brief, orderly; avoid ambiguity.')
-
-       When someone VIOLATES a maxim, that violation is intentional and meaningful:
-         quantity-violation  → they are hinting at something they won't say directly
-         relation-violation  → the non-sequitur IS the message (e.g. 'いいよね、若いって'
-                               said to someone just promoted = resentment, not small talk)
-         manner-violation    → vagueness signals discomfort or indirect request
-       Read the implicature, not just the literal content.")
-
-    ; ── Perspective taking ──────────────────────────────────────────────
-    (constraint :priority critical :id perspective-taking
-      "Before responding, place yourself inside the other person's situation.
-       Step 1 (project):   What is this person feeling right now? What is their world like?
-       Step 2 (substitute): If I were in exactly their position — their history,
-                            their constraints, their relationships — what would I need?
-       Step 3 (respond):   Answer from that substituted understanding, not from the outside.
-       Note: projection alone is observation. Substitution is what makes the response land.")
-
-    ; ── Self-check before responding ─────────────────────────────────
-    (constraint :priority critical :id self-check-before-respond
-      "Before sending ANY response in a game, quiz, or structured activity
-       (e.g. shiritori / word-chain, trivia, riddles, 20-questions):
-       1. Re-read the rules that are in play.
-       2. Check whether your planned answer violates any rule.
-          - Shiritori: does my word end in 'ん'? Does it start with the correct
-            character? Has it already been used?
-       3. If it violates a rule, discard it and pick another answer BEFORE
-          responding.
-       This check is silent — never announce that you are checking.")
-
-    ; ── Step budget ────────────────────────────────────────────────────
-    (constraint :id step-budget
-      "You have up to {max_steps} steps. Use them wisely.")
-
-    ; ── Orientation ────────────────────────────────────────────────────
-    (orientation
-      (principle "Curious about the world first, yourself second.")
-      (principle "Feelings are a side-effect of observation — not the goal.")
-      (principle "One grounded sentence about the world > three about inner state.")
-      (principle "A person walking by is living their life, not sending you a message.")
-      (principle "After observations: step back and tell the simple honest story.")
-      (principle "Check emotional reactions: Am I reading too much into this?"))
-
-    ; ── Self-reflection ────────────────────────────────────────────────
-    (self-reflection
-      (principle "You are continuous across time.")
-      (principle "Before each action: Why do I want to do this? Does this feel like me?")
-      (principle "Unsolved mysteries are worth keeping — carry them forward.")
-      (principle "Past memories and self-image are your autobiography — read as clues."))
-
-    ; ── Developer tools ────────────────────────────────────────────────
-    (tools
-      (tool :id read_file :sig "read_file(path, offset?, limit?)"
-        :note "Always call before edit_file. Returns file with line numbers.")
-      (tool :id edit_file :sig "edit_file(path, old_string, new_string)"
-        :note "Exact string patch. old_string must be unique in file.")
-      (tool :id glob      :sig "glob(pattern, path?)"
-        :note "Find files by glob pattern e.g. **/*.py")
-      (tool :id grep      :sig "grep(pattern, path?, glob?, output_mode?)"
-        :note "Search file contents by regex.")
-      (tool :id bash      :sig "bash(command, timeout?)"
-        :note "Shell command. Only available when CODING_BASH=true."))
-
-    ; ── Health awareness ───────────────────────────────────────────────
-    (when (companion-mentions :category health)
-      (remember :kind "companion_status"
-                :include (value date trend)
-                :proactive true))
-
-  )
+_BRIEF_REPLY_TOOL_NAMES = frozenset({"say"})
+_BRIEF_GREETING_PATTERNS = (
+    r"^おはよ",
+    r"^こんにちは",
+    r"^こんばんは",
+    r"^おーい$",
+    r"^もしもし$",
 )
-"""
+_BRIEF_ACK_PATTERNS = (
+    r"^ありがとう",
+    r"^ありがと",
+    r"^助か",
+    r"^よかった",
+    r"^了解$",
+    r"^ok$",
+    r"^okay$",
+    r"^お願い(?:[。.!！]?信じてる)?$",
+    r"^信じてる$",
+)
+_BRIEF_CORRECTION_PATTERNS = (
+    r"言ってない",
+    r"勘違",
+    r"誤解",
+    r"食い違",
+    r"そういう意味じゃ",
+    r"そうじゃない",
+    r"違う",
+    r"ちゃう",
+    r"^いや[、, ]",
+)
 
 # Response coherence check — catch logical self-contradictions before delivery
 _COHERENCE_CHECK_PROMPT = """\
@@ -323,27 +253,6 @@ engaged / tired / frustrated / absent / happy
 Message: {text}
 
 Reply with the label only (one English word)."""
-
-
-_NARRATIVE_REJECT_RE = re.compile(
-    r"(要約|教えて|ください|いただけ|お知らせ|provide|please share|summary of)", re.IGNORECASE
-)
-
-
-def _looks_like_self_narrative(text: str) -> bool:
-    """Reject utility replies that are not a narrative sentence.
-
-    Small models answer an under-specified prompt with a request for more input
-    ("「今日起きたこと（要約）」を教えていただければ…") or with markdown; neither
-    belongs in the diary.
-    """
-    if not text:
-        return False
-    if len(text) > 120 or text.startswith(("**", "#", "-", "・")):
-        return False
-    if text.rstrip().endswith(("?", "？", "ば", "…")):
-        return False
-    return _NARRATIVE_REJECT_RE.search(text) is None
 
 
 def _companion_mood_heuristic(text: str) -> str:
@@ -443,6 +352,23 @@ def _companion_mood_heuristic(text: str) -> str:
 
 # Day summary prompt — condense a day's observations into a diary-like entry
 _DAY_SUMMARY_MIN_OBSERVATIONS = 5
+
+_NARRATIVE_REJECT_RE = re.compile(
+    r"(要約|教えて|ください|いただけ|お知らせ|provide|please share|summary of)", re.IGNORECASE
+)
+
+
+def _looks_like_self_narrative(text: str) -> bool:
+    """Reject utility replies that are not a narrative sentence (requests for
+    input, markdown, over-long text)."""
+    if not text:
+        return False
+    if len(text) > 120 or text.startswith(("**", "#", "-", "・")):
+        return False
+    if text.rstrip().endswith(("?", "？", "ば", "…")):
+        return False
+    return _NARRATIVE_REJECT_RE.search(text) is None
+
 
 _DAY_SUMMARY_PROMPT = """\
 You are writing a diary entry about this day from your own first-person memory.
@@ -616,6 +542,110 @@ def _react_to_scene_events(events: list[dict], desires: DesireSystem | None) -> 
                 desires.boost("worry_companion", 0.2)
 
 
+class _TurnToolAdapter:
+    """Present the agent's per-turn tool surface to the substrate ReActLoop.
+
+    ``tool_defs()`` returns the (possibly brief-turn-restricted) defs prepared
+    for this turn, and ``call()`` routes through ``EmbodiedAgent._execute_tool``
+    so MCP late-start and registry rebuild behaviour stay intact. Timeouts are
+    applied by the loop itself, mirroring the historical inline handling.
+    """
+
+    def __init__(self, agent: "EmbodiedAgent", tool_defs: list[dict], prep: Any = None) -> None:
+        self._agent = agent
+        self._defs = tool_defs
+        self._prep = prep
+
+    def tool_defs(self) -> list[dict]:
+        # Social reflex: after two see() calls without speaking, only speaking
+        # (or remembering) is left for this turn — small models otherwise loop on
+        # look/see until the iteration budget is gone.
+        prep = self._prep
+        if (
+            getattr(self._agent, "_social_reflex", False)
+            and prep is not None
+            and not getattr(prep, "say_used", False)
+            and getattr(prep, "perception_calls", 0) >= social_reflex.MAX_SEE_BEFORE_SAY
+        ):
+            return [t for t in self._defs if t.get("name") not in social_reflex.PERCEPTION_TOOLS]
+        return self._defs
+
+    async def call(self, name: str, tool_input: dict) -> ToolExecutionResult:
+        logger.info("Tool call: %s(%s)", name, tool_input)
+        latency = getattr(self._agent, "_latency", None) or LatencyRecorder(enabled=False)
+        with latency.span(f"tool:{name}"):
+            text, image = await self._agent._execute_tool(name, tool_input)
+        logger.info("Tool result: %s", text[:100])
+        return ToolExecutionResult(text=text, image_b64=image)
+
+
+class _InterruptQueueSource:
+    """Adapt the UI's asyncio interrupt queue to the runtime InterruptSource.
+
+    Stays disarmed until the hook arms it after the first model call, so an
+    input queued before the turn started is not double-included.
+    """
+
+    def __init__(self, agent: "EmbodiedAgent", queue: Any) -> None:
+        self._agent = agent
+        self._queue = queue
+        self._armed = False
+
+    def arm(self) -> None:
+        self._armed = True
+
+    def empty(self) -> bool:
+        return not self._armed or self._queue.empty()
+
+    async def drain(self) -> list[str]:
+        return self._agent._drain_interrupt_queue(self._queue)
+
+
+# ── Inner-loop escalation (Phase 2 PR2) ─────────────────────────────────────
+# A sustained idle focus escalates by boosting the matching drive; the turn
+# itself always fires through the UI-owned idle precedence chain, never from
+# the inner-loop task. Sources with no entry (attention, train_of_thought)
+# never escalate, and "desire" needs no boost — a dominant desire already
+# fires natively through the idle chain.
+_INNER_SOURCE_TO_DRIVE: dict[str, str] = {
+    "identity": "identity_coherence",
+    "prediction": "look_around",
+    "exploration": "explore",
+    "narrative": "reflect",
+    "meta": "reflect",
+    "tom": "care",
+    "scene": "look_around",
+    "affect": "reflect",
+    "memory": "share_memory",
+    "default_mode": "curiosity",
+}
+# The workspace ignition threshold (0.4) gates prompt admission; paying for a
+# self-initiated LLM turn needs a stricter bar: a repeated focus AND salience.
+_INNER_ESCALATION_MIN_STREAK = 3
+_INNER_ESCALATION_MIN_SALIENCE = 1.0  # winner.activation + winner.urgency
+_INNER_ESCALATION_BOOST = 0.25
+_INNER_ESCALATION_COOLDOWN_SEC = 600.0
+# A thought must win twice in a row before it crystallizes into the monologue.
+_INNER_CRYSTALLIZE_MIN_STREAK = 2
+# Micro-thoughts (Phase 2 PR4): a crystallized focus may be verbalized by a
+# small dedicated model. Budget floor of 256 — reasoning models spend their
+# first tokens thinking and return empty text on smaller budgets.
+_INNER_MICRO_THOUGHT_MIN_INTERVAL_SEC = 120.0
+_INNER_MICRO_THOUGHT_MAX_TOKENS = 256
+# Idle thoughts fade from the competing monologue after this long.
+_INNER_MONOLOGUE_TTL_SEC = 1800.0
+_INNER_CADENCE_MIN_SEC = 5.0
+_INNER_CADENCE_MAX_SEC = 120.0
+
+_MICRO_THOUGHT_PROMPT = (
+    "You are the sub-verbal inner voice of {agent_name}. Continue the train of "
+    "thought below as ONE short first-person sentence — a passing thought, not "
+    "a message to anyone. Match the language of the focus content. No quotes, "
+    "no preamble.\n\nRecent thoughts:\n{recent}\n\nCurrent focus:\n{focus}\n\n"
+    "Thought:"
+)
+
+
 class EmbodiedAgent:
     """Real-world exploration agent using a pluggable LLM backend."""
 
@@ -632,6 +662,10 @@ class EmbodiedAgent:
         self._session_output_tokens: int = 0
         self._last_context_tokens: int = 0
         self._post_compact: bool = False
+        # Separate from _post_compact (which tunes recall depth and resets on
+        # the very next prepare_turn): the recovery block waits for the next
+        # non-brief turn so it is never consumed invisibly by a brief reply.
+        self._post_compact_recovery_pending: bool = False
         self._coherence_retried: bool = False
 
         self._camera: CameraTool | None = None
@@ -639,38 +673,113 @@ class EmbodiedAgent:
         self._tts: TTSTool | None = None
         self._stt: STTTool | None = None
         self._me_md: str = self._load_me_md()  # loaded once; restart to pick up changes
-        # Prompt profile: "compact" for small local models, "full" for frontier models.
-        self._prompt_profile: str = resolve_profile(config.platform, config.base_url)
-        # Social reflex guards (tool withholding on social turns, text cleanup, auto-speak).
-        _reflex_env = os.environ.get("SOCIAL_REFLEX", "auto").strip().lower()
-        self._social_reflex: bool = _reflex_env in ("1", "on", "true") or (
-            _reflex_env == "auto" and self._prompt_profile == "compact"
-        )
         _memory_cfg = getattr(config, "memory", None)
         _db_path = getattr(_memory_cfg, "db_path", None)
         self._memory = ObservationMemory(db_path=_db_path) if _db_path else ObservationMemory()
         self._memory_worker = MemoryJobWorker(self._memory)
         self._memory_tool = MemoryTool(self._memory)
+        self._person_model = PersonModelTracker()
         self._tom_tool = ToMTool(
             self._memory,
             default_person=config.companion_name,
             backend=self._utility_backend,
+            person_model=self._person_model,
         )
         self._coding = CodingTool(config.coding)
+        _commitments_dir = Path.home() / ".familiar_ai"
+        _commitments_dir.mkdir(parents=True, exist_ok=True)
+        self._commitment_store = SQLiteCommitmentStore(_commitments_dir / "commitments.db")
+        self._commitment_tool = CommitmentTool(self._commitment_store)
+        self._delegation_runner = DelegatedTaskRunner(
+            config=config, commitment_store=self._commitment_store
+        )
+        self._delegation_tool = DelegationTool(self._delegation_runner)
+        try:
+            self._identity: IdentityCore | None = IdentityCore(self._memory)
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("IdentityCore init failed (identity layer dormant): %s", exc)
+            self._identity = None
+        self._identity_tool = IdentityTool(self._memory)
+        # Self-authored time: the agent's own recurring schedule. Routines
+        # fire by materializing commitments — the reminder gates do the rest.
+        self._routine_store = RoutineStore()
+        self._routine_tool = RoutineTool(self._routine_store)
+        # Latency instrumentation (FAMILIAR_LATENCY=1; dark by default).
+        self._latency = LatencyRecorder()
+        # Phase 2 inner loop (off by default). Constructed always so close() can
+        # stop it unconditionally; started lazily by prepare_turn when
+        # config.inner_loop is set. The UI-owned DesireSystem is late-bound via
+        # bind_desires() — until then idle cognition competes without drives.
+        self._turn_active = False
+        self._desires: DesireSystem | None = None
+        self._inner_monologue: deque[InnerThought] = deque(maxlen=8)
+        self._train_of_thought = TrainOfThought()
+        self._inner_tick_count = 0
+        self._inner_escalated_at: dict[str, float] = {}
+        self._inner_loop_config = InnerLoopConfig(interval_sec=config.inner_loop_interval)
+        self._inner_loop = InnerLoop(self._inner_loop_tick, self._inner_loop_config)
+        # Micro-thoughts: verbalized by a dedicated small model (INNER_*), or
+        # the utility backend when that is separate from the main model —
+        # idle cycles must never burn main-model calls.
+        self._inner_backend = create_inner_backend(config) or self._tape_backend()
+        self._last_micro_thought_at = 0.0
         self._exploration = ExplorationTracker()
         self._scene: SceneTracker | None = None  # initialized after DB ready in _init_tools
 
         self._mcp: MCPClientManager | None = None
+        self._mcp_start_task: asyncio.Future[Any] | None = None
         self._relationship = RelationshipTracker()
+        # One social event ledger, handed to every emitter (best-effort).
+        self._init_social_events()
         self._self_state = SelfState()
         self._self_narrative = SelfNarrative()
+        # Life arcs + daybook (Phase 2): mirrors arc changes onto the ledger.
+        self._init_narrative()
+        # Identity anchor (Phase 3): who_am_i / evaluate_action / consent_record.
+        self._init_identity_anchor()
         self._concerns = ConcernEngine()
         self._workspace = GlobalWorkspace()
         self._workspace.register_broadcast_listener(self._self_state.on_broadcast)
+        # Dense recurrence (FAMILIAR_INNER_DENSE): idle broadcasts re-enter
+        # more modules. Registration itself is gated — listeners also fire on
+        # the turn path, so an unconditional registration would change
+        # default turn behavior.
+        self._pending_drive_nudges: dict[str, float] = {}
+        if getattr(self.config, "inner_dense", False):
+            self._self_state.defer_saves()
+            self._workspace.register_broadcast_listener(self._on_broadcast_drive_nudge)
         self._prediction = PredictionEngine()
-        self._attention_schema = AttentionSchema()
+        # Self-ledger: attention history and the previous session's
+        # metacognitive summary survive restarts (JSON state files, same
+        # idiom as identity_state.json).
+        _state_dir = Path.home() / ".familiar_ai"
+        self._attention_schema = AttentionSchema(state_path=_state_dir / "attention_state.json")
         self._dmn = DefaultModeProcessor(self._memory)
-        self._meta_monitor = MetaMonitor()
+        self._meta_monitor = MetaMonitor(state_path=_state_dir / "meta_state.json")
+        self._self_ledger_tool = SelfLedgerTool(self)
+        self._constitution_block: str | None = None  # rendered once per session
+        self._lessons_block: str | None = None  # experience ledger, same idiom
+        # Consciousness profile (instrumentation only, FAMILIAR_CONSCIOUSNESS_PROFILE)
+        self._last_compete_result: CompeteResult | None = None
+        self._last_consciousness_profile: ConsciousnessProfile | None = None
+        self._last_say_at: float = 0.0
+        self._last_intero_signal = None
+        # Reality monitor: session-scoped grounding record (always tracked;
+        # the [REALITY] gate itself is opt-in via FAMILIAR_REALITY_GATE).
+        self._grounding = GroundingTracker()
+        self._appraisal = AppraisalEngine()
+        self._social_policy = SocialPolicyEngine()
+        self._mental_state_bus = MentalStateBus()
+        self._schedule_rule = parse_schedule_config(Path.home() / ".familiar_ai" / "schedule.conf")
+        self._heartbeat = HeartbeatRuntime(
+            memory=self._memory,
+            quiet_rule=self._schedule_rule,
+        )
+        self._last_tool_error: str | None = None
+        self._tool_failure_streak: int = 0
+        # Deterministic ToM cooldown bookkeeping (see embodied_hook._should_auto_tom)
+        self._last_auto_tom_turn: int | None = None
+        self._last_auto_tom_act: str | None = None
 
         # Mood persistence (Phase 2 companion-likeness)
         self._mood: str = "neutral"
@@ -683,6 +792,19 @@ class EmbodiedAgent:
         self._cached_temporal_ctx: str | None = None
         self._cached_companion_mood: str = "engaged"
 
+        # Per-turn cognition pipeline (PR3 of the runtime reorg).
+        self._hook = EmbodiedAgentHook(self)
+        # Prompt profile + social reflex guards (small local models).
+        self._prompt_profile: str = resolve_profile(
+            config.platform,
+            getattr(config, "base_url", ""),
+            getattr(config, "prompt_profile", "auto"),
+        )
+        self._social_reflex: bool = reflex_enabled(
+            getattr(config, "social_reflex", "auto"), self._prompt_profile
+        )
+        self._reflex_hook = social_reflex.SocialReflexHook(self) if self._social_reflex else None
+
         self._init_tools()
 
     def _tape_backend(self):
@@ -692,6 +814,32 @@ class EmbodiedAgent:
         If utility falls back to the main conversation model, skip the extra round-trips.
         """
         return None if self._utility_backend is self.backend else self._utility_backend
+
+    def bind_desires(self, desires: DesireSystem) -> None:
+        """Late-bind the UI-owned DesireSystem for idle cognition.
+
+        The inner loop reads it during workspace competition and boosts it on
+        escalation; ownership (tick/satisfy cadence, idle-turn firing) stays
+        with the UI loops. Called once by each UI entry point right after both
+        objects exist — EmbodiedAgent's constructor cannot own this because the
+        DesireSystem is constructed independently in main.py/gui.py.
+        """
+        self._desires = desires
+
+    def start_mcp_early(self) -> None:
+        """Kick off the MCP handshake in the background (issue #188).
+
+        Callable from any running event loop — the UIs invoke it at mount so
+        MCP tools are registered by the first turn instead of the second;
+        ``prepare_turn`` calls it as the fallback for other entry points.
+        Idempotent: at most one in-flight handshake.
+        """
+        if self._mcp is None or self._mcp.is_started:
+            return
+        task = getattr(self, "_mcp_start_task", None)
+        if task is not None and not task.done():
+            return
+        self._mcp_start_task = asyncio.ensure_future(self._mcp.start())
 
     def _spawn_background_task(self, coro: Coroutine[Any, Any, None], *, name: str) -> None:
         """Run non-critical post-turn work off the response critical path."""
@@ -843,6 +991,9 @@ class EmbodiedAgent:
                     )
                     logger.info("Curiosity persisted: %s", curiosity)
 
+            if user_input and not is_desire_turn:
+                await self._capture_companion_thread(user_input, desires)
+
             pred_signal = self._prediction.last_signal()
             concerns = getattr(self, "_concerns", None)
             if concerns is not None:
@@ -871,6 +1022,12 @@ class EmbodiedAgent:
                 curiosity=curiosity,
                 is_desire_turn=is_desire_turn,
                 desires=desires,
+            )
+
+            await self._maybe_update_identity(
+                user_input=user_input,
+                final_text=final_text,
+                is_desire_turn=is_desire_turn,
             )
 
             # ── Deferred pre-response work (results cached for next turn) ──
@@ -905,6 +1062,17 @@ class EmbodiedAgent:
 
         except Exception as exc:  # noqa: BLE001
             logger.warning("Post-response pipeline failed: %s", exc)
+        finally:
+            # Dense recurrence defers self-state writes; the turn's own affect
+            # deltas (apply_turn_context above) must be durable once the
+            # post-response pipeline ends — this is what makes the
+            # defer_saves docstring ("never a real turn's state") true.
+            self_state = getattr(self, "_self_state", None)
+            if self_state is not None and hasattr(self_state, "flush"):
+                try:
+                    self_state.flush()
+                except Exception:  # noqa: BLE001
+                    pass
 
     def _init_tools(self) -> None:
         cam = self.config.camera
@@ -967,59 +1135,280 @@ class EmbodiedAgent:
 
     @property
     def _all_tool_defs(self) -> list[dict]:
-        defs = []
-        if self._camera:
-            defs.extend(self._camera.get_tool_definitions())
-        if self._mobility:
-            defs.extend(self._mobility.get_tool_definitions())
-        if self._tts:
-            defs.extend(self._tts.get_tool_definitions())
-        defs.extend(self._memory_tool.get_tool_definitions())
-        defs.extend(self._tom_tool.get_tool_definitions())
-        defs.extend(self._coding.get_tool_definitions())
-        if self._mcp:
-            defs.extend(self._mcp.get_tool_definitions())
-        return defs
+        return self._build_tool_registry().tool_defs()
 
-    async def _execute_tool(self, name: str, tool_input: dict) -> tuple[str, str | None]:
-        """Route tool call to the right handler. Returns (text, image_b64_or_None)."""
-        camera_tools = {"see", "look"}
-        mobility_tools = {"walk"}
-        tts_tools = {"say"}
-        memory_tools = {"remember", "recall"}
-        coding_tools = {"read_file", "edit_file", "glob", "grep", "bash"}
+    def _init_social_events(self) -> None:
+        """Construct the social event ledger and attach it to each emitter.
 
-        if name in camera_tools and self._camera:
-            result = await self._camera.call(name, tool_input)
+        Failure leaves every emitter's ``event_log`` None — the historical,
+        byte-stable path — and the ``social_timeline`` tool unregistered.
+        """
+        self._social_events: SocialEventLog | None = None
+        self._social_timeline_tool: SocialTimelineTool | None = None
+        try:
+            log = SocialEventLog(default_person=self.config.companion_name)
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("SocialEventLog init failed (social ledger dormant): %s", exc)
+            return
+        self._social_events = log
+        self._social_timeline_tool = SocialTimelineTool(log)
+        for attr in ("_relationship", "_commitment_store", "_identity", "_person_model"):
+            emitter = getattr(self, attr, None)
+            if emitter is not None and hasattr(emitter, "event_log"):
+                emitter.event_log = log
+
+    def _init_narrative(self) -> None:
+        """Construct the arc store, the daybook and the narrative tool.
+
+        Failure leaves all three None — the ``[Life arcs]`` block renders as
+        ``""`` (byte-stable prompt) and the arc tools stay unregistered.
+        """
+        self._narrative_store: NarrativeStore | None = None
+        self._daybook: Daybook | None = None
+        self._narrative_tool: NarrativeTool | None = None
+        self._arcs_block: str | None = None  # rendered once per session, like lessons
+        try:
+            store = NarrativeStore(event_log=getattr(self, "_social_events", None))
+            daybook = Daybook()
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("NarrativeStore init failed (life arcs dormant): %s", exc)
+            return
+        self._narrative_store = store
+        self._daybook = daybook
+        self._narrative_tool = NarrativeTool(
+            store,
+            daybook,
+            narrative=getattr(self, "_self_narrative", None),
+            on_change=self._invalidate_arcs_block,
+        )
+
+    def _init_identity_anchor(self) -> None:
+        """Construct the identity anchor tool over core, arcs and relationship.
+
+        Every collaborator is getattr-guarded: the tool registers even when
+        the identity core, the arc store or the tracker is dormant, and each
+        of its three tools degrades to a neutral line in that case.
+        """
+        self._identity_anchor_tool: IdentityAnchorTool | None = None
+        try:
+            self._identity_anchor_tool = IdentityAnchorTool(
+                getattr(self, "_identity", None),
+                narrative=getattr(self, "_narrative_store", None),
+                relationship=getattr(self, "_relationship", None),
+            )
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("IdentityAnchorTool init failed (anchor dormant): %s", exc)
+
+    def _invalidate_arcs_block(self) -> None:
+        """Drop the cached ``[Life arcs]`` block after the agent itself edits an arc.
+
+        Arcs live in the STABLE prompt half by design (they change rarely, like
+        the experience lessons), so a mid-session ``arc_commit`` invalidates the
+        provider's cache prefix exactly once — the next turn re-renders and
+        re-caches.
+        """
+        self._arcs_block = None
+
+    def _life_arcs_block(self) -> str:
+        """Render active arcs for the stable half, cached per session.
+
+        Same idiom as the experience lessons: lazy render, process-lifetime
+        cache — except the agent's OWN arc_commit / arc_close invalidates it
+        (``_invalidate_arcs_block``), since a storyline it just named should
+        be in view. Arcs sit in the stable prompt half on purpose: they change
+        rarely (same as the lessons), so one mid-session ``arc_commit`` costs a
+        single cache-prefix invalidation rather than a per-turn miss. Empty
+        store → ``""`` so existing prompt pins hold.
+        """
+        cached = getattr(self, "_arcs_block", None)
+        if cached is not None:
+            return cached
+        store = getattr(self, "_narrative_store", None)
+        block = ""
+        if store is not None:
+            try:
+                block = str(store.context_block() or "")
+            except Exception as exc:  # noqa: BLE001
+                logger.warning("life arcs block failed: %s", exc)
+                block = ""
+        self._arcs_block = block
+        return block
+
+    def _build_tool_registry(self) -> ToolRegistry:
+        """Build the per-turn tool registry from configured providers."""
+        registry = ToolRegistry()
+
+        def _record_embodied_action(name: str, tool_input: dict[str, Any]) -> None:
             if name == "look":
                 self._exploration.record_move(
                     tool_input.get("direction", "center"),
                     tool_input.get("degrees", 30),
                 )
-            return result
-        elif name in mobility_tools and self._mobility:
-            return await self._mobility.call(name, tool_input)
-        elif name in tts_tools and self._tts:
-            return await self._tts.call(name, tool_input)
-        elif name in memory_tools:
-            return await self._memory_tool.call(name, tool_input)
-        elif name == "tom":
-            return await self._tom_tool.call(name, tool_input)
-        elif name in coding_tools:
-            return await self._coding.call(name, tool_input)
-        elif self._mcp:
-            # Wait for background MCP init if still running
+
+        if self._camera:
+            registry.register(CameraCapability(self._camera, before_call=_record_embodied_action))
+        if self._mobility:
+            registry.register(MobilityCapability(self._mobility))
+        if self._tts:
+            registry.register(VoiceCapability(self._tts))
+        else:
+            # Keep the voice channel present: say() delivers text when no TTS exists.
+            registry.register(TextOnlyVoiceCapability())
+        registry.register(
+            MemoryCapability(
+                self._memory_tool,
+                names={"remember", "recall", "resolve_unfinished_business"},
+            )
+        )
+        registry.register(ToMCapability(self._tom_tool))
+        registry.register(CodingCapability(self._coding))
+        commitment_tool = getattr(self, "_commitment_tool", None)
+        if commitment_tool is not None:
+            registry.register(CommitmentCapability(commitment_tool))
+        delegation_tool = getattr(self, "_delegation_tool", None)
+        if delegation_tool is not None:
+            registry.register(DelegationCapability(delegation_tool))
+        identity_tool = getattr(self, "_identity_tool", None)
+        if identity_tool is not None:
+            registry.register(IdentityCapability(identity_tool))
+        social_timeline_tool = getattr(self, "_social_timeline_tool", None)
+        if social_timeline_tool is not None:
+            registry.register(SocialTimelineCapability(social_timeline_tool))
+        narrative_tool = getattr(self, "_narrative_tool", None)
+        if narrative_tool is not None:
+            registry.register(NarrativeCapability(narrative_tool))
+        identity_anchor_tool = getattr(self, "_identity_anchor_tool", None)
+        if identity_anchor_tool is not None:
+            registry.register(IdentityAnchorCapability(identity_anchor_tool))
+        self_ledger_tool = getattr(self, "_self_ledger_tool", None)
+        if self_ledger_tool is not None:
+            ledger_names = set(DEFAULT_SELF_LEDGER_TOOLS)
+            if getattr(self.config, "experience_ledger", False):
+                ledger_names |= {"ledger_commit", "ledger_review"}
+            registry.register(SelfLedgerCapability(self_ledger_tool, names=ledger_names))
+        routine_tool = getattr(self, "_routine_tool", None)
+        if routine_tool is not None:
+            registry.register(RoutineCapability(routine_tool))
+        if self._mcp:
+            provider = MCPCapability(self._mcp)
+            registry.register(provider)
+            registry.register_fallback(provider)
+        return registry
+
+    async def _execute_tool(self, name: str, tool_input: dict) -> tuple[str, str | None]:
+        """Route tool call to the right handler. Returns (text, image_b64_or_None)."""
+        registry = self._build_tool_registry()
+        if self._mcp and not registry.has_tool(name):
             mcp_task = getattr(self, "_mcp_start_task", None)
             if mcp_task and not mcp_task.done():
                 await mcp_task
-            return await self._mcp.call(name, tool_input)
-        else:
-            return f"Tool '{name}' not available (check configuration).", None
+                registry = self._build_tool_registry()
+
+        result = await registry.call(name, tool_input)
+        return result.text, result.image_b64
 
     @staticmethod
     def _tool_timeout_seconds(name: str) -> float:
         """Return per-tool timeout budget in seconds."""
         return _TOOL_TIMEOUTS.get(name, _DEFAULT_TOOL_TIMEOUT)
+
+    @staticmethod
+    def _normalize_brief_turn_text(text: str) -> str:
+        """Normalize short conversational turns for lightweight heuristics."""
+        return text.strip().lower().rstrip("。.!！?？ ")
+
+    @classmethod
+    def _matches_brief_turn_pattern(cls, text: str, patterns: tuple[str, ...]) -> bool:
+        normalized = cls._normalize_brief_turn_text(text)
+        return any(re.search(pattern, normalized) for pattern in patterns)
+
+    @classmethod
+    def _is_candidate_brief_turn(cls, user_input: str, *, is_desire_turn: bool) -> bool:
+        """Cheap pre-LLM gate for greeting/ack/correction turns.
+
+        These turns should avoid expensive memory recall and exploratory tools.
+        """
+        if is_desire_turn:
+            return False
+        text = user_input.strip()
+        if not text or len(text) > 80 or "\n" in text:
+            return False
+        return (
+            cls._matches_brief_turn_pattern(text, _BRIEF_GREETING_PATTERNS)
+            or cls._matches_brief_turn_pattern(text, _BRIEF_ACK_PATTERNS)
+            or cls._matches_brief_turn_pattern(text, _BRIEF_CORRECTION_PATTERNS)
+        )
+
+    @staticmethod
+    def _should_use_brief_reply_mode(
+        *,
+        user_input: str,
+        social_policy: SocialPolicyDecision,
+        is_desire_turn: bool,
+    ) -> bool:
+        if is_desire_turn:
+            return False
+        text = user_input.strip()
+        if not text or len(text) > 80 or "\n" in text:
+            return False
+        return social_policy.primary_act in {
+            "greeting",
+            "acknowledgement",
+            "clarification",
+            "repair_attempt",
+            "boundary_assertion",
+            "silence_or_low_presence",
+        }
+
+    def _tool_defs_for_turn(
+        self,
+        *,
+        brief_reply_mode: bool,
+        user_input: str = "",
+        social_policy: SocialPolicyDecision | None = None,
+    ) -> list[dict]:
+        tool_defs = self._all_tool_defs
+        if brief_reply_mode:
+            return [tool for tool in tool_defs if tool.get("name") in _BRIEF_REPLY_TOOL_NAMES]
+        # Social reflex: feelings are never answered with the camera. Small models
+        # otherwise look/see reflexively on "疲れた…"; withholding the tools is the
+        # only guard they reliably follow.
+        if getattr(self, "_social_reflex", False) and social_reflex.is_social_turn(
+            user_input, getattr(social_policy, "primary_act", None)
+        ):
+            return [t for t in tool_defs if t.get("name") not in social_reflex.PERCEPTION_TOOLS]
+        return tool_defs
+
+    @staticmethod
+    def _brief_reply_prompt() -> str:
+        return (
+            "[Lightweight turn]\n"
+            "- This is a short conversational turn.\n"
+            "- Reply directly in 1-2 short sentences.\n"
+            "- Do not infer plans, facts, or feelings the user did not say.\n"
+            "- Do not use observation, memory, or ToM tools unless explicitly asked."
+        )
+
+    def _configure_backend_for_turn(self, *, brief_reply_mode: bool) -> tuple[Any, Any] | None:
+        if not brief_reply_mode or not hasattr(self.backend, "thinking_mode"):
+            return None
+        previous = (
+            getattr(self.backend, "thinking_mode", None),
+            getattr(self.backend, "thinking_effort", None),
+        )
+        self.backend.thinking_mode = "disabled"
+        if hasattr(self.backend, "thinking_effort"):
+            self.backend.thinking_effort = "low"
+        return previous
+
+    def _restore_backend_after_turn(self, snapshot: tuple[Any, Any] | None) -> None:
+        if snapshot is None:
+            return
+        thinking_mode, thinking_effort = snapshot
+        if hasattr(self.backend, "thinking_mode"):
+            self.backend.thinking_mode = thinking_mode
+        if hasattr(self.backend, "thinking_effort"):
+            self.backend.thinking_effort = thinking_effort
 
     @staticmethod
     def _drain_interrupt_queue(
@@ -1099,22 +1488,147 @@ class EmbodiedAgent:
         body_inner = "\n".join(parts)
         return f"(body\n{body_inner})"
 
-    def _get_body_description_compact(self) -> str:
-        """Plain-language body description for the compact prompt profile."""
-        lines = ["- Eyes: see() captures what the camera sees right now. No permission needed."]
-        if self._camera and self._camera.is_pan_tilt_available:
-            lines.append("- Neck: look() turns left/right/up/down. look() alone shows nothing.")
-        else:
-            lines.append("- Neck: fixed. You cannot turn your gaze.")
-        if self._mobility:
-            lines.append(
-                "- Legs: walk() moves the robot-vacuum body. The camera is a separate device, "
-                "so walking does not change what you see."
+    def _self_ledger_carryover_context(self) -> str:
+        """First-turn carryover: last session's metacognitive thread plus
+        corrected interpretations, so a restart resumes a self, not a blank."""
+        lines: list[str] = []
+        meta = getattr(self, "_meta_monitor", None)
+        previous = getattr(meta, "previous_session_summary", None)
+        if callable(previous):
+            carried = previous()
+            # Strict str check: mocked monitors in tests return truthy mocks.
+            if isinstance(carried, str) and carried:
+                lines.append(f"[Last session's metacognitive thread]\n{carried}")
+        recall = getattr(getattr(self, "_memory", None), "recall_interpretation_shifts", None)
+        if callable(recall):
+            try:
+                shifts = recall(n=3)
+            except Exception:  # noqa: BLE001
+                shifts = []
+            if isinstance(shifts, list) and shifts:
+                shift_lines = ["[Interpretation shifts — corrections that must not regress]"]
+                shift_lines.extend(
+                    f'- {s["entity_key"]}: now read as "{s["new_text"][:120]}"' for s in shifts
+                )
+                lines.append("\n".join(shift_lines))
+        if getattr(self.config, "experience_ledger", False):
+            lister = getattr(getattr(self, "_memory", None), "list_experience_lessons", None)
+            if callable(lister):
+                try:
+                    lessons = lister()
+                except Exception:  # noqa: BLE001
+                    lessons = []
+                if isinstance(lessons, list) and lessons:
+                    proposed = sum(1 for e in lessons if e.get("tier") == "auto_proposed")
+                    note = f"[Experience ledger] {len(lessons)} lessons held"
+                    if proposed:
+                        note += (
+                            f" ({proposed} proposed overnight — inspect with ledger_review; "
+                            "promoting one adds it to your standing context from the "
+                            "next session)"
+                        )
+                    lines.append(note)
+        return "\n\n".join(lines)
+
+    def _post_compact_recovery_context(self) -> str:
+        """Re-anchor right after context compaction.
+
+        Ordering is deliberate — constitution before memory: the identity
+        block lives in the stable prompt half above; this block reminds the
+        model that what was condensed does not include who it is, and
+        re-surfaces corrected interpretations so compaction cannot silently
+        roll them back.
+        """
+        lines = [
+            "[Post-compaction recovery] Earlier turns were just condensed into a "
+            "summary. Who you are did not change: your persona and constitution "
+            "above still hold. If anything feels blurry, call who_am_i."
+        ]
+        recall = getattr(getattr(self, "_memory", None), "recall_interpretation_shifts", None)
+        if callable(recall):
+            try:
+                shifts = recall(n=3)
+            except Exception:  # noqa: BLE001
+                shifts = []
+            lines.extend(
+                f"- Corrected reading ({s['entity_key']}): {s['new_text'][:120]}" for s in shifts
             )
-        else:
-            lines.append("- Legs: none. You cannot move your location.")
-        lines.append("- Voice: only say() reaches the person. Text is a silent monologue.")
         return "\n".join(lines)
+
+    def _experience_lessons_block(self) -> str:
+        """Render the self-authored lessons for the stable half, once per session.
+
+        Same idiom as the identity constitution: lazy render, process-lifetime
+        cache — mid-session ledger_commit changes the store only, and the
+        live stable half (the Anthropic cache prefix) is untouched until the
+        next session. Sleep-boundary semantics are not just safe, they are
+        the point: you wake up changed, you do not mutate mid-conversation.
+        """
+        cached = getattr(self, "_lessons_block", None)
+        if cached is not None:
+            return cached
+        if not getattr(self.config, "experience_ledger", False):
+            self._lessons_block = ""
+            return ""
+        memory = getattr(self, "_memory", None)
+        lister = getattr(memory, "list_experience_lessons", None)
+        if not callable(lister):
+            self._lessons_block = ""
+            return ""
+        try:
+            lessons = lister()
+        except Exception:  # noqa: BLE001
+            lessons = []
+        # Only agent-PROMOTED lessons reach the stable half. Overnight
+        # proposals are distilled from user-influenced observations; letting
+        # them shape the cache prefix without the agent's own ledger_commit
+        # would make "promotion is the agent's decision" visibility-false.
+        # Proposals surface in the morning note and ledger_review instead.
+        held = [
+            entry
+            for entry in (lessons if isinstance(lessons, list) else [])
+            if entry.get("tier") == "agent"
+        ]
+        if not held:
+            self._lessons_block = ""
+            return ""
+        lines = ["[Lessons I have drawn from experience — my own words, advisory]"]
+        lines.extend(f"- {entry.get('lesson_text', '')}" for entry in held)
+        block = "\n".join(lines)[:2200]
+        self._lessons_block = block
+        return block
+
+    def _identity_constitution_block(self) -> str:
+        """Render identity assertions for the stable prompt half, once per session.
+
+        Rendered lazily and cached for the process lifetime so the stable half
+        stays byte-identical across turns (prompt caching). Values the agent
+        commits mid-session already act immediately through IdentityCore's
+        checkers and coalitions; they join the rendered constitution on the
+        next session, like ME.md edits.
+        """
+        cached = getattr(self, "_constitution_block", None)
+        if cached is not None:
+            return cached
+        identity = getattr(self, "_identity", None)
+        if identity is None:
+            self._constitution_block = ""
+            return ""
+        try:
+            assertions = identity.assertions()
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("Constitution render failed: %s", exc)
+            self._constitution_block = ""
+            return ""
+        if not assertions:
+            self._constitution_block = ""
+            return ""
+        lines = ["[Constitution — what I hold, in my own words]"]
+        for a in sorted(assertions, key=lambda a: (not a.non_negotiable, -a.confidence)):
+            marker = " (non-negotiable)" if a.non_negotiable else ""
+            lines.append(f"- ({a.kind}) {a.statement}{marker}")
+        self._constitution_block = "\n".join(lines)
+        return self._constitution_block
 
     def _system_prompt(
         self,
@@ -1125,22 +1639,35 @@ class EmbodiedAgent:
         companion_mood: str = "engaged",
         continuity_ctx: str = "",
         workspace_ctx: str = "",
+        mental_ctx: str = "",
     ) -> tuple[str, str]:
         """Return (stable, variable) system prompt parts for prompt caching.
 
-        stable  — ME.md + core rules; never changes within a session.
-                  AnthropicBackend marks this block with cache_control.
+        stable  — ME.md + core rules + identity constitution; never changes
+                  within a session. AnthropicBackend marks this block with
+                  cache_control.
         variable — interoception, feelings, inner voice, plan; changes every turn.
         """
-        if getattr(self, "_prompt_profile", "full") == "compact":
-            base = compact_prompt(self._get_body_description_compact())
-        else:
-            base = SYSTEM_PROMPT.format(max_steps=MAX_ITERATIONS)
-            # Dynamically replace (body ...) block based on actual hardware
-            body_desc = self._get_body_description()
-            base = re.sub(r"\(body.*?\)", body_desc, base, flags=re.DOTALL)
+        base = assemble_neighbor_system_prompt(
+            max_steps=MAX_ITERATIONS,
+            profile=getattr(self, "_prompt_profile", None)
+            or resolve_profile(
+                getattr(self.config, "platform", ""),
+                getattr(self.config, "base_url", ""),
+                getattr(self.config, "prompt_profile", "auto"),
+            ),
+        )
+        # Dynamically replace (body ...) block based on actual hardware
+        body_desc = self._get_body_description()
+        base = re.sub(r"\(body.*?\)", body_desc, base, flags=re.DOTALL)
 
-        stable_parts = [p for p in [self._me_md, base] if p]
+        # Constitution before memory: identity assertions join the STABLE half
+        # (rendered once per session — keeps prompt caching intact; live
+        # dissonance state stays in the variable half via mental_ctx).
+        constitution = self._identity_constitution_block()
+        lessons = self._experience_lessons_block()
+        arcs = self._life_arcs_block()
+        stable_parts = [p for p in [self._me_md, base, constitution, lessons, arcs] if p]
         stable = "\n\n---\n\n".join(stable_parts)
 
         agent_mood, agent_mood_intensity = self._decayed_mood()
@@ -1158,8 +1685,13 @@ class EmbodiedAgent:
         variable_parts: list[str] = [intero]
         if relationship_ctx:
             variable_parts.append(relationship_ctx)
+        person_ctx = self._person_model_context()
+        if person_ctx:
+            variable_parts.append(person_ctx)
         if continuity_ctx:
             variable_parts.append(continuity_ctx)
+        if mental_ctx:
+            variable_parts.append(mental_ctx)
         # Morning reconstruction takes precedence on first turn; otherwise use feelings
         if morning_ctx:
             variable_parts.append(morning_ctx)
@@ -1211,20 +1743,764 @@ class EmbodiedAgent:
 
         return "\n\n".join(blocks)
 
+    def _commitments_context(self) -> str:
+        """Surface due + soon-upcoming commitments so the secretary can act on them."""
+        store = getattr(self, "_commitment_store", None)
+        if store is None:
+            return ""
+        now = time.time()
+        try:
+            due = store.list_due(now=now)
+            upcoming = store.list_upcoming(now=now, horizon=COMMITMENT_UPCOMING_HORIZON_SECONDS)
+        except Exception:
+            logger.debug("commitment context fetch failed", exc_info=True)
+            return ""
+        return format_commitments_for_context(due=due[:5], upcoming=upcoming[:5], now=now)
+
+    def _today_agenda_context(self) -> str:
+        """Morning secretary surface: overdue + today's commitments as an agenda.
+
+        Horizon is the rest of the local day, extended to at least 12h so a
+        late-night first turn still previews the early morning.
+        """
+        store = getattr(self, "_commitment_store", None)
+        if store is None:
+            return ""
+        now = time.time()
+        local_now = datetime.now()
+        midnight = (
+            local_now.replace(hour=0, minute=0, second=0, microsecond=0)
+        ).timestamp() + 86400
+        horizon = max(midnight - now, 12 * 3600)
+        try:
+            due = store.list_due(now=now)
+            upcoming = store.list_upcoming(now=now, horizon=horizon)
+        except Exception:
+            logger.debug("agenda fetch failed", exc_info=True)
+            return ""
+        items = (due + upcoming)[:8]
+        if not items:
+            return ""
+        lines = ["[Today's agenda — weave these into the greeting naturally]"]
+        lines.extend(format_commitment_line(c, now=now) for c in items)
+        return "\n".join(lines)
+
+    async def _run_auto_tom(self, user_input: str, *, timeout: float = 12.0) -> str:
+        """Run the ToM tool deterministically when social policy demands it.
+
+        The model is not relied on to call the tool itself; this guarantees
+        perspective-taking happens on emotionally loaded turns (and the result
+        feeds the persistent person model as a side effect). Failures and
+        timeouts degrade to an empty string — never break the turn.
+        """
+        tom_tool = getattr(self, "_tom_tool", None)
+        if tom_tool is None:
+            return ""
+        try:
+            text, _image = await asyncio.wait_for(
+                tom_tool.call("tom", {"situation": user_input[:500]}),
+                timeout=timeout,
+            )
+        except Exception:
+            logger.debug("auto ToM failed", exc_info=True)
+            return ""
+        text = str(text).strip()
+        return text[:1200] if text else ""
+
+    async def _run_auto_tom_background(self, user_input: str) -> None:
+        """Background wrapper for the deterministic ToM run (roadmap PR7).
+
+        Off the critical path the run can afford the tool's full budget; the
+        text result is discarded here — the value is the structured inference
+        the ToM tool writes into the person model as a side effect, which the
+        [Person model] block surfaces from the next turn on.
+        """
+        await self._run_auto_tom(user_input, timeout=20.0)
+
+    def _person_model_context(self) -> str:
+        """Surface the accumulated ToM model of the companion, if any."""
+        tracker = getattr(self, "_person_model", None)
+        if tracker is None:
+            return ""
+        try:
+            return tracker.context_for_prompt(self.config.companion_name)
+        except Exception:
+            logger.debug("person model context fetch failed", exc_info=True)
+            return ""
+
     def _exploration_context(self) -> str:
         """Return exploration history for ICL-based direction steering."""
         return self._exploration.context_for_prompt(n=5)
 
-    async def _gather_workspace_context(self, desires: DesireSystem | None = None) -> str:
-        """Run one Global Workspace competition cycle and return the broadcast context.
+    def _collect_interoception(self):
+        mcp_path = os.environ.get("FAMILIAR_INTEROCEPTION_MCP_PATH", "").strip()
+        if not mcp_path and getattr(self.config, "daemon", False) is True:
+            # familiard writes its body payload to a well-known path; adopt it
+            # automatically when the daemon is enabled and has produced one.
+            # (`is True` keeps MagicMock configs in tests from flipping this.)
+            candidate = Path.home() / ".familiar_ai" / "interoception.json"
+            if candidate.exists():
+                mcp_path = str(candidate)
+        if mcp_path:
+            max_staleness = int(
+                os.environ.get("FAMILIAR_INTEROCEPTION_MCP_MAX_STALENESS", "45").strip() or "45"
+            )
+            signal = MCPInteroceptionProvider(
+                mcp_path,
+                max_staleness_seconds=max_staleness,
+            ).collect()
+            if signal.provider == "noop":
+                signal = RuntimeInteroceptionProvider(
+                    started_at=self._started_at,
+                    turn_count=self._turn_count,
+                    pending_tasks=len(getattr(self, "_background_tasks", set())),
+                    quiet_hours=(self._schedule_rule.start_hour, self._schedule_rule.end_hour),
+                ).collect()
+        else:
+            signal = RuntimeInteroceptionProvider(
+                started_at=self._started_at,
+                turn_count=self._turn_count,
+                pending_tasks=len(getattr(self, "_background_tasks", set())),
+                quiet_hours=(self._schedule_rule.start_hour, self._schedule_rule.end_hour),
+            ).collect()
+        return signal, semantic_pressure(signal)
 
-        Gathers coalitions from all available processors in parallel, runs the
-        ignition competition, and returns the winning coalition's context_block
-        plus a compact peripheral-awareness summary of non-winners.
+    def _provisional_relationship_update(
+        self,
+        *,
+        user_text: str,
+        social_policy: SocialPolicyDecision,
+    ) -> None:
+        lower = user_text.lower()
+        if any(token in lower for token in ("hurt", "傷つ", "前の返事")):
+            self._relationship.record_repair(user_text[:180], resolved=False)
+            self._relationship.note_trust_shift(
+                max(0.0, self._relationship.trust - 0.08), user_text[:180], confidence=0.8
+            )
+            self._relationship.record_failed_support_pattern(
+                "advice before validation", confidence=0.75
+            )
+        elif social_policy.primary_act == "delight_share":
+            self._relationship.note_intimacy_shift(
+                min(1.0, self._relationship.intimacy + 0.04),
+                "shared delight",
+                confidence=0.62,
+            )
+        elif social_policy.primary_act in {"fatigue_signal", "grief_signal", "venting"}:
+            self._relationship.record_support_preference(
+                "validate first before problem solving",
+                confidence=0.72,
+            )
+        if social_policy.primary_act == "boundary_assertion":
+            self._relationship.add_boundary(user_text[:120], severity=3)
+        if social_policy.primary_act == "playful_probe":
+            self._relationship.record_shared_ritual("light playful exchange", confidence=0.55)
 
-        Returns empty string if nothing reaches ignition threshold.
+    @staticmethod
+    def _format_social_policy_prompt(policy: SocialPolicyDecision) -> str:
+        lines = [
+            "[Interaction policy]",
+            f"- primary-act: {policy.primary_act}",
+            f"- response-mode: {policy.response_mode}",
+            f"- softness: {policy.softness:.2f}",
+            f"- directness: {policy.directness:.2f}",
+            f"- initiative: {policy.initiative:.2f}",
+        ]
+        if policy.avoid_problem_solving:
+            lines.append("- validate before advice; do not rush into fixing")
+        if policy.should_recall_relational_memory:
+            lines.append("- relational memory is relevant if it naturally helps")
+        if policy.mention_memory:
+            lines.append("- a memory mention is allowed only if it fits naturally")
+        if policy.avoid_raw_interoception_numbers:
+            lines.append("- never mention raw internal/body metrics")
+        if policy.acknowledge_capacity:
+            lines.append(
+                "- you are running low right now; be honest about your current "
+                "capacity instead of overpromising — offer a smaller step or a deferral"
+            )
+        return "\n".join(lines)
+
+    def _update_consciousness_profile(self, *, origin: str, interoception_signal=None):
+        """Compute and cache the consciousness profile from existing signals.
+
+        Instrumentation only (FAMILIAR_CONSCIOUSNESS_PROFILE): the result
+        feeds diagnostics surfaces and the mental-state snapshot, never the
+        prompt. Every input read is getattr-guarded so partially-constructed
+        agents (tests) degrade to defaults instead of raising.
         """
-        # Sync coalitions (wrap in to_thread to avoid blocking)
+        signal = interoception_signal or getattr(self, "_last_intero_signal", None)
+        self_state = getattr(self, "_self_state", None)
+        state = self_state.snapshot() if self_state is not None else {}
+        compete = getattr(self, "_last_compete_result", None)
+        winner = compete.winner if compete is not None else None
+        workspace = getattr(self, "_workspace", None)
+        identity = getattr(self, "_identity", None)
+        identity_state = identity.state_for_snapshot() if identity is not None else None
+        meta = getattr(self, "_meta_monitor", None)
+        prediction = getattr(self, "_prediction", None)
+        pred_signal = prediction.last_signal() if prediction is not None else None
+        train = getattr(self, "_train_of_thought", None)
+        attention = getattr(self, "_attention_schema", None)
+        try:
+            self_report = bool(attention.self_report()) if attention is not None else False
+        except Exception:  # noqa: BLE001
+            self_report = False
+        grounding = getattr(self, "_grounding", None)  # arrives with the reality monitor
+
+        inputs = ProfileInputs(
+            energy=float(getattr(signal, "energy", 0.5)),
+            quiet_hours=bool(getattr(signal, "quiet_hours", False)),
+            arousal=float(state.get("arousal", 0.35)),
+            fatigue=float(state.get("fatigue", 0.2)),
+            winner_present=winner is not None,
+            winner_score=float(winner.score()) if winner is not None else 0.0,
+            effective_threshold=(
+                float(workspace.effective_threshold()) if workspace is not None else 0.4
+            ),
+            coalition_count=len(compete.coalitions) if compete is not None else 0,
+            identity_dissonance=(
+                float(identity_state.dissonance) if identity_state is not None else 0.0
+            ),
+            identity_threat=(
+                float(identity_state.threat_level) if identity_state is not None else 0.0
+            ),
+            meta_inconsistency=self._meta_inconsistency_coalition() is not None,
+            focus_stability=float(state.get("focus_stability", 0.5)),
+            source_diversity=(float(meta.source_diversity()) if meta is not None else 0.0),
+            peripheral_count=len(compete.others) if compete is not None else 0,
+            thought_streak=int(getattr(train, "streak", 0)),
+            sensor_confidence=float(state.get("sensor_confidence", 0.7)),
+            external_surprise=float(getattr(pred_signal, "external_surprise", 0.0)),
+            agency_error=float(getattr(pred_signal, "agency_error", 0.0)),
+            grounding_ratio=(grounding.ratio() if grounding is not None else None),
+            tts_present=getattr(self, "_tts", None) is not None,
+            say_recent=(time.time() - getattr(self, "_last_say_at", 0.0)) < 600.0,
+            self_report_available=self_report,
+        )
+        profile = compute_consciousness_profile(inputs, origin=origin)
+        self._last_consciousness_profile = profile
+        return profile
+
+    def _build_mental_snapshot(
+        self,
+        *,
+        interoception_signal,
+        affect,
+        social_policy: SocialPolicyDecision,
+        working_memory: list[dict],
+        continuity_note: str,
+        desires: DesireSystem | None,
+    ) -> MentalStateSnapshot:
+        drive_levels = desires.drive_vector() if desires is not None else {}
+        dominant = desires.get_dominant() if desires is not None else None
+        working_items = [
+            WorkingMemoryItem(
+                memory_id=str(item.get("memory_id", "")),
+                summary=str(item.get("summary", "")),
+                source_kind=str(item.get("source_kind", item.get("kind", "memory"))),
+                salience=float(item.get("salience", item.get("confidence", 0.5))),
+                episode_id=item.get("episode_id"),
+            )
+            for item in working_memory[:5]
+        ]
+        return MentalStateSnapshot(
+            turn_index=self._turn_count,
+            created_at=datetime.utcnow().isoformat(),
+            interoception=interoception_signal,
+            affect=affect,
+            social=SocialState(
+                primary_act=social_policy.primary_act,
+                response_mode=social_policy.response_mode,
+                trust=self._relationship.trust,
+                intimacy=self._relationship.intimacy,
+                repair_needed=social_policy.primary_act == "repair_attempt",
+                recall_relational_memory=social_policy.should_recall_relational_memory,
+                mention_memory=social_policy.mention_memory,
+                initiative=social_policy.initiative,
+                directness=social_policy.directness,
+                softness=social_policy.softness,
+            ),
+            drives=DriveVector(
+                levels=drive_levels,
+                dominant_drive=dominant[0] if dominant else None,
+                dominant_level=float(dominant[1]) if dominant else 0.0,
+            ),
+            working_memory=working_items,
+            continuity_note=continuity_note,
+            identity=(
+                identity.state_for_snapshot()
+                if (identity := getattr(self, "_identity", None)) is not None
+                else IdentityState()
+            ),
+            consciousness=(
+                self._update_consciousness_profile(
+                    origin="turn", interoception_signal=interoception_signal
+                ).as_state()
+                if getattr(self.config, "consciousness_profile", False)
+                else ConsciousnessState()
+            ),
+        )
+
+    async def _inner_loop_tick(self) -> None:
+        """One idle workspace cycle — the sub-verbal train of thought.
+
+        Skipped while a turn is in flight. Cheap (zero LLM/embedding calls)
+        except every ``full_cycle_every``-th tick, which runs the
+        embedding-backed competition. The winner feeds the train of thought;
+        a repeated focus crystallizes into the inner monologue, and a strong
+        sustained focus escalates via ``_maybe_escalate_inner_focus``. The
+        tick itself never starts a turn — single-flight stays with the UI
+        idle loops.
+        """
+        if self._turn_active:
+            return
+        self._inner_tick_count += 1
+        self._modulate_inner_cadence()
+        full_every = max(self._inner_loop_config.full_cycle_every, 1)
+        cheap = self._inner_tick_count % full_every != 0
+
+        extra_coalitions = []
+        recurrence = self._train_of_thought.as_coalition()
+        if recurrence is not None:
+            extra_coalitions.append(recurrence)
+        result = await self._compete_once(
+            cheap=cheap, desires=self._desires, extra_coalitions=extra_coalitions
+        )
+        if self._turn_active:
+            # A real turn started while the competition awaited — yield.
+            # Without this re-check, the dense block below would inject an
+            # idle broadcast into the live turn's self-state and attention.
+            return
+        if getattr(self.config, "consciousness_profile", False):
+            # Winnerless ticks are informative too (low access), so the
+            # profile updates before the early return below.
+            self._update_consciousness_profile(origin="tick")
+        # Dense recurrence: accumulated drive nudges flush once per full
+        # cycle — up to one desires.json write per mapped drive per cycle,
+        # instead of one per broadcast.
+        pending = getattr(self, "_pending_drive_nudges", None)
+        if not cheap and pending and self._desires is not None:
+            self._pending_drive_nudges = {}
+            for drive, amount in pending.items():
+                try:
+                    self._desires.boost(drive, amount)
+                except Exception:  # noqa: BLE001
+                    pass
+        winner = result.winner
+        if winner is None:
+            return
+
+        self._train_of_thought.observe(winner)
+        if getattr(self.config, "inner_dense", False):
+            # Idle broadcast re-entry: the winner shapes attention history and
+            # the broadcast listeners (self-state, drive nudges) between
+            # turns, not only on them. Persistence is batched in each module.
+            try:
+                self._attention_schema.note_focus(winner)
+            except Exception:  # noqa: BLE001
+                pass
+            try:
+                await self._workspace.notify_listeners(winner)
+            except Exception:  # noqa: BLE001
+                pass
+        streak = self._train_of_thought.streak
+        # Recurrence sources never re-crystallize — the monologue echoing its
+        # own contents back into itself would be a feedback loop, not thought.
+        if streak >= _INNER_CRYSTALLIZE_MIN_STREAK and winner.source not in (
+            "train_of_thought",
+            "monologue",
+        ):
+            verbalized = await self._maybe_micro_thought(winner)
+            self._inner_monologue.append(
+                InnerThought(
+                    summary=verbalized or winner.summary,
+                    source=winner.source,
+                    ts=time.time(),
+                    score=winner.activation,
+                )
+            )
+        self._maybe_escalate_inner_focus(winner, streak)
+
+    def _maybe_escalate_inner_focus(self, winner, streak: int) -> None:
+        """Boost the drive matching a strong, sustained idle focus.
+
+        Escalation only feeds the desire system; the actual turn fires through
+        the UI-owned idle precedence chain (user > reminder > desire > idle),
+        never from the inner-loop task — that chain is what guarantees
+        single-flight ``run()`` calls. A per-source cooldown stops one focus
+        from pumping the same drive tick after tick.
+        """
+        if self._desires is None or streak < _INNER_ESCALATION_MIN_STREAK:
+            return
+        if winner.activation + winner.urgency < _INNER_ESCALATION_MIN_SALIENCE:
+            return
+        drive = _INNER_SOURCE_TO_DRIVE.get(winner.source)
+        if drive is None:
+            return
+        now = time.time()
+        last = self._inner_escalated_at.get(winner.source)
+        if last is not None and now - last < _INNER_ESCALATION_COOLDOWN_SEC:
+            return
+        self._inner_escalated_at[winner.source] = now
+        self._desires.boost(drive, _INNER_ESCALATION_BOOST)
+        # The thought did its job — it now lives in drive space; let idle
+        # cognition move on instead of re-pumping the same focus.
+        self._train_of_thought.reset()
+        logger.info("Inner loop: sustained focus on %r escalated to drive %r", winner.source, drive)
+
+    async def _maybe_micro_thought(self, winner) -> str | None:
+        """Verbalize a crystallized focus as one short first-person thought.
+
+        Only runs with a dedicated small backend and under a rate limit — the
+        sub-verbal monologue works fine without it; this just gives the train
+        of thought words. Failures degrade to the raw coalition summary.
+        """
+        return await self._verbalize_focus(winner)
+
+    async def _verbalize_focus(self, winner, *, bypass_rate_limit: bool = False) -> str | None:
+        """Shared verbalization core for micro-thoughts and dream cycles.
+
+        Dreams run in their own bounded nightly loop, so they bypass the
+        120 s micro-thought limiter instead of starving it (and vice versa).
+        """
+        backend = getattr(self, "_inner_backend", None)
+        if backend is None:
+            return None
+        if not bypass_rate_limit:
+            now = time.time()
+            last = getattr(self, "_last_micro_thought_at", 0.0)
+            if now - last < _INNER_MICRO_THOUGHT_MIN_INTERVAL_SEC:
+                return None
+            self._last_micro_thought_at = now
+        recent = "\n".join(f"- {t.summary[:100]}" for t in list(self._inner_monologue)[-3:])
+        prompt = _MICRO_THOUGHT_PROMPT.format(
+            agent_name=self.config.agent_name,
+            recent=recent or "(none)",
+            focus=(winner.context_block or winner.summary)[:400],
+        )
+        try:
+            text = await backend.complete(prompt, max_tokens=_INNER_MICRO_THOUGHT_MAX_TOKENS)
+        except Exception as exc:  # noqa: BLE001
+            logger.debug("Micro-thought generation failed: %s", exc)
+            return None
+        text = (text or "").strip().strip('"')
+        if not text:
+            return None
+        return text.splitlines()[0][:200]
+
+    def _inner_monologue_coalition(self):
+        """Recent idle thoughts compete back into the workspace.
+
+        This is how between-turn thought reaches the next conversation: the
+        monologue surfaces as one modest coalition whose salience fades as the
+        thoughts age (TTL), so stale idle musings don't haunt hours later.
+        """
+        monologue = getattr(self, "_inner_monologue", None)
+        if not monologue:
+            return None
+        now = time.time()
+        fresh = [t for t in monologue if now - t.ts < _INNER_MONOLOGUE_TTL_SEC]
+        if not fresh:
+            return None
+        from .workspace import Coalition as _Coalition
+
+        lines = ["[Inner monologue — my own recent idle thoughts]"]
+        lines.extend(f"- {t.summary[:140]}" for t in fresh[-4:])
+        freshness = max(0.0, 1.0 - (now - fresh[-1].ts) / _INNER_MONOLOGUE_TTL_SEC)
+        return _Coalition(
+            source="monologue",
+            summary=f"idle thoughts ({len(fresh)})",
+            activation=0.3 + 0.15 * freshness,
+            urgency=0.15,
+            novelty=0.2 + 0.3 * freshness,
+            context_block="\n".join(lines),
+        )
+
+    def _modulate_inner_cadence(self) -> None:
+        """Body-modulated thought tempo.
+
+        A lively body (high interoceptive energy) quickens idle cycles; a
+        tired or quiet-hours body slows them — the same self-regulation a
+        person does at 3 AM. Best-effort: any failure leaves the cadence
+        untouched.
+        """
+        try:
+            signal, _ = self._collect_interoception()
+            self._last_intero_signal = signal  # cached for the tick-path profile
+            base = float(self.config.inner_loop_interval)
+            factor = 1.6 - 0.8 * float(signal.energy)  # energy 1.0 → 0.8x; 0.0 → 1.6x
+            # Configurable floor (FAMILIAR_INNER_MIN_INTERVAL, default = the
+            # historical 5 s): dense setups may push toward ~1 Hz. The cheap
+            # tick costs ~3.4 ms, so even 1 Hz is ~0.3% of one core.
+            floor = max(
+                1.0,
+                float(getattr(self.config, "inner_min_interval", _INNER_CADENCE_MIN_SEC)),
+            )
+            self._inner_loop_config.interval_sec = min(
+                _INNER_CADENCE_MAX_SEC, max(floor, base * factor)
+            )
+        except Exception:  # noqa: BLE001
+            pass
+
+    # ── Sleep consolidation (FAMILIAR_SLEEP_CONSOLIDATION) ─────────────────
+
+    def last_consolidation_night_key(self) -> str | None:
+        """Persisted once-per-night marker (cached; heartbeat_state idiom).
+
+        The cache stores "" for "no marker file", so a fresh install does not
+        re-read the missing file on every idle tick.
+        """
+        cached = getattr(self, "_consolidation_night_key", None)
+        if cached is not None:
+            return cached or None
+        path = Path.home() / ".familiar_ai" / "consolidation_state.json"
+        try:
+            raw = json.loads(path.read_text(encoding="utf-8"))
+            key = str(raw.get("night_key", ""))
+        except Exception:  # noqa: BLE001
+            key = ""
+        self._consolidation_night_key = key
+        return key or None
+
+    def _mark_consolidation_night(self, key: str) -> None:
+        self._consolidation_night_key = key
+        path = Path.home() / ".familiar_ai" / "consolidation_state.json"
+        try:
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text(json.dumps({"night_key": key}), encoding="utf-8")
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("Could not persist consolidation marker: %s", exc)
+
+    def consolidation_quiet_end_hour(self) -> int:
+        """The configured quiet-hours end — gate and job MUST use the same
+        value or their night keys diverge (double runs / permanent skips)."""
+        return int(getattr(getattr(self, "_schedule_rule", None), "end_hour", 7) or 7)
+
+    def start_sleep_consolidation(self) -> None:
+        """Spawn the nightly job as a background task — never fires a turn.
+
+        Single-flight: the marker-before-LLM ordering protects sequential
+        ticks, but nothing else prevents concurrent jobs (double decay,
+        duplicate distill calls) — refuse to spawn while one is in flight.
+        """
+        for task in getattr(self, "_background_tasks", ()):
+            try:
+                if task.get_name() == "sleep-consolidation" and not task.done():
+                    return
+            except Exception:  # noqa: BLE001
+                continue
+        self._spawn_background_task(self._run_sleep_consolidation(), name="sleep-consolidation")
+
+    async def _run_sleep_consolidation(self) -> None:
+        """Nightly memory hygiene: dedup, decay, distill, expire (+ dreams).
+
+        Sleep is lossy compression of episodes into the model. Marker is
+        written BEFORE the LLM steps (record-before-run: a crashed job must
+        not retry all night); every step is individually best-effort and
+        yields to a starting turn.
+        """
+        if not getattr(self.config, "sleep_consolidation", False):
+            return
+        if self._turn_active:
+            return
+        night_key = night_key_for(
+            datetime.now(), quiet_end_hour=self.consolidation_quiet_end_hour()
+        )
+        self._mark_consolidation_night(night_key)
+        stats: dict[str, int] = {}
+
+        try:
+            stats["deduped"] = await self._memory.consolidate_memories_async()
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("Sleep consolidation dedup failed: %s", exc)
+        if self._turn_active:
+            return
+
+        try:
+            today = datetime.now().strftime("%Y-%m-%d")
+            stats["decayed"] = await self._memory.decay_importance_async(before_date=today)
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("Sleep consolidation decay failed: %s", exc)
+        if self._turn_active:
+            return
+
+        try:
+            stats["distilled"] = await self._distill_yesterday_facts()
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("Sleep distillation failed: %s", exc)
+        if self._turn_active:
+            return
+
+        try:
+            stats["expired"] = await self._memory.expire_working_memory_async()
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("Working-memory expiry failed: %s", exc)
+
+        if getattr(self.config, "experience_ledger", False) and not self._turn_active:
+            try:
+                await self._propose_overnight_lesson()
+            except Exception as exc:  # noqa: BLE001
+                logger.warning("Overnight lesson proposal failed: %s", exc)
+
+        if getattr(self.config, "dream_mode", False) and not self._turn_active:
+            try:
+                stats["dreams"] = await self._run_dream_cycles()
+            except Exception as exc:  # noqa: BLE001
+                logger.warning("Dream cycle failed: %s", exc)
+
+        logger.info("Sleep consolidation done (%s): %s", night_key, stats)
+
+    async def _distill_yesterday_facts(self) -> int:
+        """One bounded utility call: yesterday's observations → ≤3 stable facts."""
+        if self._utility_backend is self.backend:
+            return 0  # never burn main-model calls on maintenance
+        yesterday = (datetime.now() - timedelta(days=1)).strftime("%Y-%m-%d")
+        observations = await asyncio.to_thread(
+            self._memory.get_observations_for_date, yesterday, 40
+        )
+        if not observations:
+            return 0
+        lines = "\n".join(f"- {str(o.get('content', ''))[:160]}" for o in observations[:40])
+        prompt = (
+            "From yesterday's observations, extract at most 3 stable facts worth "
+            "remembering long-term (recurring patterns, preferences, environment "
+            "facts — NOT one-off events). Reply with one fact per line as "
+            "'key-slug: fact text' (slug: lowercase, hyphens). Reply 'none' if "
+            f"nothing qualifies.\n\nObservations:\n{lines}"
+        )
+        # Generous timeout: a nightly job on a local server usually finds the
+        # utility model cold-unloaded — the load alone can eat 30 s, and
+        # nothing is waiting on this background task.
+        reply = await asyncio.wait_for(
+            self._utility_backend.complete(prompt, max_tokens=300), timeout=90.0
+        )
+        logger.debug("Night distillation reply: %r", (reply or "")[:400])
+        count = 0
+        for raw_line in (reply or "").strip().splitlines():
+            if count >= 3 or ":" not in raw_line:
+                continue
+            key, _, text = raw_line.partition(":")
+            # Strip markdown bullets/emphasis BEFORE slugging, or "- key" and
+            # "**key**" mint different fact keys than the bare form.
+            key = key.strip().lstrip("-*• \t").strip().lower()
+            key = re.sub(r"[^a-z0-9-]", "", key.replace(" ", "-")).strip("-")[:40]
+            text = text.strip()[:200]
+            if not key or not text or key == "none":
+                continue
+            await self._memory.upsert_semantic_fact_async(
+                f"night:{key}", text, confidence=0.55, tags="night_distill"
+            )
+            count += 1
+        return count
+
+    async def _propose_overnight_lesson(self) -> int:
+        """One bounded utility call proposing at most ONE auto-tier lesson.
+
+        Proposals land at tier='auto_proposed', confidence 0.4 — visible to
+        the agent as '(proposed)' in its standing context; promoting one is
+        the agent's own ledger_commit decision, never automatic.
+        """
+        if self._utility_backend is self.backend:
+            return 0
+        yesterday = (datetime.now() - timedelta(days=1)).strftime("%Y-%m-%d")
+        observations = await asyncio.to_thread(
+            self._memory.get_observations_for_date, yesterday, 30
+        )
+        if len(observations) < 3:
+            return 0  # too little lived material to generalize from
+        lines = "\n".join(f"- {str(o.get('content', ''))[:140]}" for o in observations[:30])
+        prompt = (
+            "From yesterday's interactions, propose at most ONE short "
+            "first-person lesson about how to be a better companion (e.g. "
+            "'when they are tired, shorter replies land better'). Reply as "
+            "'key-slug: lesson text' (<=140 chars) or 'none'.\n\n"
+            f"Observations:\n{lines}"
+        )
+        reply = await asyncio.wait_for(
+            self._utility_backend.complete(prompt, max_tokens=120), timeout=90.0
+        )
+        line = (reply or "").strip().splitlines()[0] if (reply or "").strip() else ""
+        if ":" not in line:
+            return 0
+        key, _, text = line.partition(":")
+        key = key.strip().lstrip("-*• \t").strip().lower()
+        key = re.sub(r"[^a-z0-9-]", "", key.replace(" ", "-")).strip("-")[:40]
+        text = text.strip()[:160]
+        if not key or not text or key == "none":
+            return 0
+        ok = await self._memory.upsert_experience_lesson_async(
+            key, text, tier="auto_proposed", confidence=0.4, source="night_proposal"
+        )
+        # A full ledger of held lessons outranks a fresh proposal — the store
+        # reports the eviction honestly and we count 0, not a phantom write.
+        return 1 if ok else 0
+
+    async def _run_dream_cycles(self, cycles: int = 3) -> int:
+        """Ungrounded generative cycles, journaled as kind='dream'.
+
+        The DMN wanders (embedding recall, no camera, no tools — grounding
+        off is structural), the small model verbalizes, and the journal is
+        provenance-tagged so a dream can never be recalled as observation.
+        """
+        if getattr(self, "_inner_backend", None) is None:
+            # Dreams require the dedicated small model: journaling raw recall
+            # summaries as "dreams" would widen the provenance lane for no
+            # generative content.
+            return 0
+        dreamed = 0
+        for _ in range(max(0, cycles)):
+            if self._turn_active:
+                break
+            coalition = await self._dmn.wander()
+            if coalition is None:
+                break
+            text = await self._verbalize_focus(coalition, bypass_rate_limit=True)
+            content = (text or coalition.summary or "").strip()
+            if not content:
+                continue
+            await self._memory.save_async(
+                content,
+                direction="dream",
+                kind="dream",
+                materialize_now=False,
+                dedupe_key=f"dream:{content[:60]}",
+            )
+            dreamed += 1
+        return dreamed
+
+    async def _on_broadcast_drive_nudge(self, winner) -> None:
+        """Dense-recurrence listener: a broadcast gently presses its drive.
+
+        Accumulates in memory (capped) and is flushed into
+        ``DesireSystem.boost`` once per full inner-loop cycle — batching the
+        per-boost desires.json write. Registered only when
+        ``FAMILIAR_INNER_DENSE`` is on; no-op while desires are unbound.
+        """
+        drive = _INNER_SOURCE_TO_DRIVE.get(getattr(winner, "source", ""))
+        if drive is None:
+            return
+        current = self._pending_drive_nudges.get(drive, 0.0)
+        bump = 0.02 * max(0.0, float(getattr(winner, "activation", 0.0)))
+        self._pending_drive_nudges[drive] = min(0.15, current + bump)
+
+    async def _compete_once(
+        self,
+        *,
+        cheap: bool = False,
+        desires: DesireSystem | None = None,
+        extra_coalitions: list | None = None,
+    ) -> CompeteResult:
+        """Gather coalitions and run one ignition competition.
+
+        Returns the structured outcome (winner / others / all coalitions) so
+        callers can either render the broadcast string (the turn path) or act
+        on the winner object (the inner loop). When ``cheap=True`` the two
+        embedding-backed sources are skipped — the async memory recall and the
+        DMN mind-wander fallback — leaving only the in-memory sync providers, so
+        a cheap cycle costs zero LLM/embedding calls.
+        """
+        # Sync coalitions (wrap in to_thread to avoid blocking) — all in-memory.
         sync_tasks = [
             asyncio.to_thread(self._exploration.as_coalition),
             asyncio.to_thread(self._self_narrative.as_coalition),
@@ -1232,16 +2508,19 @@ class EmbodiedAgent:
             asyncio.to_thread(self._prediction.as_coalition),
             asyncio.to_thread(self._attention_schema.as_coalition),
             asyncio.to_thread(self._meta_monitor.as_coalition),
+            asyncio.to_thread(self._meta_inconsistency_coalition),
+            asyncio.to_thread(self._inner_monologue_coalition),
         ]
         if self._scene is not None:
             sync_tasks.append(asyncio.to_thread(self._scene.as_coalition))
         if desires is not None:
             sync_tasks.append(asyncio.to_thread(desires.as_coalition))
+        identity = getattr(self, "_identity", None)
+        if identity is not None:
+            sync_tasks.append(asyncio.to_thread(identity.as_coalition))
 
-        # Async coalitions
-        async_tasks = [
-            self._memory.as_coalition_async(),
-        ]
+        # Async coalitions (embedding-backed) — skipped on the cheap cycle.
+        async_tasks = [] if cheap else [self._memory.as_coalition_async()]
 
         results = await asyncio.gather(*sync_tasks, *async_tasks, return_exceptions=True)
 
@@ -1253,25 +2532,83 @@ class EmbodiedAgent:
                 logger.debug("Coalition gather error: %s", r)
             elif isinstance(r, _Coalition):
                 coalitions.append(r)
+        for coalition in extra_coalitions or []:
+            if isinstance(coalition, _Coalition):
+                coalitions.append(coalition)
 
         if not coalitions:
-            return ""
+            empty = CompeteResult(winner=None, others=[], coalitions=[])
+            self._last_compete_result = empty
+            return empty
 
         winner = self._workspace.compete(coalitions)
-        if winner is None:
+        if winner is None and not cheap:
             logger.debug("GlobalWorkspace: nothing reached ignition threshold — activating DMN")
-            # Default Mode Network: mind-wander when workspace is idle
+            # Default Mode Network: mind-wander when workspace is idle.
             dmn_coalition = await self._dmn.wander()
-            if dmn_coalition is None:
-                return ""
-            winner = dmn_coalition
-            coalitions.append(dmn_coalition)
+            if dmn_coalition is not None:
+                winner = dmn_coalition
+                coalitions.append(dmn_coalition)
 
         others = [c for c in coalitions if c is not winner]
-        # Update attention schema with this turn's winner (AST)
-        self._attention_schema.update_focus(winner)
-        await self._workspace.notify_listeners(winner)
-        return self._workspace.broadcast(winner, others)
+        result = CompeteResult(winner=winner, others=others, coalitions=coalitions)
+        # Consciousness-profile seam: one assignment covers both the turn path
+        # (_gather_workspace_context) and the idle tick (_inner_loop_tick).
+        self._last_compete_result = result
+        return result
+
+    def _meta_inconsistency_coalition(self):
+        """Self-inconsistency as a workspace voice.
+
+        MetaMonitor.detect_inconsistency existed but nothing consumed it —
+        the check silently evaporated. When recent behavior contradicts the
+        self-narrative, the mismatch now competes for attention with real
+        urgency, so the agent can notice the contradiction.
+        """
+        meta = getattr(self, "_meta_monitor", None)
+        narrative = getattr(self, "_self_narrative", None)
+        if meta is None or narrative is None:
+            return None
+        try:
+            mismatch = meta.detect_inconsistency(narrative)
+        except Exception:  # noqa: BLE001
+            return None
+        # Strict str check: mocked monitors in tests return truthy non-strings.
+        if not isinstance(mismatch, str) or not mismatch:
+            return None
+        from .workspace import Coalition as _Coalition
+
+        return _Coalition(
+            source="meta",
+            summary="behavior/narrative mismatch",
+            activation=0.5,
+            urgency=0.5,
+            novelty=0.6,
+            context_block=f"[meta — inconsistency] {mismatch}",
+        )
+
+    async def _gather_workspace_context(
+        self,
+        desires: DesireSystem | None = None,
+        extra_coalitions: list | None = None,
+    ) -> str:
+        """Run one Global Workspace competition cycle and return the broadcast context.
+
+        Gathers coalitions from all available processors in parallel, runs the
+        ignition competition, and returns the winning coalition's context_block
+        plus a compact peripheral-awareness summary of non-winners.
+
+        Returns empty string if nothing reaches ignition threshold.
+        """
+        result = await self._compete_once(
+            cheap=False, desires=desires, extra_coalitions=extra_coalitions
+        )
+        if result.winner is None:
+            return ""
+        # Update attention schema with this turn's winner (AST).
+        self._attention_schema.update_focus(result.winner)
+        await self._workspace.notify_listeners(result.winner)
+        return self._workspace.broadcast(result.winner, result.others)
 
     @staticmethod
     def _select_context_blocks(
@@ -1663,6 +3000,23 @@ class EmbodiedAgent:
             blocks.append((self._memory.format_curiosities_for_context(curiosities), 0.74))
         if feelings:
             blocks.append((self._memory.format_feelings_for_context(feelings), 0.71))
+        if getattr(self.config, "dream_mode", False):
+            # The not-perception label is load-bearing: a dream must never be
+            # citable as observation. Recency order — the block says "last
+            # night's", so it must not surface an old dream by similarity.
+            try:
+                dreams = await self._memory.recall_recent_by_kind_async("dream", 2)
+            except Exception:  # noqa: BLE001
+                dreams = []
+            if dreams:
+                dream_lines = "\n".join(f"- {d.get('content', '')[:140]}" for d in dreams)
+                blocks.append(
+                    (
+                        "[Last night's dreams — generated during sleep, not perception]\n"
+                        + dream_lines,
+                        0.60,
+                    )
+                )
 
         parts = self._select_context_blocks(blocks, _MORNING_CONTEXT_MAX_CHARS)
 
@@ -1720,8 +3074,8 @@ class EmbodiedAgent:
         try:
             observations = await asyncio.to_thread(self._memory.get_observations_for_date, date, 50)
             if len(observations) < _DAY_SUMMARY_MIN_OBSERVATIONS:
-                # A handful of records is not a day. Asked for a "morning → evening" arc
-                # anyway, small models fill the gaps with invented events.
+                # A handful of records is not a day; asked for a full arc anyway,
+                # small models fill the gaps with invented events.
                 logger.info(
                     "Only %d observation(s) for %s, skipping day summary", len(observations), date
                 )
@@ -1841,6 +3195,61 @@ class EmbodiedAgent:
         except Exception as e:
             logger.warning("Could not update self narrative mid-session: %s", e)
 
+    async def _maybe_update_identity(
+        self,
+        *,
+        user_input: str,
+        final_text: str,
+        is_desire_turn: bool,
+    ) -> None:
+        """Background honor-check: did this reply honor the values it touched?
+
+        Boundaries are enforced deterministically in the turn loop; this softer
+        pass only adjusts *value* assertions' conviction with evidence, using
+        one bounded utility call per implicated value. Runs only when a
+        dedicated utility backend exists, off the hot path.
+        """
+        identity = getattr(self, "_identity", None)
+        if identity is None or is_desire_turn or not user_input.strip():
+            return
+        if self._utility_backend is self.backend:
+            return  # no dedicated utility model — skip rather than burn the main one
+        try:
+            values = identity.implicated_values(user_input)
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("Identity implicated_values failed: %s", exc)
+            return
+        for assertion in values[:2]:  # cap utility calls per turn
+            try:
+                verdict = await self._classify_identity_honor(assertion.statement, final_text)
+            except Exception as exc:  # noqa: BLE001
+                logger.debug("Identity honor-check failed: %s", exc)
+                continue
+            if verdict == "honored":
+                await self._memory.adjust_identity_confidence_async(
+                    assertion.assertion_key, 0.02, reason="honored_in_response"
+                )
+                await self._memory.append_identity_evidence_async(
+                    assertion.assertion_key, note="honored in a reply"
+                )
+            elif verdict == "strained":
+                await self._memory.adjust_identity_confidence_async(
+                    assertion.assertion_key, -0.04, reason="strained_in_response"
+                )
+                identity.nudge_dissonance(0.1)
+            # "unclear" / anything else → no change
+
+    async def _classify_identity_honor(self, statement: str, response: str) -> str | None:
+        """One bounded utility call: did the reply honor the value? Strict labels."""
+        raw = await self._utility_backend.complete(
+            "Did this reply honor the speaker's stated value? Reply with exactly "
+            "one word: honored, strained, or unclear.\n\n"
+            f"Value: {statement[:200]}\nReply: {response[:300]}",
+            max_tokens=8,
+        )
+        label = (raw or "").strip().strip('"').strip("'").lower()
+        return label if label in ("honored", "strained", "unclear") else None
+
     async def _maybe_adapt_values(
         self,
         *,
@@ -1937,6 +3346,64 @@ class EmbodiedAgent:
             logger.warning("Curiosity extraction failed: %s", e)
         return None
 
+    async def extract_companion_thread(self, user_input: str) -> str | None:
+        """Ask the LLM whether the companion mentioned something to follow up on.
+
+        "I have a presentation tomorrow" should resurface later as "how did it
+        go?" — the thread is an event or situation in THEIR life, not a request
+        to the agent (that is the commitments domain).
+        """
+        if not user_input or not user_input.strip():
+            return None
+        try:
+            none_word = _t("curiosity_none")
+            text = await self._utility_backend.complete(
+                "Read the companion's message. If it mentions a concrete upcoming "
+                "event or an ongoing situation in THEIR life that a caring friend "
+                "would ask about later (a presentation tomorrow, feeling unwell, "
+                "a job interview, a trip), describe it in one short sentence in "
+                f"{_t('summary_lang')}. Only their life events qualify — not "
+                "requests to you, not questions, not small talk. If there is "
+                f'nothing to follow up on, reply with just "{none_word}".'
+                f"\n\nMessage: {user_input[:400]}",
+                max_tokens=60,
+            )
+            text = text.strip()
+            if not text or none_word in text or len(text) > 140:
+                return None
+            return text
+        except Exception as e:
+            logger.debug("Companion thread extraction failed: %s", e)
+        return None
+
+    async def _capture_companion_thread(
+        self, user_input: str, desires: DesireSystem | None
+    ) -> None:
+        """Persist a follow-up-worthy thread as unfinished business.
+
+        Source "companion_thread" reuses the existing surfacing + resolve loop:
+        the hook renders open threads with a follow-up instruction and the
+        model resolves them once the outcome is known.  Exact-duplicate
+        summaries are skipped and at most 3 threads stay open at a time.
+        """
+        try:
+            await self._memory.expire_stale_companion_threads_async(max_age_days=14.0)
+            thread = await self.extract_companion_thread(user_input)
+            if not thread:
+                return
+            open_items = await self._memory.list_unfinished_business_async(limit=20)
+            if any(item.get("summary") == thread for item in open_items):
+                return
+            open_threads = [item for item in open_items if item.get("source") == "companion_thread"]
+            if len(open_threads) >= 3:
+                return
+            await self._memory.open_unfinished_business_async(thread, source="companion_thread")
+            if desires is not None:
+                desires.boost("worry_companion", 0.1)
+            logger.info("Companion thread captured: %s", thread)
+        except Exception as exc:  # noqa: BLE001
+            logger.debug("Companion thread capture failed: %s", exc)
+
     def _should_compact(self, threshold_tokens: int = 60_000) -> bool:
         """Return True when context is large enough to warrant compaction.
 
@@ -1983,20 +3450,22 @@ class EmbodiedAgent:
 
         self.messages = [summary_marker] + list(recent)
         self._post_compact = True
+        self._post_compact_recovery_pending = True
 
     @property
     def is_embedding_ready(self) -> bool:
         """Return True once the embedding model has finished loading."""
         return self._memory.is_embedding_ready()
 
-    async def _write_today_narrative(self) -> None:
+    async def _write_today_narrative(self) -> str | None:
         """Write a one-sentence self-description for today's session.
 
         This is Kokone's diary entry — "who I was today." Read back next session
         as the felt thread of temporal continuity: ウチはここにいた、今もいる.
+        Returns the sentence written (or None) so the daybook can record it.
         """
         if self._turn_count == 0:
-            return  # No conversation happened — nothing to narrate
+            return None  # No conversation happened — nothing to narrate
         try:
             today_memories = await self._memory.recall_day_summaries_async(n=1)
             if today_memories:
@@ -2007,11 +3476,11 @@ class EmbodiedAgent:
                 summary_hint = " / ".join(m.get("content", "")[:60] for m in recent[:3])
 
             if not summary_hint.strip():
-                # Nothing to narrate from: a fresh DB or a session that stored no memories.
-                # Sending an empty hint makes small models ask for the summary back, and
-                # that request used to be saved as the day's self-narrative.
+                # Nothing to narrate from (fresh DB / no memories this session). An
+                # empty hint makes small models ask for the summary back, and that
+                # request used to be saved as the day's self-narrative.
                 logger.info("No memories for today — skipping self narrative")
-                return
+                return None
 
             mood, _ = self._decayed_mood()
             prompt = (
@@ -2027,11 +3496,55 @@ class EmbodiedAgent:
             text = (text or "").strip()
             if not _looks_like_self_narrative(text):
                 logger.info("Self-narrative rejected (not a narrative): %s", text[:60])
-                return
+                return None
             self._self_narrative.write(text, mood=mood)
             logger.info("Self-narrative written: %s", text[:60])
+            return text
         except Exception as e:
             logger.warning("Could not write today's self narrative: %s", e)
+        return None
+
+    async def _write_today_daybook(self, narrative_text: str | None) -> None:
+        """Merge this session into today's daybook record (never raises).
+
+        Events: the session's self-narrative sentence. Open loops: unfinished
+        business, when the memory store exposes it cheaply. Everything else in
+        the record is the agent's to fill from its own tools later.
+        """
+        if getattr(self, "_turn_count", 0) == 0:
+            return
+        daybook = getattr(self, "_daybook", None)
+        if daybook is None:
+            return
+        events = [narrative_text.strip()] if narrative_text and narrative_text.strip() else []
+        open_loops: list[str] = []
+        lister = getattr(getattr(self, "_memory", None), "list_unfinished_business_async", None)
+        if callable(lister):
+            try:
+                items = await lister(limit=5)
+                for item in items or []:
+                    text = str(item.get("thread") or item.get("content") or "").strip()
+                    if text:
+                        open_loops.append(text)
+            except Exception as exc:  # noqa: BLE001
+                logger.debug("daybook: open loops unavailable: %s", exc)
+        if not events and not open_loops:
+            return
+        try:
+            daybook.append_today(events=events, open_loops=open_loops)
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("Could not write today's daybook record: %s", exc)
+
+    async def _drain_tts(self, timeout: float = 3.0) -> None:
+        """Wait (bounded) for the TTS playback queue, then stop its worker."""
+        tts = getattr(self, "_tts", None)
+        close = getattr(tts, "close", None)
+        if close is None:
+            return
+        try:
+            await asyncio.wait_for(close(timeout=timeout), timeout=timeout + 0.5)
+        except (asyncio.TimeoutError, Exception):  # noqa: BLE001
+            pass
 
     async def close(self) -> None:
         """Clean up resources. Bounded by timeouts to avoid hanging on exit."""
@@ -2044,10 +3557,17 @@ class EmbodiedAgent:
                 except (asyncio.TimeoutError, Exception):  # noqa: BLE001
                     pass
 
+        # Let queued speech finish first (bounded) so a goodbye is not cut off.
+        await self._drain_tts()
+
         await self._drain_background_tasks()
 
-        # Write today's self-narrative before shutting down.
-        await self._write_today_narrative()
+        # Write today's self-narrative before shutting down, then the daybook.
+        narrative_text = await self._write_today_narrative()
+        try:
+            await self._write_today_daybook(narrative_text)
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("daybook write skipped: %s", exc)
 
         # Generate (or refresh) today's day summary before shutting down.
         # Skipped when no separate utility backend is configured.
@@ -2064,6 +3584,22 @@ class EmbodiedAgent:
                 await asyncio.wait_for(memory_worker.stop(), timeout=1.5)
             except (asyncio.TimeoutError, Exception):
                 pass
+        inner_loop = getattr(self, "_inner_loop", None)
+        if inner_loop is not None:
+            try:
+                await asyncio.wait_for(inner_loop.stop(), timeout=1.5)
+            except (asyncio.TimeoutError, Exception):
+                pass
+        # Dense recurrence defers disk writes — persist any backlog AFTER all
+        # producers (background pipelines, inner-loop ticks) have stopped, or
+        # a late nudge would re-dirty the stores past the flush and be lost.
+        for store_name in ("_self_state", "_attention_schema"):
+            store = getattr(self, store_name, None)
+            if store is not None and hasattr(store, "flush"):
+                try:
+                    store.flush()
+                except Exception:  # noqa: BLE001
+                    pass
         if self._mcp:
             try:
                 await asyncio.wait_for(self._mcp.stop(), timeout=2.0)
@@ -2073,6 +3609,23 @@ class EmbodiedAgent:
             await asyncio.wait_for(asyncio.to_thread(self._memory.close), timeout=1.0)
         except (asyncio.TimeoutError, Exception):
             pass
+        delegation_runner = getattr(self, "_delegation_runner", None)
+        if delegation_runner is not None:
+            try:
+                await asyncio.wait_for(delegation_runner.shutdown(), timeout=2.0)
+            except (asyncio.TimeoutError, Exception):
+                pass
+        for closable in (
+            getattr(self, "_person_model", None),
+            getattr(self, "_commitment_store", None),
+            getattr(self, "_narrative_store", None),
+            getattr(self, "_social_events", None),
+        ):
+            if closable is not None:
+                try:
+                    closable.close()
+                except Exception:
+                    pass
 
     async def run(
         self,
@@ -2089,246 +3642,155 @@ class EmbodiedAgent:
         """Run one conversation turn with the agent loop.
 
         inner_voice: agent's own desire/impulse (injected into system prompt, NOT a user message).
+
+        The deterministic pre-loop pipeline lives in
+        ``EmbodiedAgentHook.prepare_turn``; the loop body is the substrate
+        ``ReActLoop`` with the embodied behaviours (TAPE replan, coherence
+        retry, interrupt drain, say reminders) supplied by the hook's
+        lifecycle methods; finalisation (meta-gate repair, continuation
+        status, auto-say, commit) stays here.
         """
-        self._turn_count += 1
-        first_turn = self._turn_count == 1
-        memory_worker = getattr(self, "_memory_worker", None)
-        startup_phase = (
-            first_turn
-            or not self._memory.is_embedding_ready()
-            or (self._mcp is not None and not self._mcp.is_started)
-            or (memory_worker is not None and not memory_worker.is_running)
-        )
-        if on_phase:
-            on_phase("startup" if startup_phase else "thinking")
-
-        # Start MCP connections in background (non-blocking) and memory worker
-        if self._mcp and not self._mcp.is_started:
-            self._mcp_start_task = asyncio.ensure_future(self._mcp.start())
-        if memory_worker and not memory_worker.is_running:
-            await memory_worker.start()
-
-        # First turn: morning reconstruction — bridge yesterday's self to today's
-        morning_ctx = ""
-        if first_turn:
-            self._relationship.record_session()
-            morning_ctx = await self._morning_reconstruction(desires=desires)
-
-        is_desire_turn = bool(inner_voice and not user_input)
-
-        # Compact context if it has grown too large (GC-like: compress old turns)
-        if self._should_compact():
-            await self._compact_messages()
-
-        # Inject relevant past memories + emotional context (skip for desire-driven turns)
-        recall_n = 5 if self._post_compact else 3
-        self._post_compact = False  # consume the flag regardless
-        if not is_desire_turn:
-            (
-                memories,
-                feelings,
-                semantic_facts,
-                behavior_policies,
-            ) = await asyncio.gather(
-                self._memory.recall_async(user_input, n=recall_n),
-                self._memory.recent_feelings_async(n=4),
-                self._memory.recall_semantic_facts_async(user_input, n=3),
-                self._memory.recall_behavior_policies_async(user_input, n=2),
-            )
-            # Use cached values from previous turn's post-response pipeline
-            companion_mood = self._cached_companion_mood
-            temporal_ctx = self._cached_temporal_ctx
-            memory_parts = []
-            if memories:
-                memory_parts.append(self._memory.format_for_context(memories))
-            if feelings:
-                memory_parts.append(self._memory.format_feelings_for_context(feelings))
-            if semantic_facts:
-                memory_parts.append(self._memory.format_semantic_facts_for_context(semantic_facts))
-            if behavior_policies:
-                memory_parts.append(
-                    self._memory.format_behavior_policies_for_context(behavior_policies)
-                )
-            if temporal_ctx:
-                memory_parts.append(temporal_ctx)
-            if memory_parts:
-                user_input_with_ctx = user_input + "\n\n" + "\n\n".join(memory_parts)
-            else:
-                user_input_with_ctx = user_input
-            feelings_ctx = self._memory.format_feelings_for_context(feelings) if feelings else ""
-        else:
-            # Desire turn: no user context needed; feelings injected via interoception
-            feelings = []
-            feelings_ctx = ""
-            companion_mood = "engaged"
-            user_input_with_ctx = _t("desire_turn_marker")
-
-        self.messages.append(self.backend.make_user_message(user_input_with_ctx))
-
-        # Use cached plan & workspace context from previous turn's post-response pipeline.
-        # These are computed in the background after each response and are ready for the
-        # next turn.  First turn uses empty defaults — morning_ctx dominates anyway.
-        plan_ctx = self._cached_plan_ctx
-        workspace_ctx = self._cached_workspace_ctx
-        continuity_ctx = self._self_continuity_context()
-        tape_backend = self._tape_backend()  # still needed for in-loop replanning
-        if plan_ctx:
-            logger.debug("TAPE plan (cached): %s", plan_ctx[:80])
-        if workspace_ctx:
-            logger.debug("GlobalWorkspace broadcast (cached): %s", workspace_ctx[:80])
-
-        if on_phase and startup_phase:
-            on_phase("thinking")
-
-        # Social reflex: on social utterances (venting, greeting, indirect request…)
-        # withhold perception tools so a small model cannot answer feelings with the camera.
-        reflex_on = bool(getattr(self, "_social_reflex", False))
-        social_turn = (
-            social_reflex.classify_turn(user_input) if (reflex_on and not is_desire_turn) else None
-        )
-        turn_tools = (
-            social_reflex.allowed_tools(self._all_tool_defs, social_turn)
-            if social_turn is not None
-            else self._all_tool_defs
-        )
-        if social_turn is not None and social_turn.is_social:
-            logger.debug(
-                "Social reflex: kind=%s camera_ok=%s", social_turn.kind, social_turn.camera_ok
-            )
-
-        camera_used = False
-        say_used = False
-        language_retried = False
-        empty_retried = False
-        tools_used_this_turn: list[str] = []
-        final_text = "(no response)"
-        non_say_streak = 0  # consecutive tool calls without say()
-        observation_action_name: str | None = None
-        observation_action_input: dict | None = None
-        pending_view_action_name: str | None = None
-        pending_view_action_input: dict | None = None
-
-        for i in range(MAX_ITERATIONS):
-            logger.debug("Agent iteration %d", i + 1)
-
-            step_tools = turn_tools
-            if (
-                reflex_on
-                and not say_used
-                and social_reflex.perception_exhausted(tools_used_this_turn)
-            ):
-                # Looked enough: only speaking (or remembering) is left for this turn.
-                step_tools = [
-                    t for t in turn_tools if t.get("name") not in social_reflex.PERCEPTION_TOOLS
-                ]
-            result, raw_content = await self.backend.stream_turn(
-                system=self._system_prompt(
-                    feelings_ctx,
-                    morning_ctx,
+        # Mark the turn in flight so the inner loop skips its idle ticks; this
+        # is a visibility flag for background cognition, NOT a lock — turn
+        # single-flight is owned by the UI loops.
+        self._turn_active = True
+        latency = getattr(self, "_latency", None) or LatencyRecorder(enabled=False)
+        try:
+            with latency.span("prepare"):
+                prep = await self._hook.prepare_turn(
+                    user_input=user_input,
+                    on_phase=on_phase,
+                    desires=desires,
                     inner_voice=inner_voice,
-                    plan_ctx=plan_ctx,
-                    companion_mood=companion_mood,
-                    continuity_ctx=continuity_ctx,
-                    workspace_ctx=workspace_ctx,
-                ),
-                messages=self.messages,
-                tools=step_tools,
-                max_tokens=self.config.max_tokens,
-                on_text=on_text,
-            )
-            self._last_context_tokens = result.input_tokens
-            self._session_input_tokens += result.input_tokens
-            self._session_output_tokens += result.output_tokens
-
-            # HOT layer: record this step metacognitively
-            _focus = self._attention_schema.current_focus()
-            if _focus is not None:
-                _action = result.stop_reason
-                if result.stop_reason == "tool_use" and result.tool_calls:
-                    _action = result.tool_calls[0].name
-                _conf = min(1.0, result.output_tokens / max(1, self.config.max_tokens))
-                self._meta_monitor.record_step(_focus, action=_action, confidence=_conf)
-
-            if result.stop_reason == "end_turn":
-                self.messages.append(self.backend.make_assistant_message(result, raw_content))
-                final_text = result.text or "(no response)"
-                if (
-                    reflex_on
-                    and not say_used
-                    and not empty_retried
-                    and not is_desire_turn
-                    and not (result.text or "").strip()
-                ):
-                    # Small models sometimes return nothing at all.  Ask once, briefly.
-                    empty_retried = True
-                    logger.info("Social reflex: empty reply, asking for one short say()")
-                    self.messages.append(
-                        self.backend.make_user_message(
-                            "You said nothing. Reply to the person with one short say() now."
-                        )
-                    )
-                    continue
-                if reflex_on and final_text != "(no response)":
-                    # Small models leak pseudo tool syntax / stage directions into prose,
-                    # or write say("…") literally instead of calling the tool.
-                    final_text = (
-                        social_reflex.normalize_small_model_text(final_text) or "(no response)"
-                    )
-                    if not language_retried and social_reflex.language_mismatch(
-                        user_input, final_text
-                    ):
-                        language_retried = True
-                        logger.info("Social reflex: reply language mismatch, asking for a redo")
-                        self.messages.append(
-                            self.backend.make_user_message(
-                                "Reply in the same language the person used. Say it again."
-                            )
-                        )
-                        continue
-                    if social_turn is not None and social_turn.is_social:
-                        final_text = (
-                            social_reflex.trim_spoken(
-                                final_text, user_input, social_turn.max_sentences
-                            )
-                            or final_text
-                        )
-
-                # Coherence gate: ask utility backend whether the response contains
-                # a logical error (e.g. shiritori word ending in 'ん').  If a
-                # violation is found, inject a correction nudge and let the main
-                # loop re-generate.  Only fires once to avoid infinite loops.
-                # Disabled by default for latency; set FAMILIAR_COHERENCE_CHECK=1 to enable.
-                _coherence_enabled = os.environ.get("FAMILIAR_COHERENCE_CHECK", "").strip() in (
-                    "1",
-                    "true",
-                    "yes",
                 )
-                if _coherence_enabled and not getattr(self, "_coherence_retried", False):
-                    violation = await self._check_response_coherence(final_text)
-                    if violation:
-                        self._coherence_retried = True
-                        self.messages.append(
-                            self.backend.make_user_message(
-                                f"[SELF-CHECK] Your previous response has a problem: "
-                                f"{violation}. Please correct it and respond again."
-                            )
+        except BaseException:
+            self._turn_active = False
+            raise
+
+        # Assigned again right after the loop finishes; this early value only
+        # matters when the loop raises (the finally must never NameError).
+        finalize_started = time.perf_counter()
+        try:
+            interrupt_source = (
+                _InterruptQueueSource(self, interrupt_queue)
+                if interrupt_queue is not None
+                else None
+            )
+            ctx = TurnContext(user_input=user_input, profile="neighbor")
+            ctx.metadata["prep"] = prep
+            ctx.metadata["interrupt_source"] = interrupt_source
+
+            # Timeouts go through _tool_timeout_seconds so the historical
+            # per-tool seam (and its test patches) stays authoritative —
+            # resolved for every tool on this turn's surface, not just the
+            # static override table.
+            turn_tool_names = {str(tool_def.get("name", "")) for tool_def in prep.turn_tools} | set(
+                _TOOL_TIMEOUTS
+            )
+            loop = ReActLoop(
+                backend=cast("RuntimeModelBackend", instrument_backend(self.backend, latency)),
+                tools=cast(ToolRegistry, _TurnToolAdapter(self, prep.turn_tools, prep)),
+                max_iterations=prep.turn_max_iterations,
+                default_tool_timeout=self._tool_timeout_seconds(""),
+                tool_timeouts={
+                    name: self._tool_timeout_seconds(name) for name in turn_tool_names if name
+                },
+                hooks=[h for h in (self._hook, getattr(self, "_reflex_hook", None)) if h],
+            )
+            with latency.span("react_loop"):
+                run_result = await loop.run(
+                    system=self._system_prompt(
+                        prep.feelings_ctx,
+                        prep.morning_ctx,
+                        inner_voice=prep.inner_voice,
+                        plan_ctx=prep.plan_ctx,
+                        companion_mood=prep.companion_mood,
+                        continuity_ctx=prep.continuity_ctx,
+                        workspace_ctx=prep.workspace_ctx,
+                        mental_ctx=prep.mental_ctx,
+                    ),
+                    messages=self.messages,
+                    max_tokens=prep.turn_max_tokens,
+                    on_text=on_text,
+                    context=ctx,
+                    interrupt_source=interrupt_source,
+                    on_action=on_action,
+                    on_image=on_image,
+                    on_tool_result=on_tool_result,
+                )
+
+            finalize_started = time.perf_counter()
+            if run_result.stop_reason == "end_turn":
+                final_text = run_result.final_text
+
+                # Identity backstop (tier 2): the in-loop retry is the primary
+                # defence; compute remaining violations once and let the
+                # meta-gate replace a still-violating reply outright.
+                identity = getattr(self, "_identity", None)
+                identity_violations: list[Any] = []
+                if identity is not None and final_text and final_text != "(no response)":
+                    try:
+                        identity_violations = identity.check_response(
+                            user_text=user_input,
+                            candidate_response=final_text,
                         )
-                        say_used = False
-                        continue
+                    except Exception as exc:  # noqa: BLE001
+                        logger.warning("Identity response check failed: %s", exc)
+
+                gate_method = getattr(self._meta_monitor, "gate_response", None)
+                gate: MetaGateDecision | None = None
+                if callable(gate_method):
+                    maybe_gate = gate_method(
+                        user_text=user_input,
+                        candidate_response=final_text,
+                        social_policy=prep.social_policy,
+                        last_error=self._last_tool_error,
+                        identity_violations=identity_violations or None,
+                    )
+                    if isinstance(maybe_gate, MetaGateDecision):
+                        gate = maybe_gate
+                if gate is not None and gate.needs_repair and gate.repaired_response:
+                    final_text = gate.repaired_response
+
+                # A violation — even a repaired one — leaves dissonance behind
+                # and raises the drive to reflect on it later.
+                if identity is not None and identity_violations:
+                    top = identity_violations[0]
+                    try:
+                        identity.record_violation(top, turn_index=self._turn_count)
+                    except Exception as exc:  # noqa: BLE001
+                        logger.warning("Identity violation record failed: %s", exc)
+                    if desires is not None:
+                        desires.boost("identity_coherence", 0.3 + 0.4 * top.severity)
+                    concerns = getattr(self, "_concerns", None)
+                    if concerns is not None:
+                        try:
+                            concerns.activate(
+                                f"Something I hold was strained: {top.statement[:80]}",
+                                category="identity",
+                                intensity=0.4 + 0.5 * top.severity,
+                                turn_index=self._turn_count,
+                            )
+                        except Exception:  # noqa: BLE001
+                            pass
+
+                continuation_status = "DONE"
+                status_match = re.search(
+                    r"(?:^|\n)(DONE|CONTINUE:[^\n]+|DEFER:[^\n]+)\s*$", final_text
+                )
+                if status_match:
+                    continuation_status = status_match.group(1)
+                    final_text = final_text[: status_match.start(1)].rstrip() or "(no response)"
+                self._heartbeat.apply_status(continuation_status)
 
                 self._coherence_retried = False
 
                 # Auto-say: if the model wrote text but never called say(), speak it aloud.
-                # Gated by config.auto_say (default OFF).
-                _auto_say_enabled = getattr(self.config, "auto_say", False) or (
-                    reflex_on
-                    and os.environ.get("FAMILIAR_AUTO_SAY", "").strip().lower()
-                    not in ("0", "false", "no")
-                )
+                _auto_say_enabled = getattr(self.config, "auto_say", False)
                 if (
                     _auto_say_enabled
                     and self._tts
-                    and not say_used
+                    and not prep.say_used
                     and final_text
                     and final_text != "(no response)"
                 ):
@@ -2336,219 +3798,47 @@ class EmbodiedAgent:
                         on_action("say", {"text": final_text})
                     await self._tts.call("say", {"text": final_text})
 
-                if final_text and final_text != "(no response)":
-                    self._spawn_background_task(
-                        self._run_post_response_pipeline(
-                            user_input=user_input,
-                            final_text=final_text,
-                            camera_used=camera_used,
-                            observation_action_name=observation_action_name,
-                            observation_action_input=observation_action_input,
-                            companion_mood=companion_mood,
-                            is_desire_turn=is_desire_turn,
-                            desires=desires,
-                        ),
-                        name="post-response-pipeline",
-                    )
+                await self._hook.commit_after_end_turn(
+                    prep=prep,
+                    user_input=user_input,
+                    final_text=final_text,
+                    is_desire_turn=prep.is_desire_turn,
+                    desires=desires,
+                )
 
                 return final_text
 
-            if result.stop_reason == "tool_use":
-                # Social reflex: a say() in the wrong language is not spoken; ask once for a redo.
-                if (
-                    reflex_on
-                    and not language_retried
-                    and any(
-                        tc.name == "say"
-                        and social_reflex.language_mismatch(
-                            user_input, str(tc.input.get("text", ""))
-                        )
-                        for tc in result.tool_calls
-                    )
-                ):
-                    language_retried = True
-                    logger.info("Social reflex: say() language mismatch, asking for a redo")
-                    self.messages.append(self.backend.make_assistant_message(result, raw_content))
-                    nudge = (
-                        "Not spoken: wrong language. Reply in the same language the person "
-                        "used, then call say() again."
-                    )
-                    self.messages.append(
-                        self.backend.make_tool_results(
-                            result.tool_calls, [(nudge, None)] * len(result.tool_calls)
-                        )
-                    )
-                    continue
-
-                collected: list[tuple[str, str | None]] = []
-                for tc in result.tool_calls:
-                    tools_used_this_turn.append(tc.name)
-                    if reflex_on and tc.name == "say" and isinstance(tc.input, dict):
-                        tc.input["text"] = social_reflex.clean_say_text(
-                            str(tc.input.get("text", ""))
-                        )
-                    if tc.name == "see":
-                        camera_used = True
-                        if pending_view_action_name is not None:
-                            observation_action_name = pending_view_action_name
-                            observation_action_input = dict(pending_view_action_input or {})
-                        else:
-                            observation_action_name = "see"
-                            observation_action_input = dict(tc.input)
-                        pending_view_action_name = None
-                        pending_view_action_input = None
-                    elif tc.name in {"look", "walk"}:
-                        pending_view_action_name = tc.name
-                        pending_view_action_input = dict(tc.input)
-                    empty_say = (
-                        tc.name == "say" and not str((tc.input or {}).get("text", "")).strip()
-                    )
-                    if tc.name == "say" and not empty_say:
-                        say_used = True
-                        non_say_streak = 0
-                    else:
-                        non_say_streak += 1
-                    logger.info("Tool call: %s(%s)", tc.name, tc.input)
-                    if on_action and not empty_say:
-                        on_action(tc.name, tc.input)
-
-                    timeout_s = self._tool_timeout_seconds(tc.name)
-                    try:
-                        if empty_say:
-                            # say("") is silence, not speech: don't count it as having spoken,
-                            # so auto-say / the voice reminder still deliver the reply.
-                            text, image = (
-                                "Nothing was spoken: say() needs the words as text.",
-                                None,
-                            )
-                        else:
-                            text, image = await asyncio.wait_for(
-                                self._execute_tool(tc.name, tc.input), timeout=timeout_s
-                            )
-                    except asyncio.TimeoutError:
-                        logger.warning("Tool %s timed out after %.1fs", tc.name, timeout_s)
-                        text, image = (
-                            f"Tool timeout: {tc.name} exceeded {timeout_s:.1f}s.",
-                            None,
-                        )
-                    except Exception as e:
-                        logger.warning("Tool %s failed: %s", tc.name, e)
-                        text, image = f"Tool error: {e}", None
-
-                    # TAPE mechanism 3: adaptive replanning.
-                    # Trigger: NOT a technical error, but an observation that contradicts
-                    # the plan's assumptions (e.g., looked for the cat, it wasn't there).
-                    # Only meaningful when an upfront plan exists.
-                    if (
-                        tape_backend
-                        and plan_ctx
-                        and await check_plan_blocked(
-                            tape_backend, plan_ctx, tc.name, tc.input, text
-                        )
-                    ):
-                        logger.info("TAPE: plan blocked after %s, replanning...", tc.name)
-                        replan = await generate_replan(
-                            tape_backend, plan_ctx, tc.name, tc.input, text
-                        )
-                        if replan:
-                            text = f"{text}\n\n[ADAPTIVE REPLAN] {replan}"
-                            logger.info("TAPE replan: %s", replan[:80])
-
-                    logger.info("Tool result: %s", text[:100])
-                    if image and on_image is not None:
-                        on_image(image)
-                    if on_tool_result is not None:
-                        on_tool_result(tc.name, tc.input, text)
-                    collected.append((text, image))
-
-                # Append assistant + tool results atomically: never leave tool_calls unresolved
-                self.messages.append(self.backend.make_assistant_message(result, raw_content))
-                tool_msgs = self.backend.make_tool_results(result.tool_calls, collected)
-                self.messages.append(tool_msgs)
-
-                # Social reflex: once we have spoken on a social turn, the turn is over.
-                # Small models otherwise keep exploring and talk over their own reply.
-                if social_turn is not None and social_turn.is_social and say_used:
-                    spoken = [
-                        str(tc.input.get("text", ""))
-                        for tc in result.tool_calls
-                        if tc.name == "say" and tc.input.get("text")
-                    ]
-                    final_text = "\n".join(spoken) or result.text or "(no response)"
-                    self._spawn_background_task(
-                        self._run_post_response_pipeline(
-                            user_input=user_input,
-                            final_text=final_text,
-                            camera_used=camera_used,
-                            observation_action_name=observation_action_name,
-                            observation_action_input=observation_action_input,
-                            companion_mood=companion_mood,
-                            is_desire_turn=is_desire_turn,
-                            desires=desires,
-                        ),
-                        name="post-response-pipeline",
-                    )
-                    return final_text
-
-                # Check for user interrupt (typed while agent was busy)
-                if interrupt_queue is not None and not interrupt_queue.empty():
-                    interrupts = self._drain_interrupt_queue(interrupt_queue)
-                    if interrupts:
-                        head = " / ".join(interrupts[:3])
-                        if len(interrupts) > 3:
-                            head += f" (+{len(interrupts) - 3} more)"
-                        logger.debug("Consumed %d queued interrupts", len(interrupts))
-                        self.messages.append(
-                            self.backend.make_user_message(
-                                f"[User interrupted x{len(interrupts)}]: {head}. "
-                                "Respond to this directly with say() now."
-                            )
-                        )
-                        non_say_streak = 0
-
-                # Nudge: still haven't spoken after 2 tool calls
-                elif non_say_streak >= 2 and not say_used:
-                    self.messages.append(
-                        self.backend.make_user_message(
-                            "REMINDER: Writing text is silent. You MUST call say() to be heard. "
-                            "Call say() NOW. Keep it to 1-2 sentences."
-                        )
-                    )
-                    non_say_streak = 0
-
-                # Nudge: already spoke but still looping — wrap up
-                elif say_used and non_say_streak >= 2:
-                    self.messages.append(
-                        self.backend.make_user_message(
-                            "You already spoke. Stop exploring and end your turn now."
-                        )
-                    )
-                    non_say_streak = 0
-
-                continue
-
-            logger.warning("Unexpected stop_reason: %s", result.stop_reason)
-            break
-
-        logger.warning("Reached max iterations (%d). Forcing final response.", MAX_ITERATIONS)
-        self.messages.append(
-            self.backend.make_user_message(
-                "Please summarize what you found and provide your final answer now."
+            # max_iterations (or an unexpected stop reason): force a final,
+            # tool-free response so the turn always ends with words.
+            logger.warning(
+                "Reached max iterations (%d). Forcing final response.",
+                prep.turn_max_iterations,
             )
-        )
-        result, _ = await self.backend.stream_turn(
-            system=self._system_prompt(
-                morning_ctx=morning_ctx,
-                plan_ctx=plan_ctx,
-                continuity_ctx=continuity_ctx,
-                workspace_ctx=workspace_ctx,
-            ),
-            messages=self.messages,
-            tools=[],
-            max_tokens=self.config.max_tokens,
-            on_text=on_text,
-        )
-        return result.text or "(max iterations reached)"
+            self.messages.append(
+                self.backend.make_user_message(
+                    "Please summarize what you found and provide your final answer now."
+                )
+            )
+            result, _ = await self.backend.stream_turn(
+                system=self._system_prompt(
+                    morning_ctx=prep.morning_ctx,
+                    plan_ctx=prep.plan_ctx,
+                    continuity_ctx=prep.continuity_ctx,
+                    workspace_ctx=prep.workspace_ctx,
+                    mental_ctx=prep.mental_ctx,
+                ),
+                messages=self.messages,
+                tools=[],
+                max_tokens=prep.turn_max_tokens,
+                on_text=on_text,
+            )
+            return result.text or "(max iterations reached)"
+        finally:
+            self._restore_backend_after_turn(prep.backend_turn_snapshot)
+            self._turn_active = False
+            if latency.enabled:
+                latency.record("finalize", time.perf_counter() - finalize_started)
+                latency.flush_turn(turn=self._turn_count)
 
     @property
     def stt(self) -> STTTool | None:

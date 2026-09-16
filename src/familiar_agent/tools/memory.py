@@ -13,6 +13,7 @@ import asyncio
 import json
 import logging
 import os
+import re
 import sqlite3
 import threading
 import uuid
@@ -929,9 +930,16 @@ class ObservationMemory:
             return False
 
     def recall(self, query: str, n: int = 3, kind: str | None = None) -> list[dict]:
-        """Recall by vector similarity. Fallback to LIKE + recency."""
+        """Recall by vector similarity. Fallback to LIKE + recency.
+
+        Dreams are an opt-in provenance lane: general recall (``kind=None``)
+        never returns them — they surface only when a caller explicitly asks
+        for ``kind="dream"``. Without this, journaled dreams would re-enter
+        turn context, working memory, and DMN seeding as ordinary memories
+        (and self-amplify across nights).
+        """
         try:
-            kind_filter = "AND kind = ?" if kind else ""
+            kind_filter = "AND kind = ?" if kind else "AND kind != 'dream'"
             kind_params: list[Any] = [kind] if kind else []
 
             # Fetch rows under lock, then compute similarity outside lock
@@ -970,13 +978,15 @@ class ObservationMemory:
                             fallback_rows = db.execute(
                                 f"SELECT id, content, timestamp, date, time, direction, kind, emotion, image_path "
                                 f"FROM observations WHERE ({conditions}) AND superseded_by IS NULL "
+                                f"AND kind != 'dream' "
                                 f"ORDER BY timestamp DESC LIMIT ?",
                                 params_like + [n],
                             ).fetchall()
                     if not fallback_rows:
                         fallback_rows = db.execute(
                             "SELECT id, content, timestamp, date, time, direction, kind, emotion, image_path "
-                            "FROM observations WHERE superseded_by IS NULL ORDER BY timestamp DESC LIMIT ?",
+                            "FROM observations WHERE superseded_by IS NULL AND kind != 'dream' "
+                            "ORDER BY timestamp DESC LIMIT ?",
                             (n,),
                         ).fetchall()
 
@@ -1273,6 +1283,45 @@ class ObservationMemory:
             logger.warning("Failed to recall revisions: %s", e)
             return []
 
+    # ── Interpretation shifts (self-ledger) ────────────────────────────────
+    # Anti-regression ledger: "I used to read X as A; now I read it as B."
+    # Rides the generic memory_revisions table with a dedicated entity_type,
+    # so corrected interpretations survive restarts and compaction and can be
+    # re-surfaced before the agent regresses to already-corrected behavior.
+
+    _INTERPRETATION_ENTITY = "interpretation"
+
+    def record_interpretation_shift(
+        self,
+        *,
+        topic: str,
+        previous_reading: str,
+        new_reading: str,
+        reason: str = "self_correction",
+    ) -> None:
+        """Persist one interpretation shift (never raises)."""
+        try:
+            with self._db_lock:
+                db = self._ensure_connected()
+                self._insert_revision_locked(
+                    db,
+                    self._INTERPRETATION_ENTITY,
+                    topic[:120],
+                    previous_reading,
+                    new_reading,
+                    0.0,
+                    1.0,
+                    None,
+                    reason=reason,
+                )
+                db.commit()
+        except Exception as e:  # noqa: BLE001
+            logger.warning("Failed to record interpretation shift: %s", e)
+
+    def recall_interpretation_shifts(self, n: int = 5) -> list[dict]:
+        """Most recent interpretation shifts, newest first."""
+        return self.recall_revisions(entity_type=self._INTERPRETATION_ENTITY, n=n)
+
     def save_with_id(
         self,
         content: str,
@@ -1369,6 +1418,17 @@ class ObservationMemory:
 
     async def recall_async(self, query: str, n: int = 3, kind: str | None = None) -> list[dict]:
         return await asyncio.to_thread(self.recall, query, n, kind)
+
+    async def recall_divergent_async(
+        self, query: str, n: int = 5, max_depth: int = 2, max_branches: int = 2
+    ) -> list[dict]:
+        return await asyncio.to_thread(
+            self.recall_divergent,
+            query,
+            n,
+            max_depth=max_depth,
+            max_branches=max_branches,
+        )
 
     async def recent_feelings_async(self, n: int = 5) -> list[dict]:
         return await asyncio.to_thread(self.recent_feelings, n)
@@ -1476,6 +1536,11 @@ class ObservationMemory:
 
         Returns list of (id_older, id_newer, similarity) tuples, sorted by similarity desc.
         Older = earlier timestamp is marked as the one to supersede.
+
+        Dreams are excluded: a dream is verbalized FROM recalled real memories,
+        so a newer dream can sit above the threshold against the very
+        observation it derives from — dedup must never evict a real memory in
+        favor of a hallucinated one.
         """
         with self._db_lock:
             db = self._ensure_connected()
@@ -1484,7 +1549,7 @@ class ObservationMemory:
                 SELECT o.id, o.timestamp, e.vector
                 FROM observations o
                 JOIN obs_embeddings e ON o.id = e.obs_id
-                WHERE o.superseded_by IS NULL
+                WHERE o.superseded_by IS NULL AND o.kind != 'dream'
                 ORDER BY o.timestamp DESC
                 LIMIT ?
                 """,
@@ -1529,6 +1594,88 @@ class ObservationMemory:
         self, entity_type: str | None = None, entity_key: str | None = None, n: int = 20
     ) -> list[dict]:
         return await asyncio.to_thread(self.recall_revisions, entity_type, entity_key, n)
+
+    async def create_episode_async(
+        self,
+        title: str,
+        *,
+        summary: str = "",
+        participants: list[str] | None = None,
+        opened_from_memory_id: str | None = None,
+    ) -> str | None:
+        return await asyncio.to_thread(
+            self.create_episode,
+            title,
+            summary=summary,
+            participants=participants,
+            opened_from_memory_id=opened_from_memory_id,
+        )
+
+    async def append_to_episode_async(self, episode_id: str, memory_id: str) -> bool:
+        return await asyncio.to_thread(self.append_to_episode, episode_id, memory_id)
+
+    async def refresh_working_memory_async(self, query: str = "", n: int = 5) -> list[dict]:
+        return await asyncio.to_thread(self.refresh_working_memory, query, n)
+
+    async def get_working_memory_async(self, n: int = 5) -> list[dict]:
+        return await asyncio.to_thread(self.get_working_memory, n)
+
+    async def consolidate_memories_async(self, threshold: float = 0.97) -> int:
+        return await asyncio.to_thread(self.consolidate_memories, threshold)
+
+    async def open_unfinished_business_async(
+        self,
+        summary: str,
+        *,
+        source: str = "agent",
+        related_memory_id: str | None = None,
+        metadata: dict[str, Any] | None = None,
+    ) -> str | None:
+        return await asyncio.to_thread(
+            self.open_unfinished_business,
+            summary,
+            source=source,
+            related_memory_id=related_memory_id,
+            metadata=metadata,
+        )
+
+    async def list_unfinished_business_async(
+        self, status: str = "open", limit: int = 5
+    ) -> list[dict]:
+        return await asyncio.to_thread(self.list_unfinished_business, status, limit)
+
+    async def resolve_unfinished_business_async(self, business_id: str) -> bool:
+        return await asyncio.to_thread(self.resolve_unfinished_business, business_id)
+
+    async def expire_stale_companion_threads_async(self, *, max_age_days: float = 14.0) -> int:
+        return await asyncio.to_thread(
+            self.expire_stale_companion_threads, max_age_days=max_age_days
+        )
+
+    async def list_identity_assertions_async(self, *, kind: str | None = None) -> list[dict]:
+        return await asyncio.to_thread(self.list_identity_assertions, kind=kind)
+
+    async def adjust_identity_confidence_async(
+        self,
+        assertion_key: str,
+        delta: float,
+        *,
+        reason: str = "identity_update",
+    ) -> float | None:
+        return await asyncio.to_thread(
+            self.adjust_identity_confidence, assertion_key, delta, reason=reason
+        )
+
+    async def append_identity_evidence_async(
+        self,
+        assertion_key: str,
+        *,
+        note: str,
+        memory_id: str | None = None,
+    ) -> bool:
+        return await asyncio.to_thread(
+            self.append_identity_evidence, assertion_key, note=note, memory_id=memory_id
+        )
 
     # ── Day summary support ────────────────────────────────────────
 
@@ -1672,8 +1819,865 @@ class ObservationMemory:
         return "\n".join(lines)
 
     # ------------------------------------------------------------------
+    # Episodes / working memory / unfinished business
+    # ------------------------------------------------------------------
+
+    def create_episode(
+        self,
+        title: str,
+        *,
+        summary: str = "",
+        participants: list[str] | None = None,
+        opened_from_memory_id: str | None = None,
+    ) -> str | None:
+        episode_id = str(uuid.uuid4())
+        now = self._now_iso()
+        participants_text = ",".join(participants or [])
+        try:
+            with self._db_lock:
+                db = self._ensure_connected()
+                db.execute(
+                    "INSERT INTO episodes "
+                    "(id, title, summary, participants, status, opened_from_memory_id, created_at, updated_at) "
+                    "VALUES (?, ?, ?, ?, 'open', ?, ?, ?)",
+                    (
+                        episode_id,
+                        title[:200],
+                        summary[:800],
+                        participants_text[:400],
+                        opened_from_memory_id,
+                        now,
+                        now,
+                    ),
+                )
+                db.commit()
+            return episode_id
+        except Exception as e:
+            logger.warning("create_episode failed: %s", e)
+            return None
+
+    def append_to_episode(self, episode_id: str, memory_id: str) -> bool:
+        try:
+            with self._db_lock:
+                db = self._ensure_connected()
+                row = db.execute(
+                    "SELECT COALESCE(MAX(position), -1) + 1 AS next_pos "
+                    "FROM episode_memories WHERE episode_id = ?",
+                    (episode_id,),
+                ).fetchone()
+                position = int(row["next_pos"]) if row and row["next_pos"] is not None else 0
+                db.execute(
+                    "INSERT OR IGNORE INTO episode_memories "
+                    "(id, episode_id, memory_id, position, added_at) VALUES (?, ?, ?, ?, ?)",
+                    (str(uuid.uuid4()), episode_id, memory_id, position, self._now_iso()),
+                )
+                db.execute(
+                    "UPDATE episodes SET updated_at = ? WHERE id = ?",
+                    (self._now_iso(), episode_id),
+                )
+                db.commit()
+            return True
+        except Exception as e:
+            logger.warning("append_to_episode failed: %s", e)
+            return False
+
+    def _episode_for_memory(self, memory_id: str) -> dict | None:
+        with self._db_lock:
+            db = self._ensure_connected()
+            row = db.execute(
+                "SELECT e.id, e.title, e.summary, e.participants "
+                "FROM episode_memories em JOIN episodes e ON e.id = em.episode_id "
+                "WHERE em.memory_id = ? ORDER BY em.added_at DESC LIMIT 1",
+                (memory_id,),
+            ).fetchone()
+        return dict(row) if row else None
+
+    def refresh_working_memory(self, query: str = "", n: int = 5) -> list[dict]:
+        recalled = self.recall_divergent(query or "recent important memories", n=n)
+        if not recalled:
+            return []
+        now = self._now_iso()
+        inserted: list[dict] = []
+        with self._db_lock:
+            db = self._ensure_connected()
+            for item in recalled[:n]:
+                memory_id = item.get("memory_id")
+                if not memory_id:
+                    continue
+                activation = float(item.get("confidence", item.get("activation", 0.5)))
+                episode_id = item.get("episode_id")
+                db.execute(
+                    "INSERT INTO memory_activation "
+                    "(id, memory_id, activation, source, context, episode_id, activated_at) "
+                    "VALUES (?, ?, ?, ?, ?, ?, ?)",
+                    (
+                        str(uuid.uuid4()),
+                        memory_id,
+                        activation,
+                        item.get("retrieval_method", "recall"),
+                        query[:200],
+                        episode_id,
+                        now,
+                    ),
+                )
+                inserted.append(item)
+            db.commit()
+        return inserted
+
+    def get_working_memory(self, n: int = 5) -> list[dict]:
+        try:
+            with self._db_lock:
+                db = self._ensure_connected()
+                rows = db.execute(
+                    "SELECT ma.memory_id, ma.activation, ma.source, ma.context, ma.episode_id, "
+                    "o.content, o.kind, o.timestamp "
+                    "FROM memory_activation ma JOIN observations o ON o.id = ma.memory_id "
+                    "ORDER BY ma.activated_at DESC LIMIT ?",
+                    (n,),
+                ).fetchall()
+            return [
+                {
+                    "memory_id": r["memory_id"],
+                    "summary": r["content"],
+                    "source_kind": r["kind"],
+                    "salience": float(r["activation"]),
+                    "episode_id": r["episode_id"],
+                    "activated_from": r["source"],
+                    "timestamp": r["timestamp"],
+                }
+                for r in rows
+            ]
+        except Exception as e:
+            logger.warning("get_working_memory failed: %s", e)
+            return []
+
+    def consolidate_memories(self, threshold: float = 0.97) -> int:
+        processed = 0
+        for older_id, newer_id, similarity in self.find_near_duplicates(threshold=threshold):
+            self.mark_superseded(older_id, newer_id)
+            self.link_memories(
+                older_id, newer_id, link_type="similar", note=f"sim={similarity:.3f}"
+            )
+            processed += 1
+        return processed
+
+    def recall_recent_by_kind(self, kind: str, n: int = 3) -> list[dict]:
+        """Most recent observations of one kind (timestamp desc, not similarity)."""
+        with self._db_lock:
+            db = self._ensure_connected()
+            rows = db.execute(
+                "SELECT id, content, timestamp, date, kind FROM observations "
+                "WHERE kind = ? AND superseded_by IS NULL "
+                "ORDER BY timestamp DESC LIMIT ?",
+                (kind, n),
+            ).fetchall()
+        return [dict(r) for r in rows]
+
+    async def recall_recent_by_kind_async(self, kind: str, n: int = 3) -> list[dict]:
+        return await asyncio.to_thread(self.recall_recent_by_kind, kind, n)
+
+    def upsert_semantic_fact(
+        self,
+        fact_key: str,
+        fact_text: str,
+        *,
+        confidence: float = 0.6,
+        tags: str = "",
+        source_memory_id: str | None = None,
+    ) -> None:
+        """Public wrapper for distillation jobs — locked, revision-audited."""
+        with self._db_lock:
+            db = self._ensure_connected()
+            self._upsert_semantic_fact_locked(
+                db,
+                fact_key,
+                fact_text,
+                source_memory_id=source_memory_id,
+                confidence=confidence,
+                tags=tags,
+            )
+            db.commit()
+
+    async def upsert_semantic_fact_async(
+        self,
+        fact_key: str,
+        fact_text: str,
+        *,
+        confidence: float = 0.6,
+        tags: str = "",
+    ) -> None:
+        await asyncio.to_thread(
+            self.upsert_semantic_fact,
+            fact_key,
+            fact_text,
+            confidence=confidence,
+            tags=tags,
+        )
+
+    # ── Experience ledger (self-authored standing context) ─────────────────
+    # Guardrails live in the STORE (house rule): the tool layer can never
+    # widen them. Lessons are advisory prompt text ONLY — never a checker or
+    # gate input (the identity two-tier discipline).
+
+    _LESSON_TIERS = ("agent", "auto_proposed")
+    _LESSON_MAX_ROWS = 12
+    _LESSON_MAX_TEXT = 160
+    # Must fit MAX_ROWS full-length lessons (12 × 160 = 1920) — otherwise the
+    # budget silently dominates the row cap and "a dozen lines" is a lie.
+    _LESSON_TOTAL_BUDGET = 2000
+
+    def upsert_experience_lesson(
+        self,
+        lesson_key: str,
+        lesson_text: str,
+        *,
+        tier: str = "agent",
+        confidence: float = 0.6,
+        source: str = "agent",
+    ) -> bool:
+        """Insert or update one distilled lesson, revision-audited and capped.
+
+        Same key from a higher tier promotes the row (auto_proposed → agent).
+        Overflow evicts auto_proposed first, then lowest confidence, then
+        oldest — a bounded prompt region forces exactly the biology-like
+        compression the feature exists for.
+        """
+        key = re.sub(r"[^a-z0-9_-]", "", lesson_key.strip().lower().replace(" ", "-"))[:40]
+        text = lesson_text.strip()[: self._LESSON_MAX_TEXT]
+        if not key or not text:
+            return False
+        if tier not in self._LESSON_TIERS:
+            tier = "auto_proposed"  # never let a caller mint a privileged tier
+        confidence = max(0.0, min(1.0, float(confidence)))
+        now_iso = self._now_iso()
+        with self._db_lock:
+            db = self._ensure_connected()
+            existing = db.execute(
+                "SELECT id, lesson_text, tier, confidence FROM experience_lessons "
+                "WHERE lesson_key = ?",
+                (key,),
+            ).fetchone()
+            if existing:
+                # Tier can only ratchet upward (auto_proposed → agent).
+                new_tier = "agent" if "agent" in (tier, str(existing["tier"])) else tier
+                self._insert_revision_locked(
+                    db,
+                    "experience_lesson",
+                    key,
+                    str(existing["lesson_text"]),
+                    text,
+                    float(existing["confidence"]),
+                    confidence,
+                    None,
+                    reason="lesson_update",
+                )
+                db.execute(
+                    "UPDATE experience_lessons SET lesson_text = ?, tier = ?, "
+                    "confidence = ?, last_confirmed_at = ?, updated_at = ? "
+                    "WHERE lesson_key = ?",
+                    (text, new_tier, confidence, now_iso, now_iso, key),
+                )
+            else:
+                self._insert_revision_locked(
+                    db,
+                    "experience_lesson",
+                    key,
+                    "",
+                    text,
+                    0.0,
+                    confidence,
+                    None,
+                    reason="lesson_create",
+                )
+                db.execute(
+                    "INSERT INTO experience_lessons "
+                    "(id, lesson_key, lesson_text, tier, confidence, source, "
+                    "last_confirmed_at, created_at, updated_at) "
+                    "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                    (
+                        str(uuid.uuid4()),
+                        key,
+                        text,
+                        tier,
+                        confidence,
+                        source,
+                        now_iso,
+                        now_iso,
+                        now_iso,
+                    ),
+                )
+            self._evict_lessons_over_budget_locked(db)
+            # Honest postcondition: a low-tier/low-conviction insert into a
+            # full ledger may be the eviction victim itself — report that as
+            # failure instead of claiming the lesson was recorded.
+            survived = (
+                db.execute(
+                    "SELECT 1 FROM experience_lessons WHERE lesson_key = ?", (key,)
+                ).fetchone()
+                is not None
+            )
+            db.commit()
+        return survived
+
+    def _evict_lessons_over_budget_locked(self, db: sqlite3.Connection) -> None:
+        while True:
+            rows = db.execute(
+                "SELECT lesson_key, lesson_text, tier, confidence, "
+                "COALESCE(last_confirmed_at, created_at) AS freshness "
+                "FROM experience_lessons"
+            ).fetchall()
+            total_chars = sum(len(str(r["lesson_text"])) for r in rows)
+            if len(rows) <= self._LESSON_MAX_ROWS and total_chars <= self._LESSON_TOTAL_BUDGET:
+                return
+            victims = sorted(
+                rows,
+                key=lambda r: (
+                    0 if str(r["tier"]) == "auto_proposed" else 1,
+                    float(r["confidence"]),
+                    str(r["freshness"]),
+                ),
+            )
+            victim_key = str(victims[0]["lesson_key"])
+            self._insert_revision_locked(
+                db,
+                "experience_lesson",
+                victim_key,
+                str(victims[0]["lesson_text"]),
+                "",
+                float(victims[0]["confidence"]),
+                0.0,
+                None,
+                reason="lesson_evicted",
+            )
+            db.execute("DELETE FROM experience_lessons WHERE lesson_key = ?", (victim_key,))
+
+    def list_experience_lessons(self) -> list[dict]:
+        """Agent-authored first, then by conviction."""
+        with self._db_lock:
+            db = self._ensure_connected()
+            rows = db.execute(
+                "SELECT lesson_key, lesson_text, tier, confidence, "
+                "last_confirmed_at, created_at FROM experience_lessons "
+                "ORDER BY CASE tier WHEN 'agent' THEN 0 ELSE 1 END, confidence DESC"
+            ).fetchall()
+        return [dict(r) for r in rows]
+
+    def drop_experience_lesson(self, lesson_key: str) -> bool:
+        with self._db_lock:
+            db = self._ensure_connected()
+            existing = db.execute(
+                "SELECT lesson_text, confidence FROM experience_lessons WHERE lesson_key = ?",
+                (lesson_key,),
+            ).fetchone()
+            if not existing:
+                return False
+            self._insert_revision_locked(
+                db,
+                "experience_lesson",
+                lesson_key,
+                str(existing["lesson_text"]),
+                "",
+                float(existing["confidence"]),
+                0.0,
+                None,
+                reason="lesson_dropped",
+            )
+            db.execute("DELETE FROM experience_lessons WHERE lesson_key = ?", (lesson_key,))
+            db.commit()
+        return True
+
+    async def upsert_experience_lesson_async(
+        self,
+        lesson_key: str,
+        lesson_text: str,
+        *,
+        tier: str = "agent",
+        confidence: float = 0.6,
+        source: str = "agent",
+    ) -> bool:
+        return await asyncio.to_thread(
+            lambda: self.upsert_experience_lesson(
+                lesson_key, lesson_text, tier=tier, confidence=confidence, source=source
+            )
+        )
+
+    async def list_experience_lessons_async(self) -> list[dict]:
+        return await asyncio.to_thread(self.list_experience_lessons)
+
+    def expire_working_memory(self, days: float = 2.0) -> int:
+        """Drop stale working-memory activation rows (nightly hygiene)."""
+        cutoff = (datetime.now() - timedelta(days=days)).isoformat()
+        with self._db_lock:
+            db = self._ensure_connected()
+            cur = db.execute("DELETE FROM memory_activation WHERE activated_at < ?", (cutoff,))
+            db.commit()
+            return int(cur.rowcount or 0)
+
+    async def expire_working_memory_async(self, days: float = 2.0) -> int:
+        return await asyncio.to_thread(self.expire_working_memory, days)
+
+    def open_unfinished_business(
+        self,
+        summary: str,
+        *,
+        source: str = "agent",
+        related_memory_id: str | None = None,
+        metadata: dict[str, Any] | None = None,
+    ) -> str | None:
+        business_id = str(uuid.uuid4())
+        try:
+            with self._db_lock:
+                db = self._ensure_connected()
+                db.execute(
+                    "INSERT INTO unfinished_business "
+                    "(id, summary, status, source, related_memory_id, metadata_json, created_at, resolved_at) "
+                    "VALUES (?, ?, 'open', ?, ?, ?, ?, NULL)",
+                    (
+                        business_id,
+                        summary[:400],
+                        source[:80],
+                        related_memory_id,
+                        json.dumps(metadata or {}, ensure_ascii=False, sort_keys=True),
+                        self._now_iso(),
+                    ),
+                )
+                db.commit()
+            return business_id
+        except Exception as e:
+            logger.warning("open_unfinished_business failed: %s", e)
+            return None
+
+    def list_unfinished_business(self, status: str = "open", limit: int = 5) -> list[dict]:
+        try:
+            with self._db_lock:
+                db = self._ensure_connected()
+                rows = db.execute(
+                    "SELECT id, summary, status, source, related_memory_id, metadata_json, created_at "
+                    "FROM unfinished_business WHERE status = ? ORDER BY created_at DESC LIMIT ?",
+                    (status, limit),
+                ).fetchall()
+            return [
+                {
+                    "id": r["id"],
+                    "summary": r["summary"],
+                    "status": r["status"],
+                    "source": r["source"],
+                    "related_memory_id": r["related_memory_id"],
+                    "metadata": json.loads(r["metadata_json"] or "{}"),
+                    "created_at": r["created_at"],
+                }
+                for r in rows
+            ]
+        except Exception as e:
+            logger.warning("list_unfinished_business failed: %s", e)
+            return []
+
+    def resolve_unfinished_business(self, business_id: str) -> bool:
+        """Resolve by full id, or by a unique prefix of an open item.
+
+        The prompt surfaces ids truncated to 8 chars, so the model passes a
+        prefix; resolve it as long as it is unambiguous among open items.
+        """
+        business_id = str(business_id).strip()
+        if len(business_id) < 4:
+            return False
+        try:
+            with self._db_lock:
+                db = self._ensure_connected()
+                updated = db.execute(
+                    "UPDATE unfinished_business SET status = 'resolved', resolved_at = ? WHERE id = ?",
+                    (self._now_iso(), business_id),
+                )
+                if updated.rowcount != 1:
+                    escaped = (
+                        business_id.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+                    )
+                    rows = db.execute(
+                        "SELECT id FROM unfinished_business "
+                        "WHERE id LIKE ? ESCAPE '\\' AND status = 'open'",
+                        (escaped + "%",),
+                    ).fetchall()
+                    if len(rows) != 1:
+                        db.commit()
+                        return False
+                    updated = db.execute(
+                        "UPDATE unfinished_business SET status = 'resolved', resolved_at = ? "
+                        "WHERE id = ?",
+                        (self._now_iso(), rows[0]["id"]),
+                    )
+                db.commit()
+            return updated.rowcount == 1
+        except Exception as e:
+            logger.warning("resolve_unfinished_business failed: %s", e)
+            return False
+
+    # ── Identity assertions (load-bearing values / boundaries / commitments) ──
+
+    def list_identity_assertions(self, *, kind: str | None = None) -> list[dict]:
+        try:
+            with self._db_lock:
+                db = self._ensure_connected()
+                if kind is not None:
+                    rows = db.execute(
+                        "SELECT * FROM identity_assertions WHERE kind = ? "
+                        "ORDER BY non_negotiable DESC, confidence DESC",
+                        (kind,),
+                    ).fetchall()
+                else:
+                    rows = db.execute(
+                        "SELECT * FROM identity_assertions "
+                        "ORDER BY non_negotiable DESC, confidence DESC"
+                    ).fetchall()
+            return [
+                {
+                    "assertion_key": r["assertion_key"],
+                    "kind": r["kind"],
+                    "statement": r["statement"],
+                    "non_negotiable": bool(r["non_negotiable"]),
+                    "confidence": float(r["confidence"]),
+                    "checker_id": r["checker_id"],
+                    "checker_params": json.loads(r["checker_params_json"] or "{}"),
+                    "source": r["source"],
+                    "evidence": json.loads(r["evidence_json"] or "[]"),
+                    "violation_count": int(r["violation_count"]),
+                    "last_violated_at": r["last_violated_at"],
+                    "updated_at": r["updated_at"],
+                }
+                for r in rows
+            ]
+        except Exception as e:
+            logger.warning("list_identity_assertions failed: %s", e)
+            return []
+
+    def upsert_identity_assertion(
+        self,
+        *,
+        assertion_key: str,
+        kind: str,
+        statement: str,
+        non_negotiable: bool = False,
+        confidence: float = 0.6,
+        checker_id: str = "",
+        checker_params: dict[str, Any] | None = None,
+        source: str = "seed",
+    ) -> bool:
+        """Insert or update an assertion. Returns True when a new row was created.
+
+        Updates never downgrade confidence (MAX-merge, like behavior policies)
+        and write a revision row when the statement or confidence changes.
+
+        Enforcement-critical fields (``kind`` / ``non_negotiable`` /
+        ``checker_id`` / ``checker_params``) are only writable on update by a
+        ``source="seed"`` caller. A non-seed upsert (the agent's
+        self-authorship tool) landing on an existing key updates only the
+        statement and confidence, so it can never escalate a row into a hard
+        veto nor silently disable a seeded checker — a prompt-injection guard
+        at the store layer, independent of the tool's own guards.
+        """
+        now_iso = self._now_iso()
+        confidence = max(0.0, min(1.0, float(confidence)))
+        params_json = json.dumps(checker_params or {}, ensure_ascii=False, sort_keys=True)
+        try:
+            with self._db_lock:
+                db = self._ensure_connected()
+                existing = db.execute(
+                    "SELECT statement, confidence FROM identity_assertions WHERE assertion_key = ?",
+                    (assertion_key,),
+                ).fetchone()
+                if existing:
+                    prev_text = str(existing["statement"])
+                    prev_conf = float(existing["confidence"])
+                    new_conf = max(prev_conf, confidence)
+                    if source == "seed":
+                        db.execute(
+                            "UPDATE identity_assertions "
+                            "SET kind = ?, statement = ?, non_negotiable = ?, "
+                            "confidence = MAX(confidence, ?), checker_id = ?, "
+                            "checker_params_json = ?, last_seen_at = ?, updated_at = ? "
+                            "WHERE assertion_key = ?",
+                            (
+                                kind,
+                                statement,
+                                int(non_negotiable),
+                                confidence,
+                                checker_id,
+                                params_json,
+                                now_iso,
+                                now_iso,
+                                assertion_key,
+                            ),
+                        )
+                    else:
+                        # Non-seed: touch only statement + confidence; leave
+                        # kind / non_negotiable / checker_* exactly as seeded.
+                        db.execute(
+                            "UPDATE identity_assertions "
+                            "SET statement = ?, confidence = MAX(confidence, ?), "
+                            "last_seen_at = ?, updated_at = ? "
+                            "WHERE assertion_key = ?",
+                            (statement, confidence, now_iso, now_iso, assertion_key),
+                        )
+                    if prev_text != statement or abs(new_conf - prev_conf) > 1e-6:
+                        self._insert_revision_locked(
+                            db,
+                            entity_type="identity_assertion",
+                            entity_key=assertion_key,
+                            previous_text=prev_text,
+                            new_text=statement,
+                            previous_confidence=prev_conf,
+                            new_confidence=new_conf,
+                            source_memory_id=None,
+                            reason="identity_upsert",
+                        )
+                    db.commit()
+                    return False
+                db.execute(
+                    "INSERT INTO identity_assertions "
+                    "(id, assertion_key, kind, statement, non_negotiable, confidence, "
+                    "checker_id, checker_params_json, source, evidence_json, "
+                    "violation_count, last_violated_at, last_seen_at, created_at, updated_at) "
+                    "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, '[]', 0, NULL, ?, ?, ?)",
+                    (
+                        str(uuid.uuid4()),
+                        assertion_key,
+                        kind,
+                        statement,
+                        int(non_negotiable),
+                        confidence,
+                        checker_id,
+                        params_json,
+                        source,
+                        now_iso,
+                        now_iso,
+                        now_iso,
+                    ),
+                )
+                db.commit()
+            return True
+        except Exception as e:
+            logger.warning("upsert_identity_assertion failed: %s", e)
+            return False
+
+    def adjust_identity_confidence(
+        self,
+        assertion_key: str,
+        delta: float,
+        *,
+        reason: str = "identity_update",
+    ) -> float | None:
+        try:
+            with self._db_lock:
+                db = self._ensure_connected()
+                new_conf = self._adjust_projection_confidence_locked(
+                    db,
+                    table="identity_assertions",
+                    key_column="assertion_key",
+                    text_column="statement",
+                    entity_type="identity_assertion",
+                    entity_key=assertion_key,
+                    delta=delta,
+                    reason=reason,
+                )
+                db.commit()
+            return new_conf
+        except Exception as e:
+            logger.warning("adjust_identity_confidence failed: %s", e)
+            return None
+
+    def append_identity_evidence(
+        self,
+        assertion_key: str,
+        *,
+        note: str,
+        memory_id: str | None = None,
+        max_items: int = 20,
+    ) -> bool:
+        try:
+            with self._db_lock:
+                db = self._ensure_connected()
+                row = db.execute(
+                    "SELECT evidence_json FROM identity_assertions WHERE assertion_key = ?",
+                    (assertion_key,),
+                ).fetchone()
+                if row is None:
+                    return False
+                evidence = json.loads(row["evidence_json"] or "[]")
+                evidence.append({"note": note[:200], "memory_id": memory_id, "ts": self._now_iso()})
+                evidence = evidence[-max_items:]
+                db.execute(
+                    "UPDATE identity_assertions SET evidence_json = ?, updated_at = ? "
+                    "WHERE assertion_key = ?",
+                    (
+                        json.dumps(evidence, ensure_ascii=False),
+                        self._now_iso(),
+                        assertion_key,
+                    ),
+                )
+                db.commit()
+            return True
+        except Exception as e:
+            logger.warning("append_identity_evidence failed: %s", e)
+            return False
+
+    def record_identity_violation(self, assertion_key: str) -> bool:
+        try:
+            with self._db_lock:
+                db = self._ensure_connected()
+                updated = db.execute(
+                    "UPDATE identity_assertions "
+                    "SET violation_count = violation_count + 1, "
+                    "last_violated_at = ?, updated_at = ? "
+                    "WHERE assertion_key = ?",
+                    (self._now_iso(), self._now_iso(), assertion_key),
+                )
+                db.commit()
+            return updated.rowcount == 1
+        except Exception as e:
+            logger.warning("record_identity_violation failed: %s", e)
+            return False
+
+    def expire_stale_companion_threads(self, *, max_age_days: float = 14.0) -> int:
+        """Expire open companion threads that nobody followed up on.
+
+        A thread like "presentation tomorrow" loses its value after a couple
+        of weeks; expiring keeps the surfaced list fresh without requiring the
+        model to resolve it.  Other sources (deferral, agent) are untouched.
+        """
+        cutoff = (datetime.now() - timedelta(days=max_age_days)).isoformat()
+        try:
+            with self._db_lock:
+                db = self._ensure_connected()
+                updated = db.execute(
+                    "UPDATE unfinished_business SET status = 'expired', resolved_at = ? "
+                    "WHERE source = 'companion_thread' AND status = 'open' AND created_at < ?",
+                    (self._now_iso(), cutoff),
+                )
+                db.commit()
+            return updated.rowcount
+        except Exception as e:
+            logger.warning("expire_stale_companion_threads failed: %s", e)
+            return 0
+
+    def recall_divergent(
+        self,
+        query: str,
+        n: int = 5,
+        *,
+        max_depth: int = 2,
+        max_branches: int = 2,
+    ) -> list[dict]:
+        """Multi-stage recall: semantic recall -> link expansion -> episode compression."""
+        seeds = self.recall(query, n=max(n, 3))
+        if not seeds:
+            return []
+
+        results: list[dict] = []
+        seen_memory_ids: set[str] = set()
+        episode_hits: dict[str, list[dict]] = {}
+
+        frontier = list(seeds)
+        for seed in seeds:
+            memory_id = str(seed.get("memory_id"))
+            seen_memory_ids.add(memory_id)
+            seed_item = dict(seed)
+            episode = self._episode_for_memory(memory_id)
+            if episode is not None:
+                seed_item["episode_id"] = episode["id"]
+                episode_hits.setdefault(episode["id"], []).append(seed_item)
+            results.append(seed_item)
+
+        for _depth in range(max_depth):
+            next_frontier: list[dict] = []
+            for item in frontier[: max(1, n)]:
+                current_memory_id = str(item.get("memory_id") or "")
+                if not current_memory_id:
+                    continue
+                linked = self.get_linked_memories(current_memory_id)[:max_branches]
+                for linked_item in linked:
+                    linked_id = str(linked_item.get("id"))
+                    if linked_id in seen_memory_ids:
+                        continue
+                    seen_memory_ids.add(linked_id)
+                    candidate = {
+                        "memory_id": linked_id,
+                        "summary": linked_item.get("content", ""),
+                        "date": linked_item.get("date", ""),
+                        "time": linked_item.get("time", ""),
+                        "direction": linked_item.get("link_direction", "?"),
+                        "kind": linked_item.get("kind", "observation"),
+                        "source_kind": linked_item.get("kind", "observation"),
+                        "emotion": linked_item.get("emotion", "neutral"),
+                        "confidence": max(0.2, float(item.get("confidence", 0.5)) * 0.82),
+                        "retrieval_method": "association",
+                    }
+                    episode = self._episode_for_memory(linked_id)
+                    if episode is not None:
+                        candidate["episode_id"] = episode["id"]
+                        episode_hits.setdefault(episode["id"], []).append(candidate)
+                    next_frontier.append(candidate)
+                    results.append(candidate)
+            frontier = next_frontier
+            if not frontier:
+                break
+
+        compressed: list[dict] = []
+        for episode_id, items in episode_hits.items():
+            episode = self._episode_for_memory(items[0]["memory_id"])
+            if episode is None:
+                continue
+            compressed.append(
+                {
+                    "memory_id": items[0]["memory_id"],
+                    "episode_id": episode_id,
+                    "summary": episode.get("summary") or episode.get("title"),
+                    "confidence": max(float(item.get("confidence", 0.4)) for item in items),
+                    "retrieval_method": "episode",
+                    "kind": "episode",
+                    "source_kind": "episode",
+                }
+            )
+
+        ranked = sorted(
+            results + compressed,
+            key=lambda item: float(item.get("confidence", 0.0)),
+            reverse=True,
+        )
+        unique: list[dict] = []
+        seen_keys: set[tuple[str | None, str | None]] = set()
+        for item in ranked:
+            key = (item.get("episode_id"), item.get("memory_id"))
+            if key in seen_keys:
+                continue
+            seen_keys.add(key)
+            unique.append(item)
+            if len(unique) >= n:
+                break
+        return unique
+
+    # ------------------------------------------------------------------
     # Associative links
     # ------------------------------------------------------------------
+
+    def _resolve_observation_id(self, db: sqlite3.Connection, candidate: str) -> str | None:
+        """Resolve a full or surfaced-prefix memory id to the stored full id.
+
+        Tool outputs show ids truncated to 8 chars, so the model passes
+        prefixes; accept them when unambiguous, reject unknown/ambiguous ids.
+        """
+        candidate = str(candidate).strip()
+        if len(candidate) < 4:
+            return None
+        row = db.execute("SELECT id FROM observations WHERE id = ?", (candidate,)).fetchone()
+        if row:
+            return str(row["id"])
+        escaped = candidate.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+        rows = db.execute(
+            "SELECT id FROM observations WHERE id LIKE ? ESCAPE '\\' LIMIT 2",
+            (escaped + "%",),
+        ).fetchall()
+        if len(rows) == 1:
+            return str(rows[0]["id"])
+        return None
 
     def link_memories(
         self,
@@ -1684,6 +2688,9 @@ class ObservationMemory:
     ) -> bool:
         """Create a typed link between two memories. Returns True on success.
 
+        Accepts full ids or the surfaced 8-char prefixes; unknown or ambiguous
+        ids are rejected instead of silently inserting a dangling link.
+
         link_type: "related" | "similar" | "caused_by" | "leads_to"
         """
         link_id = str(uuid.uuid4())
@@ -1691,11 +2698,20 @@ class ObservationMemory:
         try:
             with self._db_lock:
                 db = self._ensure_connected()
+                resolved_source = self._resolve_observation_id(db, source_id)
+                resolved_target = self._resolve_observation_id(db, target_id)
+                if resolved_source is None or resolved_target is None:
+                    logger.debug(
+                        "link_memories rejected: unresolved id(s) %r -> %r",
+                        source_id,
+                        target_id,
+                    )
+                    return False
                 db.execute(
                     "INSERT OR IGNORE INTO memory_links "
                     "(id, source_id, target_id, link_type, note, created_at) "
                     "VALUES (?, ?, ?, ?, ?, ?)",
-                    (link_id, source_id, target_id, link_type, note, now),
+                    (link_id, resolved_source, resolved_target, link_type, note, now),
                 )
                 db.commit()
             return True
@@ -1847,6 +2863,46 @@ class MemoryTool:
                     "required": ["query"],
                 },
             },
+            {
+                "name": "recall_divergent",
+                "description": (
+                    "Recall memory by semantic match, then expand through associative links "
+                    "and episode compression."
+                ),
+                "input_schema": {
+                    "type": "object",
+                    "properties": {
+                        "query": {"type": "string"},
+                        "n": {"type": "integer"},
+                    },
+                    "required": ["query"],
+                },
+            },
+            {
+                "name": "get_working_memory",
+                "description": "Return the current working-memory buffer.",
+                "input_schema": {
+                    "type": "object",
+                    "properties": {
+                        "n": {"type": "integer"},
+                    },
+                },
+            },
+            {
+                "name": "resolve_unfinished_business",
+                "description": (
+                    "Mark an open unfinished-business item (shown in your context "
+                    "as [Open unfinished business] with its id) as resolved once "
+                    "the conversation has actually addressed it."
+                ),
+                "input_schema": {
+                    "type": "object",
+                    "properties": {
+                        "id": {"type": "string", "description": "The item's id."},
+                    },
+                    "required": ["id"],
+                },
+            },
         ]
 
     async def call(self, tool_name: str, tool_input: dict) -> tuple[str, str | None]:
@@ -1913,5 +2969,39 @@ class MemoryTool:
                         )
 
             return "\n".join(lines), None
+
+        if tool_name == "recall_divergent":
+            query = tool_input["query"]
+            n = int(tool_input.get("n", 5))
+            memories = await self._store.recall_divergent_async(query, n=n)
+            if not memories:
+                return "No divergent memories found.", None
+            lines = []
+            for memory in memories:
+                episode = f" episode:{memory['episode_id'][:8]}" if memory.get("episode_id") else ""
+                lines.append(
+                    f"- {memory.get('retrieval_method', 'semantic')} {episode} "
+                    f"conf:{float(memory.get('confidence', 0.0)):.2f} "
+                    f"{memory.get('summary', '')[:140]}"
+                )
+            return "\n".join(lines), None
+
+        if tool_name == "get_working_memory":
+            n = int(tool_input.get("n", 5))
+            items = await self._store.get_working_memory_async(n=n)
+            if not items:
+                return "Working memory is empty.", None
+            lines = [
+                f"- salience:{float(item.get('salience', 0.0)):.2f} {item.get('summary', '')[:140]}"
+                for item in items
+            ]
+            return "\n".join(lines), None
+
+        if tool_name == "resolve_unfinished_business":
+            business_id = str(tool_input.get("id", "")).strip()
+            resolved = await self._store.resolve_unfinished_business_async(business_id)
+            if resolved:
+                return f"✓ Resolved unfinished business [{business_id[:8]}]", None
+            return f"Error: unfinished business not found: {business_id[:8]}", None
 
         return f"Unknown memory tool: {tool_name}", None

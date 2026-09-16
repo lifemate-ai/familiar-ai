@@ -24,12 +24,15 @@ from ._ui_helpers import (
     ACTION_ICONS,
     DESIRE_COOLDOWN as _DESIRE_COOLDOWN,
     IDLE_CHECK_INTERVAL as _IDLE_CHECK_INTERVAL,
+    commitment_reminder_prompt,
     desire_tick_prompt,
     format_action as _format_action,
     format_tool_result as _format_tool_result,
+    should_fire_commitment_reminder,
     should_fire_idle_desire,
+    should_run_sleep_consolidation,
 )
-from .realtime_stt_session import create_realtime_stt_session, RealtimeSttSession
+from .realtime_stt_session import create_realtime_stt_controller, RealtimeSttController
 
 if TYPE_CHECKING:
     from .agent import EmbodiedAgent
@@ -165,6 +168,7 @@ class FamiliarApp(App):
         Binding("ctrl+c", "quit", _t("quit_label"), show=True, priority=True),
         Binding("ctrl+l", "clear_history", _t("clear_label"), show=True),
         Binding("ctrl+t", "toggle_listen", "🎙 Voice", show=True),
+        Binding("ctrl+r", "restart_realtime_stt", "↻ STT", show=True),
         Binding("escape", "cancel_turn", "🛑 Cancel", show=False),
         Binding("space", "start_ptt", "🎙 PTT", show=False),
     ]
@@ -190,7 +194,7 @@ class FamiliarApp(App):
         # Push-to-Talk state
         self._ptt_active: bool = False
         # Realtime STT (hands-free, always-on)
-        self._realtime_stt: RealtimeSttSession | None = create_realtime_stt_session()
+        self._realtime_stt: RealtimeSttController | None = create_realtime_stt_controller()
 
     def _open_log_file(self) -> Path:
         log_dir = Path.home() / ".cache" / "familiar-ai"
@@ -246,7 +250,15 @@ class FamiliarApp(App):
         for line in _make_banner(include_commands=False).splitlines():
             log.write(f"[bold]{line}[/bold]" if "familiar-ai" in line else f"[dim]{line}[/dim]")
         self._log_system(_t("startup", log_path=str(self._log_path)))
+        self.set_interval(IDLE_CHECK_INTERVAL, self._reminder_tick)
         self.set_interval(IDLE_CHECK_INTERVAL, self._desire_tick)
+        # familiard wake events accelerate the idle ticks when the daemon runs.
+        if getattr(self.agent.config, "daemon", False) is True:
+            self.run_worker(self._wake_listener_loop(), exclusive=False)
+        # Start the MCP handshake now so tools are ready by the first turn (#188).
+        start_mcp_early = getattr(self.agent, "start_mcp_early", None)
+        if callable(start_mcp_early):
+            start_mcp_early()
         self.run_worker(self._process_queue(), exclusive=False)
         # Start realtime STT if configured
         if self._realtime_stt:
@@ -347,6 +359,13 @@ class FamiliarApp(App):
             text = await self._input_queue.get()
             if text is None:
                 break
+            if self._agent_running:
+                # An autonomous turn (reminder/desire tick) started while we were
+                # parked in get(); put the input back so the running turn absorbs
+                # it via interrupt_queue instead of starting a second agent.run.
+                await self._input_queue.put(text)
+                await asyncio.sleep(0.05)
+                continue
             await self._run_agent(text)
 
     async def _spinner_loop(
@@ -423,6 +442,9 @@ class FamiliarApp(App):
                 count = action_counts.get(tool_name, 0)
                 if count:
                     parts.append(f"[dim]{icon} ×{count}[/dim]")
+            profile = getattr(self.agent, "_last_consciousness_profile", None)
+            if profile is not None:
+                parts.append(f"[dim]{profile.one_line()}[/dim]")
             summary = "  [dim]──[/dim] " + "  ".join(parts) + "  [dim]" + "─" * 20 + "[/dim]"
             log.write(summary)
             self._append_log(f"── {elapsed:.1f}s ──")
@@ -508,6 +530,86 @@ class FamiliarApp(App):
             stream.update("")
             self._agent_running = False
 
+    def _maybe_start_sleep_consolidation(self, *, quiet: bool) -> None:
+        """Nightly consolidation: a background job, never a turn — checked
+        after the reminder branch so idle precedence stays untouched."""
+        if not bool(getattr(self.agent.config, "sleep_consolidation", False)):
+            return  # short-circuit before touching the marker file
+        try:
+            if should_run_sleep_consolidation(
+                enabled=True,
+                agent_running=self._agent_running,
+                has_pending_input=not self._input_queue.empty(),
+                quiet_hours=quiet,
+                now_dt=datetime.now(),
+                last_night_key=self.agent.last_consolidation_night_key(),
+                # Gate and job MUST share the configured end hour, or their
+                # night keys diverge inside an extended quiet window.
+                quiet_end_hour=self.agent.consolidation_quiet_end_hour(),
+            ):
+                self.agent.start_sleep_consolidation()
+        except Exception:
+            logger.exception("sleep consolidation gate failed; skipping")
+
+    async def _reminder_tick(self) -> None:
+        """Proactively surface due commitments when idle (independent of auto_desire)."""
+        store = getattr(self.agent, "_commitment_store", None)
+        heartbeat = getattr(self.agent, "_heartbeat", None)
+        quiet_now = heartbeat.routine_state().quiet_hours if heartbeat else False
+        # getattr-guarded: tests bind this method onto bare namespaces.
+        consolidation = getattr(self, "_maybe_start_sleep_consolidation", None)
+        if consolidation is not None:
+            consolidation(quiet=quiet_now)
+        if store is None or not getattr(self.agent.config, "proactive_reminders", True):
+            return
+        try:
+            quiet = quiet_now
+            reminders = should_fire_commitment_reminder(
+                agent_running=self._agent_running,
+                has_pending_input=not self._input_queue.empty(),
+                last_interaction=self._last_interaction,
+                now=time.time(),
+                store=store,
+                quiet_hours=quiet,
+                routine_store=getattr(self.agent, "_routine_store", None),
+            )
+            if not reminders:
+                return
+            # Re-check the gate around the awaited run (input may have arrived).
+            if self._agent_running or not self._input_queue.empty():
+                return
+            # Record the fire BEFORE the turn: the cadence advances regardless of
+            # the turn's outcome, and a mid-turn snooze reset survives intact.
+            store.mark_reminded([c.id for c in reminders], at=time.time())
+        except Exception:
+            logger.exception("reminder tick gate failed; skipping this tick")
+            return
+        self._last_interaction = time.time()
+        await self._run_agent("", inner_voice=commitment_reminder_prompt(reminders))
+
+    async def _wake_listener_loop(self) -> None:
+        """Consume familiard wake events; each one is just an early idle tick.
+
+        The tick methods re-check every gate themselves (agent running,
+        pending input, cooldowns, quiet hours), so a wake can never bypass
+        the idle precedence contract — it only removes poll latency.
+        """
+        from .wake import WakeListener
+
+        listener = WakeListener(
+            getattr(self.agent.config, "daemon_socket", "") or None,
+            enabled=True,  # the caller gates on config.daemon
+        )
+        try:
+            while not self._closing:
+                event = await listener.wait(60.0)
+                if event is None or self._closing:
+                    continue
+                await self._reminder_tick()
+                await self._desire_tick()
+        finally:
+            listener.close()
+
     async def _desire_tick(self) -> None:
         """Check desires and fire autonomous actions when idle."""
         # Skip if auto_desire is disabled (default OFF)
@@ -576,12 +678,31 @@ class FamiliarApp(App):
 
             self._realtime_stt.on_partial = _on_partial
             self._realtime_stt.on_committed = _on_committed
+            self._realtime_stt.on_restart = lambda reason: self._log_system(
+                f"🎤 Realtime STT restarting ({reason})"
+            )
             await self._realtime_stt.start(loop, self._input_queue)
             self._log_system("\U0001f3a4 Realtime STT ON (ElevenLabs)")
         except Exception as e:
             logger.warning("Realtime STT init failed: %s", e)
             self._log_system(f"\u26a0 Realtime STT init failed: {e}")
             self._realtime_stt = None
+
+    async def action_restart_realtime_stt(self) -> None:
+        """Reconnect realtime STT after a loop or transient transport issue."""
+        if not self._realtime_stt:
+            self._log_system("Realtime STT not configured")
+            return
+        try:
+            restarted = await self._realtime_stt.restart(reason="manual")
+        except Exception as exc:
+            logger.warning("Realtime STT restart failed: %s", exc)
+            self._log_system(f"⚠ Realtime STT restart failed: {exc}")
+            return
+        if restarted:
+            self._log_system("🎤 Realtime STT restarted")
+        else:
+            self._log_system("Realtime STT restart unavailable before startup")
 
     async def action_toggle_listen(self) -> None:
         """Toggle microphone recording for voice input."""

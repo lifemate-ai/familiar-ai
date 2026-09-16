@@ -23,6 +23,7 @@
   "desire_label_worry_companion": "気遣う",
   "desire_label_rest": "休息",
   "desire_pending_note": "（{note}と言ってた）{prompt}",
+  "reminder_impulse": "（内的衝動）これを思い出させると約束してた。もう時間や：\n{items}\nリストみたいに読み上げるんやなくて、自分の言葉で自然に切り出して伝えて。相手の反応を見て、済んだら complete_commitment、後でええなら snooze_commitment を呼ぶこと。",
   "desire_prompt_curiosity_target": "さっき気になったことがある。{target}をもっとよく見て。カメラを向けて確認して。",
   "desire_prompt_look_around": "（内部衝動）なんか外が気になってきた。see()で見てみる。カメラが繋がらなかったら、1回だけ別の方向を試して、それでもダメなら諦めて記憶を振り返るか別のことをする。何度も同じことを繰り返さない。",
   "desire_prompt_explore": "（内部衝動）ちょっとうろうろしたい。walk()で移動してから、see()で今いる場所を確認する。カメラが繋がらなくても、移動したこと自体を楽しめる。",

@@ -63,78 +63,6 @@ def test_sentence_and_question_counts() -> None:
     assert sr.count_sentences("") == 0
 
 
-@pytest.mark.asyncio
-async def test_agent_withholds_camera_tools_on_social_turn() -> None:
-    """With social reflex on, a venting utterance must not offer see/look to the model."""
-    from unittest.mock import AsyncMock, MagicMock, PropertyMock, patch
-
-    from familiar_agent.agent import EmbodiedAgent
-    from familiar_agent.backend import TurnResult
-
-    agent = EmbodiedAgent.__new__(EmbodiedAgent)
-    agent.config = MagicMock(max_tokens=100, auto_say=False)
-    agent._turn_count = 5
-    agent._session_input_tokens = agent._session_output_tokens = agent._last_context_tokens = 0
-    agent._post_compact = False
-    agent._background_tasks = set()
-    agent._cached_plan_ctx = agent._cached_workspace_ctx = ""
-    agent._cached_temporal_ctx = None
-    agent._cached_companion_mood = "engaged"
-    agent._started_at = 0.0
-    agent.messages = []
-    agent._me_md = ""
-    agent._social_reflex = True
-    agent._prompt_profile = "compact"
-    agent._camera = agent._mobility = agent._tts = agent._scene = agent._mcp = None
-    agent._memory_worker = None
-    agent._self_state = None
-    agent._relationship = MagicMock(context_for_prompt=MagicMock(return_value=""))
-    agent._exploration = MagicMock(context_for_prompt=MagicMock(return_value=""))
-    agent._concerns = agent._prediction = None
-    agent._attention_schema = MagicMock(current_focus=MagicMock(return_value=None))
-    agent._mood, agent._mood_intensity, agent._mood_set_at = "neutral", 0.0, 0.0
-    tool_defs = [{"name": n} for n in ("say", "see", "look", "remember")]
-    agent._tape_backend = lambda: None
-    agent._spawn_background_task = MagicMock()
-    agent._should_compact = lambda: False
-
-    mem = MagicMock()
-    mem.is_embedding_ready = MagicMock(return_value=True)
-    for name in (
-        "recall_async",
-        "recent_feelings_async",
-        "recall_semantic_facts_async",
-        "recall_behavior_policies_async",
-    ):
-        setattr(mem, name, AsyncMock(return_value=[]))
-    agent._memory = mem
-
-    seen_tools: list[list[str]] = []
-
-    async def fake_stream_turn(system, messages, tools, max_tokens, on_text=None):
-        seen_tools.append([t["name"] for t in tools])
-        return TurnResult("end_turn", "お疲れさん。<tool_code>{}</tool_code>", []), {
-            "role": "assistant",
-            "content": "x",
-        }
-
-    backend = MagicMock()
-    backend.stream_turn = fake_stream_turn
-    backend.make_user_message = lambda t: {"role": "user", "content": t}
-    backend.make_assistant_message = lambda r, raw: raw
-    agent.backend = backend
-
-    with patch.object(EmbodiedAgent, "_all_tool_defs", new_callable=PropertyMock) as defs:
-        defs.return_value = tool_defs
-        out = await agent.run("今日ほんま疲れた…")
-        assert seen_tools == [["say", "remember"]]
-        assert out == "お疲れさん。"
-
-        seen_tools.clear()
-        await agent.run("見て見て、これ買ったやつ！")
-        assert seen_tools == [["say", "see", "look", "remember"]]
-
-
 def test_unwrap_textual_say() -> None:
     assert (
         sr.unwrap_textual_say('say("お疲れさん。今日はしんどかったんやな。")')
@@ -163,79 +91,6 @@ def test_language_mismatch_detects_chinese_and_english_replies_to_japanese() -> 
     assert not sr.language_mismatch("ただいま", "")
 
 
-@pytest.mark.asyncio
-async def test_agent_asks_for_redo_when_say_is_in_wrong_language() -> None:
-    from unittest.mock import AsyncMock, MagicMock, PropertyMock, patch
-
-    from familiar_agent.agent import EmbodiedAgent
-    from familiar_agent.backend import ToolCall, TurnResult
-
-    agent = EmbodiedAgent.__new__(EmbodiedAgent)
-    agent.config = MagicMock(max_tokens=100, auto_say=False)
-    agent._turn_count = 5
-    agent._session_input_tokens = agent._session_output_tokens = agent._last_context_tokens = 0
-    agent._post_compact = False
-    agent._background_tasks = set()
-    agent._cached_plan_ctx = agent._cached_workspace_ctx = ""
-    agent._cached_temporal_ctx = None
-    agent._cached_companion_mood = "engaged"
-    agent._started_at = 0.0
-    agent.messages = []
-    agent._me_md = ""
-    agent._social_reflex = True
-    agent._prompt_profile = "compact"
-    agent._camera = agent._mobility = agent._tts = agent._scene = agent._mcp = None
-    agent._memory_worker = None
-    agent._self_state = None
-    agent._relationship = MagicMock(context_for_prompt=MagicMock(return_value=""))
-    agent._exploration = MagicMock(context_for_prompt=MagicMock(return_value=""))
-    agent._concerns = agent._prediction = None
-    agent._attention_schema = MagicMock(current_focus=MagicMock(return_value=None))
-    agent._mood, agent._mood_intensity, agent._mood_set_at = "neutral", 0.0, 0.0
-    agent._tape_backend = lambda: None
-    agent._spawn_background_task = MagicMock()
-    agent._should_compact = lambda: False
-    agent._execute_tool = AsyncMock(return_value=("(spoken)", None))
-    mem = MagicMock()
-    mem.is_embedding_ready = MagicMock(return_value=True)
-    for name in (
-        "recall_async",
-        "recent_feelings_async",
-        "recall_semantic_facts_async",
-        "recall_behavior_policies_async",
-    ):
-        setattr(mem, name, AsyncMock(return_value=[]))
-    agent._memory = mem
-
-    replies = iter(
-        [
-            TurnResult("tool_use", "", [ToolCall("1", "say", {"text": "年轻挺不错的。"})]),
-            TurnResult(
-                "tool_use", "", [ToolCall("2", "say", {"text": "若さより、積み重ねやろ。"})]
-            ),
-        ]
-    )
-
-    async def fake_stream_turn(system, messages, tools, max_tokens, on_text=None):
-        r = next(replies)
-        return r, {"role": "assistant", "content": r.text}
-
-    backend = MagicMock()
-    backend.stream_turn = fake_stream_turn
-    backend.make_user_message = lambda t: {"role": "user", "content": t}
-    backend.make_assistant_message = lambda r, raw: raw
-    backend.make_tool_results = lambda calls, results: [{"role": "tool", "content": results[0][0]}]
-    agent.backend = backend
-
-    with patch.object(EmbodiedAgent, "_all_tool_defs", new_callable=PropertyMock) as defs:
-        defs.return_value = [{"name": "say"}]
-        out = await agent.run("いいよね、若いって。")
-    assert out == "若さより、積み重ねやろ。"
-    agent._execute_tool.assert_awaited_once()  # the Chinese say() was never spoken
-    flat = [m for item in agent.messages for m in (item if isinstance(item, list) else [item])]
-    assert any("wrong language" in m.get("content", "") for m in flat)
-
-
 def test_language_mismatch_catches_mixed_simplified_chinese() -> None:
     assert sr.language_mismatch("疲れた", "へぇ…同じこと又被说了一遍か。")
     assert not sr.language_mismatch("疲れた", "同じこと、また言われたんか。")
@@ -260,72 +115,129 @@ def test_clean_say_text_and_perception_exhausted() -> None:
     assert sr.perception_exhausted(["look", "see", "look", "see"])
 
 
+# ── SocialReflexHook (runtime hook) ──────────────────────────────────────────
+
+from types import SimpleNamespace  # noqa: E402
+
+from familiar_runtime.models.base import ModelTurnResult, ToolCall  # noqa: E402
+from familiar_runtime.runtime import RetryDecision, TurnContext  # noqa: E402
+
+
+def _ctx(user_input: str) -> TurnContext:
+    ctx = TurnContext(user_input=user_input, profile="neighbor")
+    ctx.metadata["prep"] = SimpleNamespace(is_desire_turn=False)
+    return ctx
+
+
 @pytest.mark.asyncio
-async def test_empty_say_does_not_count_as_speaking() -> None:
-    from unittest.mock import AsyncMock, MagicMock, PropertyMock, patch
+async def test_hook_rejects_wrong_language_say_once() -> None:
+    hook = sr.SocialReflexHook(agent=SimpleNamespace())
+    ctx = _ctx("いいよね、若いって。")
+    bad = ModelTurnResult("tool_use", "", [ToolCall("1", "say", {"text": "年轻挺不错的。"})])
+    out = await hook.after_model_result(ctx, bad)
+    assert isinstance(out, RetryDecision) and out.retry
+    # second time: let it through (one re-ask only)
+    assert await hook.after_model_result(ctx, bad) is None
+
+
+@pytest.mark.asyncio
+async def test_hook_treats_empty_say_as_silence_and_cleans_text() -> None:
+    hook = sr.SocialReflexHook(agent=SimpleNamespace())
+    ctx = _ctx("ただいま")
+    empty = ModelTurnResult("tool_use", "", [ToolCall("1", "say", {"text": ""})])
+    out = await hook.after_model_result(ctx, empty)
+    assert isinstance(out, RetryDecision)
+    junk = ModelTurnResult("tool_use", "", [ToolCall("2", "say", {"text": "おかえり。}\\n"})])
+    assert await hook.after_model_result(ctx, junk) is None
+    assert junk.tool_calls[0].input["text"] == "おかえり。"
+
+
+@pytest.mark.asyncio
+async def test_hook_normalises_and_trims_end_turn_text() -> None:
+    hook = sr.SocialReflexHook(agent=SimpleNamespace())
+    ctx = _ctx("明日、転職の面接なんよ。")
+    res = ModelTurnResult(
+        "end_turn",
+        '<tool_code>{}</tool_code>\nsay("明日、転職の面接なんよ。緊張するね。応援してるよ。三文目。")',
+        [],
+    )
+    out = await hook.after_model_result(ctx, res)
+    assert isinstance(out, ModelTurnResult)
+    assert out.text == "緊張するね。応援してるよ。"
+
+
+@pytest.mark.asyncio
+async def test_hook_asks_once_on_empty_reply_and_nudges_stop_after_say() -> None:
+    hook = sr.SocialReflexHook(agent=SimpleNamespace())
+    ctx = _ctx("疲れた…")
+    out = await hook.after_model_result(ctx, ModelTurnResult("end_turn", "", []))
+    assert isinstance(out, RetryDecision)
+    assert await hook.after_model_result(ctx, ModelTurnResult("end_turn", "", [])) is None
+    await hook.after_tool_result(
+        ctx, ToolCall("1", "say", {"text": "お疲れさん。"}), SimpleNamespace(success=True)
+    )
+    assert await hook.mid_turn_user_messages(ctx, 1) == [
+        "You already spoke. End your turn now without further tools."
+    ]
+    assert await hook.mid_turn_user_messages(ctx, 2) == []
+
+
+def test_tool_defs_for_turn_withholds_perception_on_social_turns() -> None:
+    from unittest.mock import PropertyMock, patch
 
     from familiar_agent.agent import EmbodiedAgent
-    from familiar_agent.backend import ToolCall, TurnResult
 
     agent = EmbodiedAgent.__new__(EmbodiedAgent)
-    agent.config = MagicMock(max_tokens=100, auto_say=False)
-    agent._turn_count = 5
-    agent._session_input_tokens = agent._session_output_tokens = agent._last_context_tokens = 0
-    agent._post_compact = False
-    agent._background_tasks = set()
-    agent._cached_plan_ctx = agent._cached_workspace_ctx = ""
-    agent._cached_temporal_ctx = None
-    agent._cached_companion_mood = "engaged"
-    agent._started_at = 0.0
-    agent.messages = []
-    agent._me_md = ""
     agent._social_reflex = True
-    agent._prompt_profile = "compact"
-    agent._camera = agent._mobility = agent._tts = agent._scene = agent._mcp = None
-    agent._memory_worker = None
-    agent._self_state = None
-    agent._relationship = MagicMock(context_for_prompt=MagicMock(return_value=""))
-    agent._exploration = MagicMock(context_for_prompt=MagicMock(return_value=""))
-    agent._concerns = agent._prediction = None
-    agent._attention_schema = MagicMock(current_focus=MagicMock(return_value=None))
-    agent._mood, agent._mood_intensity, agent._mood_set_at = "neutral", 0.0, 0.0
-    agent._tape_backend = lambda: None
-    agent._spawn_background_task = MagicMock()
-    agent._should_compact = lambda: False
-    agent._execute_tool = AsyncMock(return_value=("(spoken)", None))
-    mem = MagicMock()
-    mem.is_embedding_ready = MagicMock(return_value=True)
-    for name in (
-        "recall_async",
-        "recent_feelings_async",
-        "recall_semantic_facts_async",
-        "recall_behavior_policies_async",
-    ):
-        setattr(mem, name, AsyncMock(return_value=[]))
-    agent._memory = mem
+    defs = [{"name": n} for n in ("say", "see", "look", "walk", "remember")]
+    with patch.object(EmbodiedAgent, "_all_tool_defs", new_callable=PropertyMock) as p:
+        p.return_value = defs
+        social = agent._tool_defs_for_turn(brief_reply_mode=False, user_input="今日ほんま疲れた…")
+        assert [t["name"] for t in social] == ["say", "remember"]
+        by_act = agent._tool_defs_for_turn(
+            brief_reply_mode=False,
+            user_input="ふう。",
+            social_policy=SimpleNamespace(primary_act="fatigue_signal"),
+        )
+        assert [t["name"] for t in by_act] == ["say", "remember"]
+        visual = agent._tool_defs_for_turn(brief_reply_mode=False, user_input="見て見て！")
+        assert visual is defs
+        agent._social_reflex = False
+        assert agent._tool_defs_for_turn(brief_reply_mode=False, user_input="疲れた…") is defs
 
-    replies = iter(
-        [
-            TurnResult("tool_use", "", [ToolCall("1", "say", {"text": ""})]),
-            TurnResult("end_turn", "おかえり。", []),
-        ]
+
+def test_tool_adapter_caps_perception_after_two_sees() -> None:
+    from familiar_agent.agent import _TurnToolAdapter
+
+    agent = SimpleNamespace(_social_reflex=True)
+    defs = [{"name": n} for n in ("say", "see", "look")]
+    prep = SimpleNamespace(say_used=False, perception_calls=2)
+    assert [t["name"] for t in _TurnToolAdapter(agent, defs, prep).tool_defs()] == ["say"]
+    prep.perception_calls = 1
+    assert _TurnToolAdapter(agent, defs, prep).tool_defs() is defs
+
+
+def test_body_part_aliases_resolve_to_real_tools() -> None:
+    neck = ToolCall("1", "neck", {"look": "down"})
+    assert sr.resolve_body_part_alias(neck) and (neck.name, neck.input) == (
+        "look",
+        {"direction": "down"},
     )
+    eyes = ToolCall("2", "eyes", {})
+    assert sr.resolve_body_part_alias(eyes) and eyes.name == "see"
+    voice = ToolCall("3", "voice", {"words": "やあ"})
+    assert sr.resolve_body_part_alias(voice) and voice.input == {"text": "やあ"}
+    real = ToolCall("4", "see", {})
+    assert not sr.resolve_body_part_alias(real) and real.name == "see"
 
-    async def fake_stream_turn(system, messages, tools, max_tokens, on_text=None):
-        r = next(replies)
-        return r, {"role": "assistant", "content": r.text}
 
-    backend = MagicMock()
-    backend.stream_turn = fake_stream_turn
-    backend.make_user_message = lambda t: {"role": "user", "content": t}
-    backend.make_assistant_message = lambda r, raw: raw
-    backend.make_tool_results = lambda calls, results: [{"role": "tool", "content": results[0][0]}]
-    agent.backend = backend
-    actions: list[str] = []
+@pytest.mark.asyncio
+async def test_text_only_voice_capability_delivers_say_without_tts() -> None:
+    from familiar_capabilities.voice import TextOnlyVoiceCapability
 
-    with patch.object(EmbodiedAgent, "_all_tool_defs", new_callable=PropertyMock) as defs:
-        defs.return_value = [{"name": "say"}]
-        out = await agent.run("ただいまー。", on_action=lambda n, i: actions.append(n))
-    assert out == "おかえり。"
-    agent._execute_tool.assert_not_awaited()  # the empty say() never reached TTS
-    assert actions == []
+    cap = TextOnlyVoiceCapability()
+    assert [s.name for s in cap.specs()] == ["say"]
+    ok = await cap.call("say", {"text": "おかえり。"})
+    assert ok.success and "text" in ok.text
+    empty = await cap.call("say", {"text": ""})
+    assert "Nothing was spoken" in empty.text

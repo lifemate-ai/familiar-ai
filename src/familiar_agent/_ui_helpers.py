@@ -11,12 +11,15 @@ Keeping these here prevents duplication across tui.py, gui.py, and main.py.
 
 from __future__ import annotations
 
+import logging
 import os
 from typing import TYPE_CHECKING
 
 from ._i18n import _t
 
 if TYPE_CHECKING:
+    from familiar_runtime.commitments import Commitment, SQLiteCommitmentStore
+
     from .desires import DesireSystem
 
 
@@ -276,3 +279,119 @@ def desire_tick_prompt(
         prompt = _t("desire_pending_note", note=pending_note, prompt=prompt)
 
     return desire_name, prompt, pending_note
+
+
+# ---------------------------------------------------------------------------
+# Proactive commitment reminders (Phase 3)
+# ---------------------------------------------------------------------------
+
+# Base gap between self-initiated reminders for one commitment; widened by the
+# per-commitment escalating backoff in the store.
+REMINDER_BASE_COOLDOWN: float = float(os.environ.get("REMINDER_BASE_COOLDOWN", "600"))
+# Don't fire a reminder right after the user spoke — let the pause settle.
+REMINDER_MIN_IDLE_GAP: float = float(os.environ.get("REMINDER_MIN_IDLE_GAP", "30"))
+# During quiet hours, only commitments at this priority or above may interrupt.
+REMINDER_QUIET_MIN_PRIORITY: int = 2
+
+
+def should_fire_commitment_reminder(
+    *,
+    agent_running: bool,
+    has_pending_input: bool,
+    last_interaction: float,
+    now: float,
+    store: SQLiteCommitmentStore,
+    base_cooldown: float = REMINDER_BASE_COOLDOWN,
+    min_idle_gap: float = REMINDER_MIN_IDLE_GAP,
+    quiet_hours: bool = False,
+    min_priority_in_quiet: int = REMINDER_QUIET_MIN_PRIORITY,
+    routine_store=None,
+) -> list[Commitment]:
+    """Return commitments that should be proactively reminded right now.
+
+    Pure scheduling gate (mirrors :func:`should_fire_idle_desire`): never fires
+    while the agent is busy, while user input is pending, or before ``min_idle_gap``
+    has elapsed since the last interaction. During quiet hours only urgent
+    (priority >= ``min_priority_in_quiet``) commitments pass.
+
+    When a ``routine_store`` is supplied, due self-authored routines first
+    materialize as commitments here, then ride the exact same gates — one
+    firing path for everything self-initiated-by-schedule.
+    """
+    if agent_running or has_pending_input:
+        return []
+    if now - last_interaction < min_idle_gap:
+        return []
+    if routine_store is not None:
+        try:
+            routine_store.materialize_due(store, now=now)
+        except Exception:  # noqa: BLE001
+            logging.getLogger(__name__).exception("routine materialization failed")
+    ready = store.list_due_for_reminder(now=now, base_cooldown=base_cooldown)
+    if quiet_hours:
+        ready = [c for c in ready if c.priority >= min_priority_in_quiet]
+    return ready
+
+
+def night_key_for(now_dt, *, quiet_end_hour: int = 7) -> str:
+    """Group one 23:00→07:00 window under a single key.
+
+    Subtracting ``quiet_end_hour`` maps every instant of the same night
+    (before AND after midnight) onto the same calendar date.
+    """
+    from datetime import timedelta
+
+    return (now_dt - timedelta(hours=quiet_end_hour)).date().isoformat()
+
+
+def should_run_sleep_consolidation(
+    *,
+    enabled: bool,
+    agent_running: bool,
+    has_pending_input: bool,
+    quiet_hours: bool,
+    now_dt,
+    last_night_key: str | None,
+    quiet_end_hour: int = 7,
+) -> bool:
+    """Pure scheduling gate for the nightly consolidation job.
+
+    Mirrors :func:`should_fire_commitment_reminder`: never during activity,
+    only in quiet hours, at most once per night (``last_night_key`` is the
+    persisted marker). The caller spawns a background job — no turn fires,
+    so idle precedence (user > reminder > desire) is untouched.
+    """
+    if not enabled:
+        return False
+    if agent_running or has_pending_input:
+        return False
+    if not quiet_hours:
+        return False
+    return night_key_for(now_dt, quiet_end_hour=quiet_end_hour) != (last_night_key or "")
+
+
+def commitment_reminder_prompt(commitments: list[Commitment]) -> str:
+    """Render the internal-impulse text for a proactive reminder turn."""
+    items = "\n".join(f"- {c.summary}" for c in commitments)
+    return _t("reminder_impulse", items=items)
+
+
+def decide_idle_action(
+    *,
+    has_pending_input: bool,
+    reminder_ready: bool,
+    desire_ready: bool,
+) -> str:
+    """Resolve idle-loop precedence: user input > reminder > desire > idle.
+
+    Reference implementation of the idle-precedence contract. The three idle
+    loops (REPL/TUI/GUI) currently inline this ordering because their control
+    flow differs; the tests on this function pin the contract they must follow.
+    """
+    if has_pending_input:
+        return "user"
+    if reminder_ready:
+        return "reminder"
+    if desire_ready:
+        return "desire"
+    return "idle"

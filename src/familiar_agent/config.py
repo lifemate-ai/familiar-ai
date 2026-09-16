@@ -33,6 +33,13 @@ def _optional_int_env(*names: str) -> int | None:
     return int(value)
 
 
+def _bool_env(*names: str, default: bool = False) -> bool:
+    value = _env_value(*names, default="")
+    if not value:
+        return default
+    return value.strip().lower() in ("1", "true", "yes", "on")
+
+
 @dataclass
 class CameraConfig:
     host: str = field(
@@ -154,14 +161,16 @@ class AgentConfig:
         default_factory=lambda: os.environ.get("COMPANION_NAME", _default_companion_name())
     )
 
-    # Platform: "anthropic" | "gemini" | "openai" | "ollama" | "kimi" | "glm" | "cli"
+    # Platform: "anthropic" | "gemini" | "openai" | "kimi" | "glm"
     platform: str = field(default_factory=lambda: os.environ.get("PLATFORM", "anthropic"))
 
-    # Unified API key (used for whichever platform is selected)
-    api_key: str = field(default_factory=lambda: os.environ.get("API_KEY", ""))
+    # Unified API key (used for whichever platform is selected).
+    # Legacy ANTHROPIC_API_KEY is still accepted for backward compatibility.
+    api_key: str = field(default_factory=lambda: _env_value("API_KEY", "ANTHROPIC_API_KEY"))
 
-    # Model name — platform-specific defaults applied in create_backend()
-    model: str = field(default_factory=lambda: os.environ.get("MODEL", ""))
+    # Model name — platform-specific defaults applied in create_backend().
+    # Legacy ANTHROPIC_MODEL is still accepted for backward compatibility.
+    model: str = field(default_factory=lambda: _env_value("MODEL", "ANTHROPIC_MODEL"))
 
     # OpenAI-compatible only: base URL and tool-calling mode
     # TOOLS_MODE: "native" = use function-calling API, "prompt" = inject into system prompt
@@ -173,6 +182,23 @@ class AgentConfig:
     # Ollama native backend only: context window requested at load time.
     ollama_num_ctx: int = field(
         default_factory=lambda: int(os.environ.get("OLLAMA_NUM_CTX", "16384"))
+    )
+
+    # System prompt profile: "auto" | "full" | "compact".
+    # "auto" resolves to "compact" for local platforms (ollama, cli, local
+    # OpenAI-compatible URLs) and "full" otherwise — see prompt_profiles.resolve_profile.
+    # "compact" is a trimmed framework prompt for small local models (Ollama
+    # gemma-class): only critical operational constraints, voice rule last.
+    # The long-form social/cognitive guidance it drops is carried by the
+    # deterministic mind layers (auto-ToM, social policy, meta-gate, identity).
+    prompt_profile: str = field(
+        default_factory=lambda: os.environ.get("PROMPT_PROFILE", "auto").strip().lower() or "auto"
+    )
+
+    # Social reflex guards for small models: "auto" (on when the resolved
+    # profile is compact) | "on" | "off". See familiar_agent.social_reflex.
+    social_reflex: str = field(
+        default_factory=lambda: os.environ.get("SOCIAL_REFLEX", "auto").strip().lower() or "auto"
     )
 
     # Thinking mode: "auto" | "adaptive" | "extended" | "disabled"
@@ -188,6 +214,8 @@ class AgentConfig:
     # "max" is Opus 4.6 only. Ignored unless THINKING_MODE=adaptive (or auto on supported models).
     thinking_effort: str = field(default_factory=lambda: os.environ.get("THINKING_EFFORT", "high"))
 
+    realtime_stt: bool = field(default_factory=lambda: _bool_env("REALTIME_STT", default=False))
+
     # ── Utility backend (optional) ─────────────────────────────────────
     # Separate backend for non-conversation LLM calls (day summaries, emotion
     # inference, self-model updates, etc.).  Falls back to the main backend
@@ -195,6 +223,9 @@ class AgentConfig:
     utility_platform: str = field(default_factory=lambda: os.environ.get("UTILITY_PLATFORM", ""))
     utility_api_key: str = field(default_factory=lambda: os.environ.get("UTILITY_API_KEY", ""))
     utility_model: str = field(default_factory=lambda: os.environ.get("UTILITY_MODEL", ""))
+    # OpenAI-compatible utility endpoint override (mirrors INNER_BASE_URL) —
+    # lets summaries/distillation run on a local server (Ollama, vllm).
+    utility_base_url: str = field(default_factory=lambda: os.environ.get("UTILITY_BASE_URL", ""))
 
     # ── Scene backend (optional) ────────────────────────────────────────
     # Separate backend for scene entity extraction — cheaper/local model.
@@ -202,6 +233,18 @@ class AgentConfig:
     scene_platform: str = field(default_factory=lambda: os.environ.get("SCENE_PLATFORM", ""))
     scene_api_key: str = field(default_factory=lambda: os.environ.get("SCENE_API_KEY", ""))
     scene_model: str = field(default_factory=lambda: os.environ.get("SCENE_MODEL", ""))
+    # OpenAI-compatible scene endpoint override (mirrors UTILITY_BASE_URL).
+    scene_base_url: str = field(default_factory=lambda: os.environ.get("SCENE_BASE_URL", ""))
+
+    # ── Inner backend (optional) ────────────────────────────────────────
+    # Separate small/local model for inner-loop micro-thoughts (one short
+    # completion per crystallized idle thought). Falls back to the utility
+    # backend only when that is separate from the main model; micro-thoughts
+    # stay disabled otherwise — idle cycles never burn main-model calls.
+    inner_platform: str = field(default_factory=lambda: os.environ.get("INNER_PLATFORM", ""))
+    inner_api_key: str = field(default_factory=lambda: os.environ.get("INNER_API_KEY", ""))
+    inner_model: str = field(default_factory=lambda: os.environ.get("INNER_MODEL", ""))
+    inner_base_url: str = field(default_factory=lambda: os.environ.get("INNER_BASE_URL", ""))
 
     # ── Autonomous behavior ───────────────────────────────────────
     # Desire-driven idle turns are OFF by default.
@@ -221,6 +264,76 @@ class AgentConfig:
             or os.environ.get("FAMILIAR_AUTO", "").strip().lower() in ("1", "true", "yes")
         )
     )
+    # Voice gate: a conversational reply that never called say() gets one
+    # in-loop re-ask so the model itself picks the line to speak aloud.
+    # Unlike auto_say (which pipes the whole reply — stage directions and
+    # all — into TTS), this preserves say() as the deliberate voice channel.
+    # Aimed at small local models that write text but forget to speak.
+    voice_gate: bool = field(
+        default_factory=lambda: _bool_env("FAMILIAR_VOICE_GATE", default=False)
+    )
+    # Proactive commitment reminders are a baseline neighbor behaviour: on by
+    # default and INDEPENDENT of auto_desire (you can silence idle musings yet
+    # still be reminded). Disable with FAMILIAR_PROACTIVE_REMINDERS=0.
+    proactive_reminders: bool = field(
+        default_factory=lambda: _bool_env("FAMILIAR_PROACTIVE_REMINDERS", default=True)
+    )
+    # Consciousness profile: multidimensional instrumentation (wakefulness,
+    # access, self-model, integration, reality-testing, reportability) computed
+    # from existing signals. Observability only — surfaces in diagnostics and
+    # mental_state.jsonl, never in the prompt. Default OFF.
+    consciousness_profile: bool = field(
+        default_factory=lambda: _bool_env("FAMILIAR_CONSCIOUSNESS_PROFILE", default=False)
+    )
+    # Reality gate: a reply claiming present-tense perception without having
+    # looked this turn gets one [REALITY] re-ask — call see() or reframe as
+    # memory/uncertainty. Deterministic pattern checks; default OFF.
+    reality_gate: bool = field(
+        default_factory=lambda: _bool_env("FAMILIAR_REALITY_GATE", default=False)
+    )
+    # Phase 2 inner loop: cheap workspace cycling between turns. Default OFF —
+    # the agent's idle behaviour is byte-identical unless this is enabled.
+    inner_loop: bool = field(
+        default_factory=lambda: _bool_env("FAMILIAR_INNER_LOOP", default=False)
+    )
+    inner_loop_interval: float = field(
+        default_factory=lambda: float(os.environ.get("FAMILIAR_INNER_LOOP_INTERVAL", "20") or "20")
+    )
+    # Dense recurrence (requires inner_loop): idle ticks also update the
+    # attention schema and re-enter broadcast listeners, with batched disk
+    # writes. Default OFF — idle cognition stays read-only without it.
+    inner_dense: bool = field(
+        default_factory=lambda: _bool_env("FAMILIAR_INNER_DENSE", default=False)
+    )
+    # Sleep consolidation: a once-per-night background job during quiet hours
+    # (dedup near-duplicates, decay importance, distill yesterday into
+    # semantic facts, expire stale working memory). Never fires a turn.
+    sleep_consolidation: bool = field(
+        default_factory=lambda: _bool_env("FAMILIAR_SLEEP_CONSOLIDATION", default=False)
+    )
+    # Experience ledger: the agent distills lessons from experience into a
+    # bounded self-authored document injected into the stable prompt half at
+    # session start (self-rewriting prompt region = mechanized learning from
+    # experience). Advisory text only; revision-audited; default OFF.
+    experience_ledger: bool = field(
+        default_factory=lambda: _bool_env("FAMILIAR_EXPERIENCE_LEDGER", default=False)
+    )
+    # Dream mode (requires sleep_consolidation + an INNER_* small model):
+    # a few ungrounded generative cycles during the nightly job, journaled
+    # as kind="dream" and surfaced next morning with an explicit
+    # not-perception label.
+    dream_mode: bool = field(default_factory=lambda: _bool_env("FAMILIAR_DREAM", default=False))
+    # Lower bound for the body-modulated inner-loop cadence (seconds). The
+    # historical floor is 5.0; dense setups may lower it toward ~1 Hz.
+    inner_min_interval: float = field(
+        default_factory=lambda: float(os.environ.get("FAMILIAR_INNER_MIN_INTERVAL", "5") or "5")
+    )
+    # Body daemon (familiard): FAMILIAR_DAEMON=1 makes the UIs listen for wake
+    # events from a running `familiard` process (socket override:
+    # FAMILIAR_DAEMON_SOCKET) and auto-adopts its interoception payload.
+    # Default OFF; without the daemon everything degrades to the 10s idle poll.
+    daemon: bool = field(default_factory=lambda: _bool_env("FAMILIAR_DAEMON", default=False))
+    daemon_socket: str = field(default_factory=lambda: os.environ.get("FAMILIAR_DAEMON_SOCKET", ""))
 
     max_tokens: int = 4096
     camera: CameraConfig = field(default_factory=CameraConfig)

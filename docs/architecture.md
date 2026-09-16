@@ -11,16 +11,27 @@ Neighbor-like behavior emerges not from response quality alone, but from:
 
 ## Layer Mapping
 
-### Layer A: Event Ingestion → `event_bus.py`
+### Layer A: Event Ingestion → `familiar_runtime.events` + legacy `event_bus.py`
 
-All signals flowing through the system are normalized to a canonical `Event` dataclass:
+Runtime/task execution now uses `familiar_runtime.events.AgentEvent`:
+
+```
+AgentEvent(id, run_id, task_id, turn_id, source, type, payload, timestamp,
+           salience, confidence, parent_id)
+```
+
+This supports JSONL logging, SQLite persistence, subscriptions, and replay for task/runtime
+activity.
+
+Neighbor intelligence still has the legacy canonical `Event` shape available in
+`src/familiar_agent/event_bus.py`:
 
 ```
 Event(source, entity, payload, timestamp, salience, confidence, affect)
 ```
 
 Sources: text, vision, audio, bio, device, system, memory, action.
-JSONL append-only logging with replay support.
+JSONL append-only logging with replay support remains available.
 
 ### Layer B: State Tracker → `self_state.py` + `scene.py` + `prediction.py`
 
@@ -55,6 +66,13 @@ JSONL append-only logging with replay support.
 - Preferences (likes/dislikes)
 - Boundaries (things to avoid)
 - Session/conversation counting, days-together tracking
+- Support preferences and failed support patterns feed back into social
+  policy decisions (learned validate-first, advice aversion)
+
+**Person model** — `familiar_neighbor/mind/person_model.py`:
+- ToM inferences accumulate per person (states + confidence + chosen policy)
+- Surfaced as an accumulated-impressions prompt block (7-day staleness cutoff)
+- Written deterministically: flagged turns run the ToM inference themselves
 
 **Working memory** — Recent context + workspace coalitions
 
@@ -84,6 +102,36 @@ JSONL append-only logging with replay support.
 - Score = activation × (0.4×urgency + 0.3×novelty + 0.3)
 - Ignition threshold modulated by prediction error
 - Winner's context injected into LLM prompt
+
+**Commitments / proactive reminders** — `familiar_runtime/commitments` + idle-loop wiring:
+- Due-time promises (reminders, appointments, follow-ups) with priority and snooze
+- Fire self-initiated turns from REPL/TUI/GUI idle loops, independent of desires
+- Quiet hours pass urgent-only; escalating backoff goes quiet after 3 reminders
+- Passive surface every turn + `[Today's agenda]` on the first turn of the day
+
+**Delegated background tasks** — `tools/delegation.py`:
+- `delegate_task` spawns an independent non-embodied task-mode `AgentRuntime`
+  (same construction as `familiar task`, minus MCP) in a background asyncio task
+- Conversation continues unblocked; at most 2 delegated tasks run at once
+- Completion/failure creates a *due* follow-up commitment, so the proactive
+  reminder machinery delivers the report even after the companion stepped away
+- `check_delegated_tasks` lists running and recent results
+
+**Identity as load-bearing state** — `mind/identity.py` + `identity_assertions`:
+- Values, boundaries, and self-commitments are typed, persisted assertions;
+  checkers are code (`agreement_with_request` / `forbidden_phrase` /
+  `keyword_pair` / `topic_relevance`), persona patterns are seed/row data
+- `assess()` feeds an `identity_dissonance` affect dimension; the identity
+  coalition goes urgent only when something held is at stake
+- Two-tier veto on the final reply: an in-loop `[IDENTITY]` retry (the model
+  refuses in its own words), then a meta-gate `repair_text` backstop
+- Violations boost the boost-only `identity_coherence` drive → a self-initiated
+  reflection turn → `resolve_reflection()` relieves the dissonance
+- `identity_commit` / `identity_review` tools let the agent self-author values
+  (never non-negotiable, never a hard-veto checker); a background honor-check
+  nudges value conviction with evidence
+- Seeded from `~/.familiar_ai/identity_seed.json` (insert-if-missing); dormant
+  and byte-stable when nothing is held
 
 ### Layer E: Expression → `agent.py` ReAct loop + `tools/tts.py`
 
@@ -120,6 +168,39 @@ Plan generation before loop + heuristic replanning on blocked observations.
 2. **Heuristic TAPE replanning** — Keyword-based blocked detection replaces 2 LLM calls per tool use
 3. **Optional coherence check** — Disabled by default (FAMILIAR_COHERENCE_CHECK=1 to enable)
 4. **Lazy MCP initialization** — Background async startup, tools become available as servers connect
+
+## Generic Runtime Layer
+
+In parallel with the neighbour stack, the repository now hosts a generic agent runtime
+that the same neighbour code is migrating onto. Documented in detail in
+`docs/task-agent-runtime.md`; in shape:
+
+```
+familiar_runtime/          # provider-neutral substrate
+├── models/                # ModelBackend protocol + provider adapters
+├── tools/                 # ToolProvider/ToolRegistry + LegacyToolProvider
+├── tasks/                 # Task model, SQLiteTaskStore, checkpoints
+├── events/                # AgentEvent, EventBus, EventStore
+├── memory/                # MemoryStore protocol (adapter pending)
+├── react_loop.py          # Generic ReAct loop with hook callbacks
+├── runtime.py             # AgentRuntime + RuntimeHook + RuntimeHookBase
+├── context.py             # ContextBlock + budgeted selection
+└── jobs.py                # BackgroundJobManager
+
+familiar_capabilities/     # ToolProvider adapters around legacy tools
+├── coding.py, mcp.py
+├── camera.py, mobility.py, voice.py, tom.py, memory.py
+
+familiar_neighbor/         # companion profile boundary
+├── app.py (NeighborProfile)
+├── prompts.py
+└── mind/                  # compatibility re-exports of cognition modules
+```
+
+Hooks register with `AgentRuntime` and participate in five lifecycle points:
+`before_turn`, `build_context`, `after_model_result` (may rewrite the model output),
+`after_tool_result` (fires for success / timeout / exception), and `after_turn`. See
+`docs/adr/0003-runtime-hook-protocol.md` for the rationale.
 
 ## Future: Chronos-Neighbor Model
 

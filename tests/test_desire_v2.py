@@ -67,7 +67,7 @@ def test_tick_grows_rest_faster_at_night(tmp_path):
     ds._desires["rest"] = 0.0
 
     # Simulate tick at 23:00 (nighttime)
-    with patch("familiar_agent.desires.datetime") as mock_dt:
+    with patch("familiar_neighbor.mind.desires.datetime") as mock_dt:
         mock_dt.now.return_value.hour = 23
         ds._last_tick = time.time() - 60  # 60 seconds elapsed
         ds.tick()
@@ -77,7 +77,7 @@ def test_tick_grows_rest_faster_at_night(tmp_path):
     # Reset and simulate at noon
     ds2 = _make_desires(tmp_path)
     ds2._desires["rest"] = 0.0
-    with patch("familiar_agent.desires.datetime") as mock_dt:
+    with patch("familiar_neighbor.mind.desires.datetime") as mock_dt:
         mock_dt.now.return_value.hour = 12
         ds2._last_tick = time.time() - 60
         ds2.tick()
@@ -92,7 +92,7 @@ def test_tick_grows_explore_slower_at_night(tmp_path):
     ds = _make_desires(tmp_path)
     ds._desires["explore"] = 0.0
 
-    with patch("familiar_agent.desires.datetime") as mock_dt:
+    with patch("familiar_neighbor.mind.desires.datetime") as mock_dt:
         mock_dt.now.return_value.hour = 2  # 2 AM
         ds._last_tick = time.time() - 60
         ds.tick()
@@ -101,7 +101,7 @@ def test_tick_grows_explore_slower_at_night(tmp_path):
 
     ds2 = _make_desires(tmp_path)
     ds2._desires["explore"] = 0.0
-    with patch("familiar_agent.desires.datetime") as mock_dt:
+    with patch("familiar_neighbor.mind.desires.datetime") as mock_dt:
         mock_dt.now.return_value.hour = 14  # 2 PM
         ds2._last_tick = time.time() - 60
         ds2.tick()
@@ -116,7 +116,7 @@ def test_tick_grows_look_around_slower_at_night(tmp_path):
     ds = _make_desires(tmp_path)
     ds._desires["look_around"] = 0.0
 
-    with patch("familiar_agent.desires.datetime") as mock_dt:
+    with patch("familiar_neighbor.mind.desires.datetime") as mock_dt:
         mock_dt.now.return_value.hour = 3
         ds._last_tick = time.time() - 60
         ds.tick()
@@ -125,7 +125,7 @@ def test_tick_grows_look_around_slower_at_night(tmp_path):
 
     ds2 = _make_desires(tmp_path)
     ds2._desires["look_around"] = 0.0
-    with patch("familiar_agent.desires.datetime") as mock_dt:
+    with patch("familiar_neighbor.mind.desires.datetime") as mock_dt:
         mock_dt.now.return_value.hour = 10
         ds2._last_tick = time.time() - 60
         ds2.tick()
@@ -157,7 +157,7 @@ def test_tick_suppresses_explore_when_rest_is_high(tmp_path):
     ds_tired = _make_desires(tmp_path)
     ds_tired._desires["rest"] = 0.9
     ds_tired._desires["explore"] = 0.0
-    with patch("familiar_agent.desires.datetime") as mock_dt:
+    with patch("familiar_neighbor.mind.desires.datetime") as mock_dt:
         mock_dt.now.return_value.hour = 14
         ds_tired._last_tick = time.time() - 60
         ds_tired.tick()
@@ -167,7 +167,7 @@ def test_tick_suppresses_explore_when_rest_is_high(tmp_path):
     ds_fresh = _make_desires(tmp_path)
     ds_fresh._desires["rest"] = 0.0
     ds_fresh._desires["explore"] = 0.0
-    with patch("familiar_agent.desires.datetime") as mock_dt:
+    with patch("familiar_neighbor.mind.desires.datetime") as mock_dt:
         mock_dt.now.return_value.hour = 14
         ds_fresh._last_tick = time.time() - 60
         ds_fresh.tick()
@@ -181,7 +181,7 @@ def test_tick_suppresses_look_around_when_rest_is_high(tmp_path):
     ds_tired = _make_desires(tmp_path)
     ds_tired._desires["rest"] = 0.8
     ds_tired._desires["look_around"] = 0.0
-    with patch("familiar_agent.desires.datetime") as mock_dt:
+    with patch("familiar_neighbor.mind.desires.datetime") as mock_dt:
         mock_dt.now.return_value.hour = 14
         ds_tired._last_tick = time.time() - 60
         ds_tired.tick()
@@ -190,7 +190,7 @@ def test_tick_suppresses_look_around_when_rest_is_high(tmp_path):
     ds_fresh = _make_desires(tmp_path)
     ds_fresh._desires["rest"] = 0.0
     ds_fresh._desires["look_around"] = 0.0
-    with patch("familiar_agent.desires.datetime") as mock_dt:
+    with patch("familiar_neighbor.mind.desires.datetime") as mock_dt:
         mock_dt.now.return_value.hour = 14
         ds_fresh._last_tick = time.time() - 60
         ds_fresh.tick()
@@ -206,7 +206,7 @@ def test_dominant_prefers_worry_over_greet(tmp_path):
     ds._desires["worry_companion"] = 0.8
     ds._desires["greet_companion"] = 0.75
 
-    with patch("familiar_agent.desires.datetime") as mock_dt:
+    with patch("familiar_neighbor.mind.desires.datetime") as mock_dt:
         mock_dt.now.return_value.hour = 14
         result = ds.get_dominant()
 
@@ -221,7 +221,7 @@ def test_suppression_does_not_affect_worry(tmp_path):
     ds._desires["rest"] = 0.9
     ds._desires["worry_companion"] = 0.0
 
-    with patch("familiar_agent.desires.datetime") as mock_dt:
+    with patch("familiar_neighbor.mind.desires.datetime") as mock_dt:
         mock_dt.now.return_value.hour = 14
         ds._last_tick = time.time() - 10
         ds.tick()
@@ -255,7 +255,7 @@ def test_get_dominant_returns_none_below_threshold(tmp_path):
     ds = _make_desires(tmp_path)
     for k in ds._desires:
         ds._desires[k] = 0.0
-    with patch("familiar_agent.desires.datetime") as mock_dt:
+    with patch("familiar_neighbor.mind.desires.datetime") as mock_dt:
         mock_dt.now.return_value.hour = 12
         result = ds.get_dominant()
     assert result is None

@@ -8,19 +8,27 @@ import os
 import signal
 import sys
 import time
+from datetime import datetime
 from pathlib import Path
+from typing import cast
 
 from .agent import EmbodiedAgent
+from .bootstrap import load_app_bootstrap
 from .config import AgentConfig
 from .desires import DesireSystem
 from .realtime_stt_session import create_realtime_stt_session
+from .setup import run_cli_setup_wizard
+from .wake import WakeListener, wait_input_or_wake
 from ._i18n import BANNER, _t
 from ._ui_helpers import (
     DESIRE_COOLDOWN,
     IDLE_CHECK_INTERVAL,
+    commitment_reminder_prompt,
     desire_tick_prompt,
     format_action as _format_action,
+    should_fire_commitment_reminder,
     should_fire_idle_desire,
+    should_run_sleep_consolidation,
 )
 
 
@@ -81,6 +89,18 @@ async def repl(agent: EmbodiedAgent, desires: DesireSystem, debug: bool = False)
 
     loop = asyncio.get_event_loop()
 
+    # Start the MCP handshake now so tools are ready by the first turn (#188).
+    start_mcp_early = getattr(agent, "start_mcp_early", None)
+    if callable(start_mcp_early):
+        start_mcp_early()
+
+    # familiard wake events accelerate the idle poll when the daemon runs;
+    # disabled (the default) this changes nothing about the wait below.
+    wake_listener = WakeListener(
+        getattr(agent.config, "daemon_socket", "") or None,
+        enabled=getattr(agent.config, "daemon", False) is True,
+    )
+
     # Persistent input queue — stdin reader runs as a background task
     # so user input is captured even while the agent is busy.
     input_queue: asyncio.Queue[str | None] = asyncio.Queue()
@@ -138,17 +158,82 @@ async def repl(agent: EmbodiedAgent, desires: DesireSystem, debug: bool = False)
                     )
                 continue
 
-            # No pending input — show prompt and wait briefly
+            # No pending input — show prompt and wait briefly. A familiard
+            # wake short-circuits the wait; the idle gates below re-check
+            # everything, so a wake is never more than an early poll.
             print("\n> ", end="", flush=True)
-            queued_input: str | None
-            try:
-                queued_input = await asyncio.wait_for(
-                    input_queue.get(), timeout=IDLE_CHECK_INTERVAL
-                )
-            except asyncio.TimeoutError:
-                queued_input = None
+            kind, item = await wait_input_or_wake(input_queue, wake_listener, IDLE_CHECK_INTERVAL)
+            queued_input: str | None = item if kind == "input" else None
 
             if queued_input is None and input_queue.empty():
+                heartbeat = getattr(agent, "_heartbeat", None)
+                quiet_now = heartbeat.routine_state().quiet_hours if heartbeat else False
+                # Nightly consolidation: a background job, never a turn — it
+                # does not participate in idle precedence.
+                try:
+                    if bool(
+                        getattr(agent.config, "sleep_consolidation", False)
+                    ) and should_run_sleep_consolidation(
+                        enabled=True,
+                        agent_running=False,
+                        has_pending_input=not input_queue.empty(),
+                        quiet_hours=quiet_now,
+                        now_dt=datetime.now(),
+                        last_night_key=agent.last_consolidation_night_key(),
+                        # Must match the job's configured end hour.
+                        quiet_end_hour=agent.consolidation_quiet_end_hour(),
+                    ):
+                        agent.start_sleep_consolidation()
+                except Exception:
+                    logging.getLogger(__name__).exception("sleep consolidation gate failed")
+                # Proactive commitment reminders fire independently of auto_desire
+                # (a baseline neighbour behaviour, toggled by FAMILIAR_PROACTIVE_REMINDERS).
+                store = getattr(agent, "_commitment_store", None)
+                if (
+                    store is not None
+                    and getattr(agent, "config", None)
+                    and agent.config.proactive_reminders
+                ):
+                    try:
+                        quiet = quiet_now
+                        reminders = should_fire_commitment_reminder(
+                            agent_running=False,
+                            has_pending_input=not input_queue.empty(),
+                            last_interaction=last_interaction_time,
+                            now=time.time(),
+                            store=store,
+                            quiet_hours=quiet,
+                            routine_store=getattr(agent, "_routine_store", None),
+                        )
+                        if reminders:
+                            # Record the fire BEFORE the turn: the cadence advances
+                            # regardless of the turn's outcome, and a mid-turn snooze
+                            # reset survives intact.
+                            store.mark_reminded([c.id for c in reminders], at=time.time())
+                    except Exception:
+                        logging.getLogger(__name__).exception("reminder gate failed")
+                        reminders = []
+                    if reminders:
+                        try:
+                            await agent.run(
+                                "",
+                                on_action=on_action,
+                                on_text=on_text,
+                                desires=desires,
+                                inner_voice=commitment_reminder_prompt(reminders),
+                                interrupt_queue=input_queue,
+                            )
+                        except (KeyboardInterrupt, EOFError, asyncio.CancelledError):
+                            raise
+                        except Exception:
+                            logging.getLogger(__name__).exception(
+                                "proactive reminder turn failed; continuing REPL"
+                            )
+                        # The reminder turn counts as an interaction: keep the
+                        # desire cooldown from firing back-to-back with it.
+                        last_interaction_time = time.time()
+                        continue
+
                 # Skip desire-driven turns when auto_desire is disabled
                 if not getattr(agent, "config", None) or not agent.config.auto_desire:
                     continue
@@ -340,6 +425,112 @@ def _mcp_command(args: list[str]) -> None:
             print(f"  {name:<22} {cmd} {a}{env_hint}")
 
 
+async def _run_task_command(args: list[str]) -> None:
+    """Run non-embodied task mode on the generic runtime."""
+    import argparse
+
+    from familiar_capabilities import CodingCapability, MCPCapability
+    from familiar_runtime.events import AgentEvent, EventBus
+    from familiar_runtime.models import ModelBackend
+    from familiar_runtime.runtime import AgentRuntime
+    from familiar_runtime.tasks import SQLiteTaskStore, TaskStatus, TaskToolProvider
+    from familiar_runtime.tools.registry import ToolRegistry
+
+    from .backend import create_backend
+    from .mcp_client import MCPClientManager, _resolve_config_path
+    from .tools.coding import CodingTool
+
+    parser = argparse.ArgumentParser(prog="familiar task", add_help=True)
+    parser.add_argument("goal", nargs="+", help="Task goal to execute")
+    parsed = parser.parse_args(args)
+    goal = " ".join(parsed.goal).strip()
+
+    config = AgentConfig()
+    backend = cast(ModelBackend, create_backend(config))
+    registry = ToolRegistry()
+    registry.register(CodingCapability(CodingTool(config.coding)))
+
+    mcp: MCPClientManager | None = None
+    cfg_path = _resolve_config_path()
+    if cfg_path.exists():
+        mcp = MCPClientManager(cfg_path)
+        await mcp.start()
+        mcp_provider = MCPCapability(mcp)
+        registry.register(mcp_provider)
+        registry.register_fallback(mcp_provider)
+
+    task_dir = Path.home() / ".familiar_ai"
+    task_dir.mkdir(parents=True, exist_ok=True)
+    task_store = SQLiteTaskStore(task_dir / "runtime_tasks.db")
+    event_bus = EventBus(log_dir=task_dir / "runtime_events")
+    task = task_store.create_task(
+        title=goal[:80] or "Task",
+        description=goal,
+        goal=goal,
+        acceptance_criteria=["Provide a final summary with actions taken and evidence."],
+    )
+    task_store.update_status(task.id, TaskStatus.RUNNING)
+
+    def _checkpoint_runtime_event(event: AgentEvent) -> None:
+        if event.type not in {"model_result", "tool_result", "tool_timeout", "tool_error"}:
+            return
+        task_store.checkpoint_task(
+            task.id,
+            summary=f"{event.source}:{event.type}",
+            state={"event_id": event.id, "payload": event.payload},
+        )
+
+    event_bus.subscribe(_checkpoint_runtime_event)
+    registry.register(TaskToolProvider(task_store))
+
+    system_prompt = (
+        "You are familiar task mode: a non-embodied task execution agent. "
+        "Use coding and MCP tools when useful. Do not assume camera, voice, mobility, "
+        "or neighbor-only state exists. Keep bash opt-in behavior unchanged: if bash is "
+        "not listed as a tool, do not claim you can run shell commands. Finish with a "
+        "concise summary of actions taken, files changed, and checks run."
+    )
+
+    try:
+        runtime = AgentRuntime(
+            backend=backend,
+            tools=registry,
+            event_bus=event_bus,
+        )
+        result = await runtime.run_turn(
+            goal,
+            profile="task",
+            task_id=task.id,
+            system_prompt=system_prompt,
+            max_tokens=config.max_tokens,
+        )
+        task_store.checkpoint_task(
+            task.id,
+            summary="Task mode turn completed.",
+            state={
+                "final_text": result.final_text,
+                "tool_calls": [tool_call.name for tool_call in result.tool_calls],
+                "input_tokens": result.input_tokens,
+                "output_tokens": result.output_tokens,
+            },
+        )
+        task_store.update_status(task.id, TaskStatus.SUCCEEDED, evidence=result.final_text[:500])
+        print(result.final_text)
+        print(f"\n[task:{task.id}] succeeded")
+    except Exception as exc:
+        task_store.update_status(task.id, TaskStatus.FAILED, error=str(exc))
+        raise
+    finally:
+        event_bus.close()
+        task_store.close()
+        if mcp is not None:
+            await mcp.stop()
+
+
+def _task_command(args: list[str]) -> None:
+    asyncio.run(_run_task_command(args))
+
+
 def _run_repl(agent: EmbodiedAgent, desires: DesireSystem, debug: bool) -> None:
     """Run the REPL with cross-platform Ctrl+C support.
 
@@ -395,28 +586,56 @@ def main() -> None:
         _mcp_command(sys.argv[2:])
         return
 
+    if len(sys.argv) > 1 and sys.argv[1] == "task":
+        _task_command(sys.argv[2:])
+        return
+
     use_gui = "--gui" in sys.argv
     use_tui = "--no-tui" not in sys.argv and not use_gui
+    bootstrap = load_app_bootstrap()
+
+    if bootstrap.migrated:
+        for note in bootstrap.messages:
+            print(f"[migration] {note}")
+
+    if bootstrap.needs_setup:
+        if use_gui:
+            from .gui import run_setup_wizard
+
+            if not run_setup_wizard(AgentConfig(), bootstrap.env_path):
+                return
+        else:
+            if not sys.stdin.isatty():
+                print("Error: API_KEY not set.")
+                print("  Run with --gui to open the setup wizard, or create .env manually.")
+                sys.exit(1)
+            if not run_cli_setup_wizard(bootstrap.env_path):
+                return
+
+        bootstrap = load_app_bootstrap(bootstrap.env_path)
+        if bootstrap.needs_setup:
+            print("Setup incomplete: API_KEY is still missing.")
+            return
 
     config = AgentConfig()
-    if not config.api_key:
-        print("Error: API_KEY not set.")
-        print("  Set PLATFORM=gemini|anthropic|openai and API_KEY=<your key>.")
-        sys.exit(1)
-
-    agent = EmbodiedAgent(config)
-    desires = DesireSystem(companion_name=config.companion_name)
 
     if use_gui:
         from .gui import run_gui
 
-        run_gui(agent, desires)
+        desires = DesireSystem(companion_name=config.companion_name)
+        run_gui(config, desires)
     elif use_tui:
+        agent = EmbodiedAgent(config)
+        desires = DesireSystem(companion_name=config.companion_name)
+        agent.bind_desires(desires)
         from .tui import FamiliarApp
 
         app = FamiliarApp(agent, desires)
         app.run(mouse=False)
     else:
+        agent = EmbodiedAgent(config)
+        desires = DesireSystem(companion_name=config.companion_name)
+        agent.bind_desires(desires)
         _run_repl(agent, desires, debug=debug)
 
 

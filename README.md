@@ -92,7 +92,9 @@ Or: `winget install astral-sh.uv`
 
 ### 2. Install ffmpeg
 
-ffmpeg is **required** for camera image capture and audio playback.
+ffmpeg is **required** for camera image capture and camera-speaker playback via go2rtc.
+Local PC audio playback can also use built-in OS players (`afplay` on macOS) or the
+pure-Python fallback.
 
 | OS | Command |
 |----|---------|
@@ -119,6 +121,9 @@ uv sync
 cp .env.example .env
 # Edit .env with your settings
 ```
+
+If you prefer the desktop flow, `./run-gui.sh` (or `run-gui.bat`) can now open
+the setup dialog for you on first launch when `API_KEY` is still missing.
 
 **Minimum required:**
 
@@ -153,13 +158,17 @@ cp persona-template/en.md ME.md
 
 **macOS / Linux / WSL2:**
 ```bash
-./run.sh             # Textual TUI (recommended)
+./run.sh             # Textual TUI (backward-compatible default)
+./run-gui.sh         # Desktop GUI launcher
+./run.sh --gui       # Desktop GUI (same as run-gui.sh)
 ./run.sh --no-tui    # Plain REPL
 ```
 
 **Windows:**
 ```bat
-run.bat              # Textual TUI (recommended)
+run.bat              # Textual TUI (backward-compatible default)
+run-gui.bat          # Desktop GUI launcher
+run.bat --gui        # Desktop GUI (same as run-gui.bat)
 run.bat --no-tui     # Plain REPL
 ```
 
@@ -238,6 +247,42 @@ MODEL=llm -m gemma3 {}        # llm CLI (https://llm.datasette.io) — {} = prom
 
 ---
 
+## Body daemon (familiard)
+
+familiar-ai can run with an always-on body: `familiard` is a small separate
+process that keeps living while the app is closed.
+
+```bash
+uv run familiard        # start the body daemon
+FAMILIAR_DAEMON=1 ./run.sh   # the app now feels it and wakes on its nudges
+```
+
+What it owns (zero LLM calls, a few hertz):
+
+- **Interoception** — samples CPU / memory / time of day into a body signal the
+  agent feels each turn (energy, cognitive load, stress)
+- **Wake events** — due commitments, rising desires, and schedule-band pulses
+  nudge the app instantly instead of waiting for its next idle poll; every
+  behavioral gate stays in the app, so a wake is never more than an early poll
+- **Offline affect decay** — feelings settle toward baseline on wall-clock time
+  while the app is closed, instead of freezing mid-emotion
+
+Configuration lives in `~/.familiar_ai/familiard.conf` (`key = value` lines,
+`FAMILIARD_*` env overrides), e.g. `active_bands = 07:00-09:00,18:00-24:00`.
+Without the daemon (the default), nothing changes — the app keeps its plain
+idle polling.
+
+A **Rust port** with the identical contract (same config, same socket, same
+payload) lives in [`familiard-rs/`](./familiard-rs) — a single ~2 MB static
+binary that never shares the Python GIL:
+
+```bash
+cd familiard-rs && cargo build --release
+./target/release/familiard
+```
+
+---
+
 ## MCP Servers
 
 familiar-ai can connect to any [MCP (Model Context Protocol)](https://modelcontextprotocol.io) server. This lets you plug in external memory, filesystem access, web search, or any other tool.
@@ -292,6 +337,22 @@ API_KEY=sk-...
 ```
 
 Run `./run.sh` (macOS/Linux/WSL2) or `run.bat` (Windows) and start chatting. Add hardware as you go.
+If you want the desktop GUI directly, use `./run-gui.sh` or `run-gui.bat`.
+
+### Find Wi-Fi cameras automatically
+
+If you do not know your camera's IP yet, familiar-ai now ships with a small discovery tool:
+
+```bash
+uv run familiar-discover-cameras
+```
+
+This combines **WS-Discovery**, **mDNS / zeroconf**, and **SSDP**. For harder networks, you can
+opt into a slower TCP fallback scan:
+
+```bash
+uv run familiar-discover-cameras --scan
+```
 
 ### Wi-Fi PTZ camera (Tapo C220)
 
@@ -370,14 +431,17 @@ Set `TTS_OUTPUT=remote` (or `both`). Requires [go2rtc](https://github.com/AlexxI
 
 #### B) Local PC speaker
 
-The default (`TTS_OUTPUT=local`). Tries players in order: **paplay** → **mpv** → **ffplay**. Also used as a fallback when `TTS_OUTPUT=remote` and go2rtc is unavailable.
+The default (`TTS_OUTPUT=local`). Tries players in order:
+**afplay (macOS)** → **paplay** → **mpv** → **sounddevice**.
+On Windows, MP3 playback can also fall back to built-in **MCI** if no external player is available.
+Local playback is also used as a fallback when `TTS_OUTPUT=remote` and go2rtc is unavailable.
 
 | OS | Install |
 |----|---------|
-| macOS | `brew install mpv` |
+| macOS | No extra player required (`afplay` is built in). Optional: `brew install mpv` |
 | Ubuntu / Debian | `sudo apt install mpv` (or `paplay` via `pulseaudio-utils`) |
 | WSL2 / WSLg | `sudo apt install pulseaudio-utils` — set `PULSE_SERVER=unix:/mnt/wslg/PulseServer` in `.env` |
-| Windows | [mpv.io/installation](https://mpv.io/installation/) — download and add to PATH, **or** `winget install ffmpeg` |
+| Windows | [mpv.io/installation](https://mpv.io/installation/) — download and add to PATH. Without it, familiar-ai still tries built-in/Python fallbacks |
 
 > If no audio player is available, speech is still generated — it just won't play.
 
@@ -392,6 +456,28 @@ STT_LANGUAGE=ja            # recommended for Japanese; used by both batch and re
 ```
 
 familiar-ai streams microphone audio to ElevenLabs Scribe v2 and auto-commits transcripts when you pause speaking. No button press required. Coexists with the push-to-talk mode (Ctrl+T).
+
+On WSL2/WSLg, PortAudio often cannot see the WSLg microphone bridge even though
+PulseAudio-level capture works. familiar-ai handles this automatically: when
+`sounddevice` finds no input device, both STT paths (realtime and push-to-talk)
+fall back to PulseAudio's native `parec`. You only need:
+
+```bash
+sudo apt install pulseaudio-utils libasound2-plugins
+# in .env (or your shell):
+PULSE_SERVER=unix:/mnt/wslg/PulseServer
+```
+
+Verify PulseAudio capture works (this is what the fallback uses):
+
+```bash
+pactl list short sources      # should show an RDPSource / input
+parec --rate=16000 --channels=1 | head -c 32000 > /dev/null && echo mic OK
+```
+
+To force a specific capture backend, set `FAMILIAR_STT_BACKEND=sounddevice`
+or `FAMILIAR_STT_BACKEND=parec` (default: auto — sounddevice first, parec
+fallback).
 
 ---
 
@@ -442,6 +528,14 @@ Curious about how it works? See [docs/technical.md](./docs/technical.md) for the
 ## Contributing
 
 familiar-ai is an open experiment. If any of this resonates with you — technically or philosophically — contributions are very welcome.
+
+### Release Flow
+
+- `develop` is the default integration branch.
+- Run the **Prepare Release PR** workflow from `develop` with a target version like `0.6.0`.
+- The workflow creates or updates `release/v0.6.0`, bumps `pyproject.toml`, and rolls `CHANGELOG.md` `Unreleased` into `## [0.6.0] - YYYY-MM-DD`.
+- Merge that release PR into `main` when it is stable enough to ship.
+- Pushing to `main` triggers **Tag Release**, which creates `v0.6.0` and a GitHub Release from the matching changelog section.
 
 **Good places to start:**
 

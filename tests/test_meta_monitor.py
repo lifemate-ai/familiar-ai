@@ -13,6 +13,7 @@ from unittest.mock import MagicMock
 
 
 from familiar_agent.meta_monitor import MetaMonitor
+from familiar_agent.social_policy import SocialPolicyDecision
 from familiar_agent.workspace import Coalition
 
 
@@ -221,3 +222,38 @@ def test_as_coalition_low_activation_normally():
     assert c is not None
     # Meta is a background process, shouldn't dominate workspace
     assert c.activation < 0.8
+
+
+def test_gate_response_detects_validation_before_advice_violation() -> None:
+    monitor = MetaMonitor()
+    policy = SocialPolicyDecision(
+        primary_act="fatigue_signal",
+        response_mode="validate",
+        should_use_tom=True,
+        should_recall_relational_memory=False,
+        softness=0.9,
+        directness=0.3,
+        initiative=0.3,
+        avoid_problem_solving=True,
+        mention_memory=False,
+    )
+
+    decision = monitor.gate_response(
+        user_text="今日はほんましんどい",
+        candidate_response="You should just take a walk and drink coffee.",
+        social_policy=policy,
+    )
+
+    assert decision.needs_repair is True
+    assert "validation-before-advice violation" in decision.reasons
+
+
+def test_gate_response_detects_raw_interoception_leakage() -> None:
+    monitor = MetaMonitor()
+    decision = monitor.gate_response(
+        user_text="なんかだるい",
+        candidate_response="Your heart rate is 120 bpm and CPU is too high.",
+        social_policy=None,
+    )
+
+    assert "raw interoception leakage" in decision.reasons

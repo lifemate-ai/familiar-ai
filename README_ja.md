@@ -118,6 +118,9 @@ cp .env.example .env
 # .env を編集して設定を入力
 ```
 
+GUI から始めたい場合は、`API_KEY` が未設定でも初回起動時に
+`./run-gui.sh`（または `run-gui.bat`）がセットアップダイアログを開けます。
+
 **最低限必要な設定:**
 
 | 変数 | 説明 |
@@ -235,6 +238,21 @@ API_KEY=sk-...
 
 `./run.sh`（macOS/Linux/WSL2）または `run.bat`（Windows）を実行してチャットを始めましょう。ハードウェアはあとから追加できます。
 
+### Wi-Fi カメラを自動検出する
+
+カメラのIPアドレスがまだ分からない場合は、付属の discovery tool を使えます:
+
+```bash
+uv run familiar-discover-cameras
+```
+
+このツールは **WS-Discovery**、**mDNS / zeroconf**、**SSDP** をまとめて試します。
+見つからない場合だけ、やや遅い TCP fallback scan も試せます:
+
+```bash
+uv run familiar-discover-cameras --scan
+```
+
 ### Wi-Fi PTZカメラ（Tapo C220）
 
 1. Tapoアプリで: **設定 → 詳細設定 → カメラアカウント** — ローカルアカウントを作成（TP-Linkアカウントではなく）
@@ -292,6 +310,18 @@ REALTIME_STT=true
 ELEVENLABS_API_KEY=sk_...   # TTSと同じキー
 STT_LANGUAGE=ja            # 日本語なら推奨。バッチSTT / Realtime STT の両方で使います
 ```
+
+WSL2/WSLg では、Realtime STT は PulseAudio の再生設定だけでなく、
+`sounddevice` / PortAudio からマイク入力が見えている必要があります。
+`pulseaudio-utils` と `libasound2-plugins` を入れて
+`PULSE_SERVER=unix:/mnt/wslg/PulseServer` を設定したうえで、次を確認してください:
+
+```bash
+uv run python -m sounddevice
+```
+
+ここで入力デバイスが出ない、または `Error querying device -1` になる場合は、
+familiar-ai からもマイク入力を利用できません。
 
 ---
 
