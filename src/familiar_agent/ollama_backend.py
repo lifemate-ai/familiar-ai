@@ -253,6 +253,8 @@ class OllamaBackend:
         )
 
     async def complete(self, prompt: str, max_tokens: int) -> str:
+        if not prompt or not prompt.strip():
+            return ""  # never ask a model to complete nothing — it asks back
         body = self.build_request("", [{"role": "user", "content": prompt}], [], max_tokens)
         body["messages"] = [m for m in body["messages"] if m["content"]]
         try:
