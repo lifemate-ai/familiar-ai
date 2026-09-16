@@ -2037,6 +2037,12 @@ class EmbodiedAgent:
         """Clean up resources. Bounded by timeouts to avoid hanging on exit."""
         if self._camera:
             self._camera.close()
+            aclose = getattr(self._camera, "aclose", None)
+            if aclose is not None:
+                try:
+                    await asyncio.wait_for(aclose(), timeout=2.0)
+                except (asyncio.TimeoutError, Exception):  # noqa: BLE001
+                    pass
 
         await self._drain_background_tasks()
 
@@ -2394,20 +2400,31 @@ class EmbodiedAgent:
                     elif tc.name in {"look", "walk"}:
                         pending_view_action_name = tc.name
                         pending_view_action_input = dict(tc.input)
-                    if tc.name == "say":
+                    empty_say = (
+                        tc.name == "say" and not str((tc.input or {}).get("text", "")).strip()
+                    )
+                    if tc.name == "say" and not empty_say:
                         say_used = True
                         non_say_streak = 0
                     else:
                         non_say_streak += 1
                     logger.info("Tool call: %s(%s)", tc.name, tc.input)
-                    if on_action:
+                    if on_action and not empty_say:
                         on_action(tc.name, tc.input)
 
                     timeout_s = self._tool_timeout_seconds(tc.name)
                     try:
-                        text, image = await asyncio.wait_for(
-                            self._execute_tool(tc.name, tc.input), timeout=timeout_s
-                        )
+                        if empty_say:
+                            # say("") is silence, not speech: don't count it as having spoken,
+                            # so auto-say / the voice reminder still deliver the reply.
+                            text, image = (
+                                "Nothing was spoken: say() needs the words as text.",
+                                None,
+                            )
+                        else:
+                            text, image = await asyncio.wait_for(
+                                self._execute_tool(tc.name, tc.input), timeout=timeout_s
+                            )
                     except asyncio.TimeoutError:
                         logger.warning("Tool %s timed out after %.1fs", tc.name, timeout_s)
                         text, image = (
