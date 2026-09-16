@@ -43,3 +43,14 @@ don't reach for the camera on social utterances) when the conversation model is 
 
 - Changing behaviour for Anthropic/Gemini frontier backends (profile `full` stays default there).
 - Fine-tuning.
+
+## Results (benchmarks/social_eval.py, 12 scenarios, 106 checks)
+
+| model | full/off (baseline) | compact/off | full/on | compact/on |
+|---|---|---|---|---|
+| qwen3.5:9b | 63% | 76% | 75% | 85% → 94% after share_joy / early-stop / say-unwrap fixes |
+| tobestyledintro/qwen3.8-9b-distill | 60% (never calls say) | — | — | see below |
+
+Remaining qualitative gaps seen in transcripts: occasional Chinese/English reply drift
+(now caught by the language guard with one redo), fabricated comparisons on
+"昨日と比べて" (no memory), and rambling on deflection turns.
