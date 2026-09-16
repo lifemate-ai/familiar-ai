@@ -2149,6 +2149,8 @@ class EmbodiedAgent:
         camera_used = False
         say_used = False
         language_retried = False
+        empty_retried = False
+        tools_used_this_turn: list[str] = []
         final_text = "(no response)"
         non_say_streak = 0  # consecutive tool calls without say()
         observation_action_name: str | None = None
@@ -2159,6 +2161,16 @@ class EmbodiedAgent:
         for i in range(MAX_ITERATIONS):
             logger.debug("Agent iteration %d", i + 1)
 
+            step_tools = turn_tools
+            if (
+                reflex_on
+                and not say_used
+                and social_reflex.perception_exhausted(tools_used_this_turn)
+            ):
+                # Looked enough: only speaking (or remembering) is left for this turn.
+                step_tools = [
+                    t for t in turn_tools if t.get("name") not in social_reflex.PERCEPTION_TOOLS
+                ]
             result, raw_content = await self.backend.stream_turn(
                 system=self._system_prompt(
                     feelings_ctx,
@@ -2170,7 +2182,7 @@ class EmbodiedAgent:
                     workspace_ctx=workspace_ctx,
                 ),
                 messages=self.messages,
-                tools=turn_tools,
+                tools=step_tools,
                 max_tokens=self.config.max_tokens,
                 on_text=on_text,
             )
@@ -2190,6 +2202,22 @@ class EmbodiedAgent:
             if result.stop_reason == "end_turn":
                 self.messages.append(self.backend.make_assistant_message(result, raw_content))
                 final_text = result.text or "(no response)"
+                if (
+                    reflex_on
+                    and not say_used
+                    and not empty_retried
+                    and not is_desire_turn
+                    and not (result.text or "").strip()
+                ):
+                    # Small models sometimes return nothing at all.  Ask once, briefly.
+                    empty_retried = True
+                    logger.info("Social reflex: empty reply, asking for one short say()")
+                    self.messages.append(
+                        self.backend.make_user_message(
+                            "You said nothing. Reply to the person with one short say() now."
+                        )
+                    )
+                    continue
                 if reflex_on and final_text != "(no response)":
                     # Small models leak pseudo tool syntax / stage directions into prose,
                     # or write say("…") literally instead of calling the tool.
@@ -2304,6 +2332,11 @@ class EmbodiedAgent:
 
                 collected: list[tuple[str, str | None]] = []
                 for tc in result.tool_calls:
+                    tools_used_this_turn.append(tc.name)
+                    if reflex_on and tc.name == "say" and isinstance(tc.input, dict):
+                        tc.input["text"] = social_reflex.clean_say_text(
+                            str(tc.input.get("text", ""))
+                        )
                     if tc.name == "see":
                         camera_used = True
                         if pending_view_action_name is not None:

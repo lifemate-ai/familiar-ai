@@ -49,7 +49,8 @@ don't reach for the camera on social utterances) when the conversation model is 
 | model | full/off (baseline) | compact/off | full/on | compact/on |
 |---|---|---|---|---|
 | qwen3.5:9b | 63% | 76% | 75% | 85% → 94% after share_joy / early-stop / say-unwrap fixes |
-| tobestyledintro/qwen3.8-9b-distill | 60% (never calls say) | — | — | see below |
+| tobestyledintro/qwen3.8-9b-distill | 60% (never calls say) | — | — | 83% — rambles, echoes, mixes Chinese; dropped as a candidate |
+| gemma4:12b-it-qat | 75% | — | — | 90% (before perception cap / empty-reply retry); fastest (1.5–5 s), no language drift, most natural Japanese → recommended default |
 
 Remaining qualitative gaps seen in transcripts: occasional Chinese/English reply drift
 (now caught by the language guard with one redo), fabricated comparisons on

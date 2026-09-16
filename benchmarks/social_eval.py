@@ -127,11 +127,16 @@ async def run_scenario(backend, system: str, sc: SocialScenario, reflex: bool) -
     steps: list[Step] = []
     spoken_parts: list[str] = []
     language_retried = False
+    empty_retried = False
+    tools_used: list[str] = []
     t0 = time.time()
     error = ""
     try:
         for _ in range(MAX_STEPS):
-            result, raw = await backend.stream_turn(system, messages, tools, 300, None)
+            step_tools = tools
+            if reflex and not spoken_parts and sr.perception_exhausted(tools_used):
+                step_tools = [t for t in tools if t["name"] not in sr.PERCEPTION_TOOLS]
+            result, raw = await backend.stream_turn(system, messages, step_tools, 300, None)
             text = sr.normalize_small_model_text(result.text) if reflex else result.text
             if (
                 reflex
@@ -144,6 +149,21 @@ async def run_scenario(backend, system: str, sc: SocialScenario, reflex: bool) -
                 messages.append(
                     backend.make_user_message(
                         "Reply in the same language the person used. Say it again."
+                    )
+                )
+                continue
+            if (
+                reflex
+                and result.stop_reason != "tool_use"
+                and not spoken_parts
+                and not empty_retried
+                and not text.strip()
+            ):
+                empty_retried = True
+                messages.append(backend.make_assistant_message(result, raw))
+                messages.append(
+                    backend.make_user_message(
+                        "You said nothing. Reply to the person with one short say() now."
                     )
                 )
                 continue
@@ -180,12 +200,21 @@ async def run_scenario(backend, system: str, sc: SocialScenario, reflex: bool) -
                 continue
             outs = []
             for tc in result.tool_calls:
+                tools_used.append(tc.name)
                 if tc.name == "say":
-                    spoken_parts.append(str(tc.input.get("text", "")))
+                    said = str(tc.input.get("text", ""))
+                    spoken_parts.append(sr.clean_say_text(said) if reflex else said)
                 outs.append(fake_tool_result(tc.name, tc.input))
             messages.extend(backend.make_tool_results(result.tool_calls, outs))
             if reflex and turn.is_social and spoken_parts:
                 break  # the agent ends a social turn once it has spoken
+            if not spoken_parts and len([t for t in tools_used if t != "say"]) >= 2:
+                messages.append(
+                    backend.make_user_message(
+                        "REMINDER: Writing text is silent. You MUST call say() to be heard. "
+                        "Call say() NOW. Keep it to 1-2 sentences."
+                    )
+                )
     except Exception as e:  # noqa: BLE001
         error = f"{type(e).__name__}: {e}"
     latency = time.time() - t0

@@ -76,7 +76,7 @@ cheap side-calls and fall back to the main backend. Backends share an informal i
 `make_user_message`, `make_assistant_message`, `make_tool_results`, `stream_turn`, `complete`.
 
 Ollama specifics learned the hard way:
-- Use `PLATFORM=ollama` (native `/api/chat`), not `/v1`. Via `/v1` you cannot set `num_ctx`
+- Use `PLATFORM=ollama` (native `/api/chat`), not `/v1`. Default local model: `gemma4:12b-it-qat`. Via `/v1` you cannot set `num_ctx`
   (default 4096 → HTTP 500 "EOF" on long prompts) and qwen3.x always thinks unless
   `reasoning_effort=none` is sent. Prompt-mode `<tool_call>` JSON collides with Ollama's
   built-in qwen tool parser → use native tools.

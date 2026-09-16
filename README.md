@@ -176,7 +176,7 @@ run.bat --no-tui     # Plain REPL
 | Anthropic Claude | `anthropic` | `claude-haiku-4-5-20251001` | [console.anthropic.com](https://console.anthropic.com) |
 | Google Gemini | `gemini` | `gemini-2.5-flash` | [aistudio.google.com](https://aistudio.google.com) |
 | OpenAI | `openai` | `gpt-4o-mini` | [platform.openai.com](https://platform.openai.com) |
-| **Ollama (local, native API)** | `ollama` | `qwen3.5:9b` | [ollama.com](https://ollama.com) |
+| **Ollama (local, native API)** | `ollama` | `gemma4:12b-it-qat` | [ollama.com](https://ollama.com) |
 | OpenAI-compatible (vllm, LM Studio…) | `openai` + `BASE_URL=` | — | — |
 | OpenRouter.ai (multi-provider) | `openai` + `BASE_URL=https://openrouter.ai/api/v1` | — | [openrouter.ai](https://openrouter.ai) |
 | **CLI tool** (claude -p, ollama…) | `cli` | (the command) | — |
@@ -215,10 +215,10 @@ AGENT_NAME=Yukine
 
 > **Note:** To disable local/NVIDIA models, simply don't set `BASE_URL` to a local endpoint like `http://localhost:11434/v1`. Use cloud providers instead.
 
-**Ollama (local 9B) `.env` example:**
+**Ollama (local ~10B) `.env` example:**
 ```env
 PLATFORM=ollama
-MODEL=qwen3.5:9b                 # or tobestyledintro/qwen3.8-9b-distill
+MODEL=gemma4:12b-it-qat          # best local ~10B tested; qwen3.5:9b also works
 BASE_URL=http://localhost:11434  # default
 UTILITY_PLATFORM=ollama          # emotion/summary side-calls stay local too
 AGENT_NAME=Yukine

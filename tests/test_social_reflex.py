@@ -250,3 +250,11 @@ def test_trim_spoken_drops_echo_and_cuts_length() -> None:
     )
     assert sr.trim_spoken("おかえり。", "ただいま", 1) == "おかえり。"
     assert sr.trim_spoken("", "x", 2) == ""
+
+
+def test_clean_say_text_and_perception_exhausted() -> None:
+    assert sr.clean_say_text("うるさい？}\\n") == "うるさい？"
+    assert sr.clean_say_text("おかえり。</tool_call>") == "おかえり。"
+    assert sr.clean_say_text("  普通の文。 ") == "普通の文。"
+    assert not sr.perception_exhausted(["look", "see"])
+    assert sr.perception_exhausted(["look", "see", "look", "see"])

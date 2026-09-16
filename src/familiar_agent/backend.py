@@ -1336,7 +1336,7 @@ def create_backend(
       anthropic  — Anthropic Claude (default)
       gemini     — Google Gemini via native google-genai SDK
       openai     — OpenAI API (or compatible via BASE_URL)
-      ollama     — Ollama native /api/chat (BASE_URL=http://localhost:11434, MODEL=qwen3.5:9b)
+      ollama     — Ollama native /api/chat (BASE_URL=http://localhost:11434, MODEL=gemma4:12b-it-qat)
       kimi       — Moonshot AI Kimi K2.5 (api.moonshot.ai/v1)
       glm        — Z.AI GLM API (api.z.ai/api/paas/v4); set ZAI_API_KEY
       cli        — any CLI LLM tool via stdin/stdout (MODEL = the command)
@@ -1347,7 +1347,7 @@ def create_backend(
         logger.info("Using Gemini backend: %s", model)
         return GeminiBackend(api_key=config.api_key, model=model)
     if config.platform == "ollama":
-        model = config.model or "qwen3.5:9b"
+        model = config.model or "gemma4:12b-it-qat"
         logger.info(
             "Using Ollama backend: %s @ %s (think=%s)", model, config.base_url, config.thinking_mode
         )
@@ -1421,7 +1421,7 @@ def create_utility_backend(
     fall back to the main conversation backend.
     """
     if config.utility_platform == "ollama":
-        model = config.utility_model or config.model or "qwen3.5:9b"
+        model = config.utility_model or config.model or "gemma4:12b-it-qat"
         logger.info("Using Ollama utility backend: %s", model)
         return _ollama_backend(model, config.base_url, "disabled", config.ollama_num_ctx)
     if not config.utility_platform or not config.utility_api_key:
@@ -1467,7 +1467,7 @@ def create_scene_backend(
     to the utility backend or main backend.
     """
     if config.scene_platform == "ollama":
-        model = config.scene_model or config.model or "qwen3.5:9b"
+        model = config.scene_model or config.model or "gemma4:12b-it-qat"
         logger.info("Using Ollama scene backend: %s", model)
         return _ollama_backend(model, config.base_url, "disabled", config.ollama_num_ctx)
     if not config.scene_platform or not config.scene_api_key:

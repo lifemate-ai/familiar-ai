@@ -18,6 +18,21 @@ from dataclasses import dataclass, field
 
 # Tools that move or use the body's senses.  Withheld on social turns.
 PERCEPTION_TOOLS = frozenset({"see", "look", "walk"})
+# After this many see() calls in one turn a small model must speak before looking again.
+MAX_SEE_BEFORE_SAY = 2
+
+_SAY_JUNK_RE = re.compile(r"(\\n|[{}\]\[`]|</?[a-z_]+>)+\s*$")
+
+
+def clean_say_text(text: str) -> str:
+    """Strip tool-syntax residue that small models leak into say() arguments (`}\n`, tags)."""
+    return _SAY_JUNK_RE.sub("", (text or "").strip()).strip()
+
+
+def perception_exhausted(tool_names: list[str]) -> bool:
+    """True once the turn has looked enough; further see()/look() add nothing but delay."""
+    return tool_names.count("see") >= MAX_SEE_BEFORE_SAY
+
 
 # Utterance kinds.  "social" kinds get the perception tools withheld.
 KIND_VISUAL_REQUEST = "visual_request"  # 見て／どう見える／部屋の様子
