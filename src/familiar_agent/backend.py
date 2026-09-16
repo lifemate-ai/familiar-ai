@@ -15,6 +15,7 @@ from typing import TYPE_CHECKING, Any, cast
 
 if TYPE_CHECKING:
     from .config import AgentConfig
+    from .ollama_backend import OllamaBackend
 
 # ── Prompt-based tool calling ─────────────────────────────────────
 # Used when the model doesn't support native function calling (most local VLMs).
@@ -372,7 +373,14 @@ class AnthropicBackend:
 class OpenAICompatibleBackend:
     """Backend for any OpenAI-compatible endpoint: Ollama, vllm, lm-studio, etc."""
 
-    def __init__(self, api_key: str, model: str, base_url: str, tools_mode: str = "prompt") -> None:
+    def __init__(
+        self,
+        api_key: str,
+        model: str,
+        base_url: str,
+        tools_mode: str = "prompt",
+        reasoning_effort: str | None = None,
+    ) -> None:
         from openai import AsyncOpenAI
 
         self.client = AsyncOpenAI(api_key=api_key or "local", base_url=base_url)
@@ -380,6 +388,14 @@ class OpenAICompatibleBackend:
         self.tools_mode = tools_mode  # "native" | "prompt"
         # Real OpenAI API uses max_completion_tokens; local models use max_tokens
         self._use_completion_tokens = "api.openai.com" in base_url
+        # Reasoning models (qwen3.x on Ollama, o-series) otherwise spend the whole
+        # max_tokens budget thinking and return an empty message.  "none" disables it.
+        self.reasoning_effort = reasoning_effort
+
+    def _extra_kwargs(self) -> dict[str, Any]:
+        if self.reasoning_effort:
+            return {"reasoning_effort": self.reasoning_effort}
+        return {}
 
     # ── message factories ─────────────────────────────────────────
 
@@ -512,6 +528,7 @@ class OpenAICompatibleBackend:
         stream = await self.client.chat.completions.create(  # type: ignore[call-overload]
             model=self.model,
             **{tokens_key: max_tokens},
+            **self._extra_kwargs(),
             messages=flat,
             stream=True,
         )
@@ -552,6 +569,7 @@ class OpenAICompatibleBackend:
             tokens_key: max_tokens,
             "messages": flat,
             "stream": True,
+            **self._extra_kwargs(),
         }
         if oai_tools:
             kwargs["tools"] = oai_tools
@@ -645,6 +663,7 @@ class OpenAICompatibleBackend:
             resp = await self.client.chat.completions.create(  # type: ignore[call-overload]
                 model=self.model,
                 **{tokens_key: max_tokens},
+                **self._extra_kwargs(),
                 messages=[{"role": "user", "content": prompt}],
             )
             return (resp.choices[0].message.content or "").strip()
@@ -1289,6 +1308,17 @@ class CLIBackend:
         return await self._run(prompt)
 
 
+def _ollama_backend(model: str, base_url: str, thinking_mode: str, num_ctx: int) -> "OllamaBackend":
+    from .ollama_backend import OllamaBackend, think_flag
+
+    return OllamaBackend(
+        model=model,
+        base_url=base_url,
+        think=think_flag(thinking_mode),
+        num_ctx=num_ctx,
+    )
+
+
 def create_backend(
     config: "AgentConfig",
 ) -> (
@@ -1298,6 +1328,7 @@ def create_backend(
     | GLMBackend
     | GeminiBackend
     | CLIBackend
+    | "OllamaBackend"
 ):
     """Factory: pick backend based on PLATFORM env var / config.
 
@@ -1305,6 +1336,7 @@ def create_backend(
       anthropic  — Anthropic Claude (default)
       gemini     — Google Gemini via native google-genai SDK
       openai     — OpenAI API (or compatible via BASE_URL)
+      ollama     — Ollama native /api/chat (BASE_URL=http://localhost:11434, MODEL=qwen3.5:9b)
       kimi       — Moonshot AI Kimi K2.5 (api.moonshot.ai/v1)
       glm        — Z.AI GLM API (api.z.ai/api/paas/v4); set ZAI_API_KEY
       cli        — any CLI LLM tool via stdin/stdout (MODEL = the command)
@@ -1314,6 +1346,12 @@ def create_backend(
         model = config.model or "gemini-2.5-flash"
         logger.info("Using Gemini backend: %s", model)
         return GeminiBackend(api_key=config.api_key, model=model)
+    if config.platform == "ollama":
+        model = config.model or "qwen3.5:9b"
+        logger.info(
+            "Using Ollama backend: %s @ %s (think=%s)", model, config.base_url, config.thinking_mode
+        )
+        return _ollama_backend(model, config.base_url, config.thinking_mode, config.ollama_num_ctx)
     if config.platform == "openai":
         model = config.model or "gpt-4o-mini"
         # If BASE_URL not explicitly set, use the real OpenAI endpoint
@@ -1340,6 +1378,7 @@ def create_backend(
             model=model,
             base_url=base_url,
             tools_mode=tools_mode,
+            reasoning_effort=None if is_real_openai else _local_reasoning_effort(config),
         )
     if config.platform == "kimi":
         # Moonshot AI Kimi K2.5 — needs its own backend to handle reasoning_content
@@ -1368,14 +1407,23 @@ def create_backend(
     )
 
 
+def _local_reasoning_effort(config: "AgentConfig") -> str | None:
+    """For OpenAI-compatible local servers: disable reasoning unless explicitly enabled."""
+    return None if config.thinking_mode in ("adaptive", "extended") else "none"
+
+
 def create_utility_backend(
     config: "AgentConfig",
-) -> AnthropicBackend | OpenAICompatibleBackend | KimiBackend | GLMBackend | GeminiBackend | None:
+) -> "AnthropicBackend | OpenAICompatibleBackend | KimiBackend | GLMBackend | GeminiBackend | OllamaBackend | None":
     """Create a separate backend for utility LLM calls (summaries, emotion, etc.).
 
     Returns None if UTILITY_PLATFORM is not configured — caller should
     fall back to the main conversation backend.
     """
+    if config.utility_platform == "ollama":
+        model = config.utility_model or config.model or "qwen3.5:9b"
+        logger.info("Using Ollama utility backend: %s", model)
+        return _ollama_backend(model, config.base_url, "disabled", config.ollama_num_ctx)
     if not config.utility_platform or not config.utility_api_key:
         return None
 
@@ -1412,12 +1460,16 @@ def create_utility_backend(
 
 def create_scene_backend(
     config: "AgentConfig",
-) -> AnthropicBackend | OpenAICompatibleBackend | KimiBackend | GLMBackend | GeminiBackend | None:
+) -> "AnthropicBackend | OpenAICompatibleBackend | KimiBackend | GLMBackend | GeminiBackend | OllamaBackend | None":
     """Create a separate backend for scene entity extraction (cheap/local model).
 
     Returns None if SCENE_PLATFORM is not configured — caller should fall back
     to the utility backend or main backend.
     """
+    if config.scene_platform == "ollama":
+        model = config.scene_model or config.model or "qwen3.5:9b"
+        logger.info("Using Ollama scene backend: %s", model)
+        return _ollama_backend(model, config.base_url, "disabled", config.ollama_num_ctx)
     if not config.scene_platform or not config.scene_api_key:
         return None
 

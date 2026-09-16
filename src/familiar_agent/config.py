@@ -144,7 +144,7 @@ class AgentConfig:
         default_factory=lambda: os.environ.get("COMPANION_NAME", _default_companion_name())
     )
 
-    # Platform: "anthropic" | "gemini" | "openai" | "kimi" | "glm"
+    # Platform: "anthropic" | "gemini" | "openai" | "ollama" | "kimi" | "glm" | "cli"
     platform: str = field(default_factory=lambda: os.environ.get("PLATFORM", "anthropic"))
 
     # Unified API key (used for whichever platform is selected)
@@ -159,6 +159,11 @@ class AgentConfig:
         default_factory=lambda: os.environ.get("BASE_URL", "http://localhost:11434/v1")
     )
     tools_mode: str = field(default_factory=lambda: os.environ.get("TOOLS_MODE", "prompt"))
+
+    # Ollama native backend only: context window requested at load time.
+    ollama_num_ctx: int = field(
+        default_factory=lambda: int(os.environ.get("OLLAMA_NUM_CTX", "16384"))
+    )
 
     # Thinking mode: "auto" | "adaptive" | "extended" | "disabled"
     # "auto" = adaptive for claude-sonnet-4/opus-4, disabled for others
