@@ -107,12 +107,22 @@ class TTSConfig:
     output: str = field(default_factory=lambda: os.environ.get("TTS_OUTPUT", "local"))
 
 
+def resolve_memory_db_path(raw: str) -> str:
+    """Normalise MEMORY_DB_PATH: a directory (or a path without .db) means
+    ``<dir>/observations.db``; an explicit file path is used as-is."""
+    path = Path(raw).expanduser()
+    if path.suffix != ".db":
+        path = path / "observations.db"
+    return str(path)
+
+
 @dataclass
 class MemoryConfig:
+    # SQLite file for observations/feelings/conversations. Accepts a directory
+    # or a file path; defaults to ~/.familiar_ai/observations.db.
     db_path: str = field(
-        default_factory=lambda: os.environ.get(
-            "MEMORY_DB_PATH",
-            str(Path.home() / ".claude" / "memories"),
+        default_factory=lambda: resolve_memory_db_path(
+            os.environ.get("MEMORY_DB_PATH", str(Path.home() / ".familiar_ai"))
         )
     )
 

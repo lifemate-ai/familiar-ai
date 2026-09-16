@@ -12,10 +12,11 @@ Why not the OpenAI-compatible ``/v1`` route?
 
 from __future__ import annotations
 
+import contextlib
 import json
 import logging
 import uuid
-from collections.abc import AsyncIterator, Callable
+from collections.abc import AsyncGenerator, Callable
 from typing import Any
 
 from .backend import ToolCall, TurnResult
@@ -25,7 +26,7 @@ logger = logging.getLogger(__name__)
 DEFAULT_BASE_URL = "http://localhost:11434"
 DEFAULT_NUM_CTX = 16384
 
-StreamFactory = Callable[[dict[str, Any]], AsyncIterator[dict[str, Any]]]
+StreamFactory = Callable[[dict[str, Any]], AsyncGenerator[dict[str, Any], None]]
 
 
 def normalize_base_url(url: str) -> str:
@@ -158,7 +159,7 @@ class OllamaBackend:
 
     # ── HTTP ──────────────────────────────────────────────────────
 
-    async def _http_stream(self, body: dict[str, Any]) -> AsyncIterator[dict[str, Any]]:
+    async def _http_stream(self, body: dict[str, Any]) -> AsyncGenerator[dict[str, Any], None]:
         import aiohttp
 
         timeout = aiohttp.ClientTimeout(total=None, sock_read=600)
@@ -208,21 +209,16 @@ class OllamaBackend:
         input_tokens = 0
         output_tokens = 0
 
-        async for chunk in self._stream_factory(body):
-            if "error" in chunk:
-                raise RuntimeError(f"Ollama error: {chunk['error']}")
-            msg = chunk.get("message") or {}
-            if msg.get("thinking"):
-                thinking_chunks.append(msg["thinking"])
-            if msg.get("content"):
-                text_chunks.append(msg["content"])
-                if on_text:
-                    on_text(msg["content"])
-            for tc in msg.get("tool_calls") or []:
-                raw_tool_calls.append(tc)
-            if chunk.get("done"):
-                input_tokens = int(chunk.get("prompt_eval_count") or 0)
-                output_tokens = int(chunk.get("eval_count") or 0)
+        # aclosing() guarantees the HTTP session inside the generator is closed
+        # even when we stop early (error chunk, cancellation, consumer exception).
+        async with contextlib.aclosing(self._stream_factory(body)) as stream:
+            async for chunk in stream:
+                await self._absorb_chunk(
+                    chunk, text_chunks, thinking_chunks, raw_tool_calls, on_text
+                )
+                if chunk.get("done"):
+                    input_tokens = int(chunk.get("prompt_eval_count") or 0)
+                    output_tokens = int(chunk.get("eval_count") or 0)
 
         tool_calls = [
             ToolCall(
@@ -252,6 +248,26 @@ class OllamaBackend:
             raw_assistant,
         )
 
+    @staticmethod
+    async def _absorb_chunk(
+        chunk: dict[str, Any],
+        text_chunks: list[str],
+        thinking_chunks: list[str],
+        raw_tool_calls: list[dict[str, Any]],
+        on_text: Callable[[str], None] | None,
+    ) -> None:
+        if "error" in chunk:
+            raise RuntimeError(f"Ollama error: {chunk['error']}")
+        msg = chunk.get("message") or {}
+        if msg.get("thinking"):
+            thinking_chunks.append(msg["thinking"])
+        if msg.get("content"):
+            text_chunks.append(msg["content"])
+            if on_text:
+                on_text(msg["content"])
+        for tc in msg.get("tool_calls") or []:
+            raw_tool_calls.append(tc)
+
     async def complete(self, prompt: str, max_tokens: int) -> str:
         if not prompt or not prompt.strip():
             return ""  # never ask a model to complete nothing — it asks back
@@ -259,10 +275,11 @@ class OllamaBackend:
         body["messages"] = [m for m in body["messages"] if m["content"]]
         try:
             chunks: list[str] = []
-            async for chunk in self._stream_factory(body):
-                content = (chunk.get("message") or {}).get("content")
-                if content:
-                    chunks.append(content)
+            async with contextlib.aclosing(self._stream_factory(body)) as stream:
+                async for chunk in stream:
+                    content = (chunk.get("message") or {}).get("content")
+                    if content:
+                        chunks.append(content)
             return "".join(chunks).strip()
         except Exception as e:
             logger.warning("complete() failed: %s", e)

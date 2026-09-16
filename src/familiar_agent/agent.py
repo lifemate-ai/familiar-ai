@@ -442,21 +442,24 @@ def _companion_mood_heuristic(text: str) -> str:
 
 
 # Day summary prompt — condense a day's observations into a diary-like entry
+_DAY_SUMMARY_MIN_OBSERVATIONS = 5
+
 _DAY_SUMMARY_PROMPT = """\
 You are writing a diary entry about this day from your own first-person memory.
-Recall the flow of the day: what happened in the morning, then afternoon, then evening.
+Recall the flow of the day in the order the records below happened.
 Capture how your feelings changed as events unfolded — what made you happy, 
 what frustrated you, what surprised you, what lingered in your mind.
 
 Rules:
+- Use ONLY the records below. Never invent events, people, places or feelings
+  that are not recorded. If the record is thin, write fewer sentences.
 - Write in first person, as someone remembering their own lived day
-- Follow the chronological arc: morning → afternoon → evening
 - Include specific details: what you saw, who you talked to, what was said
 - Show emotional shifts: how one event changed how you felt about the next
 - Do NOT list events — weave them into a flowing narrative
 - Do NOT include titles, headers, or markdown formatting
 - Start directly with the first sentence of the entry
-- 5-8 sentences. Write in {lang}.
+- 2-8 sentences, proportional to how much actually happened. Write in {lang}.
 
 {observations}
 
@@ -643,7 +646,9 @@ class EmbodiedAgent:
         self._social_reflex: bool = _reflex_env in ("1", "on", "true") or (
             _reflex_env == "auto" and self._prompt_profile == "compact"
         )
-        self._memory = ObservationMemory()
+        _memory_cfg = getattr(config, "memory", None)
+        _db_path = getattr(_memory_cfg, "db_path", None)
+        self._memory = ObservationMemory(db_path=_db_path) if _db_path else ObservationMemory()
         self._memory_worker = MemoryJobWorker(self._memory)
         self._memory_tool = MemoryTool(self._memory)
         self._tom_tool = ToMTool(
@@ -1714,8 +1719,12 @@ class EmbodiedAgent:
         """Generate and save a day summary for the given date."""
         try:
             observations = await asyncio.to_thread(self._memory.get_observations_for_date, date, 50)
-            if not observations:
-                logger.info("No observations for %s, skipping day summary", date)
+            if len(observations) < _DAY_SUMMARY_MIN_OBSERVATIONS:
+                # A handful of records is not a day. Asked for a "morning → evening" arc
+                # anyway, small models fill the gaps with invented events.
+                logger.info(
+                    "Only %d observation(s) for %s, skipping day summary", len(observations), date
+                )
                 return
 
             # Build a concise transcript for the LLM — keep it short

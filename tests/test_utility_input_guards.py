@@ -81,3 +81,51 @@ async def test_ollama_complete_ignores_blank_prompt() -> None:
     be = OllamaBackend("m", stream_factory=spy)
     assert await be.complete("  \n", 10) == ""
     assert calls == []
+
+
+# ── memory path, day-summary grounding, session cleanup ──────────────────────
+
+
+def test_memory_db_path_resolution(monkeypatch) -> None:
+    from pathlib import Path
+
+    from familiar_agent.config import MemoryConfig, resolve_memory_db_path
+
+    assert resolve_memory_db_path("/tmp/x").endswith("/tmp/x/observations.db")
+    assert resolve_memory_db_path("/tmp/x/custom.db").endswith("/tmp/x/custom.db")
+    monkeypatch.setenv("MEMORY_DB_PATH", "/tmp/fa-test-dir")
+    assert MemoryConfig().db_path == "/tmp/fa-test-dir/observations.db"
+    monkeypatch.delenv("MEMORY_DB_PATH")
+    assert MemoryConfig().db_path == str(Path.home() / ".familiar_ai" / "observations.db")
+
+
+@pytest.mark.asyncio
+async def test_day_summary_skips_thin_days() -> None:
+    agent = _agent()
+    agent._memory.get_observations_for_date = MagicMock(
+        return_value=[
+            {"time": "03:00", "kind": "conversation", "emotion": "neutral", "content": "x"}
+        ]
+        * 3
+    )
+    agent._memory.save_async = AsyncMock()
+    await agent._generate_day_summary("2026-09-17")
+    agent._utility_backend.complete.assert_not_awaited()
+    agent._memory.save_async.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_ollama_stream_closes_generator_on_error_chunk() -> None:
+    closed = {"n": 0}
+
+    async def stream(body):
+        try:
+            yield {"error": "model not found"}
+            yield {"message": {"content": "never"}, "done": True}
+        finally:
+            closed["n"] += 1
+
+    be = OllamaBackend("m", stream_factory=stream)
+    with pytest.raises(RuntimeError):
+        await be.stream_turn("s", [], [], 10)
+    assert closed["n"] == 1
