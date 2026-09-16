@@ -205,3 +205,22 @@ def test_ptz_params_prefer_explicit_overrides():
     assert username == "ptz-user"
     assert password == "ptz-pass"
     assert port == 8899
+
+
+@pytest.mark.asyncio
+async def test_aclose_closes_onvif_transports() -> None:
+    """aclose() must close the ONVIF client (aiohttp sessions) and drop PTZ handles."""
+    from unittest.mock import AsyncMock, MagicMock
+
+    from familiar_agent.tools.camera import CameraTool
+
+    tool = CameraTool.__new__(CameraTool)
+    cam = MagicMock()
+    cam.close = AsyncMock()
+    tool._cam_onvif = cam
+    tool._ptz = MagicMock()
+    await tool.aclose()
+    cam.close.assert_awaited_once()
+    assert tool._cam_onvif is None and tool._ptz is None
+    await tool.aclose()  # idempotent
+    cam.close.assert_awaited_once()
