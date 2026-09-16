@@ -25,6 +25,11 @@ This project adheres to [Semantic Versioning](https://semver.org/).
 - Lightweight adaptive confidence updates for semantic facts and behavior policies, including revision history for experience-driven value shifts
 - Lightweight layered self continuity with inertial proto-self updates, recent intention-result traces, and persistent active concerns
 
+### Fixed
+- `MEMORY_DB_PATH` is honoured (it was parsed but never used; the DB path was hardcoded)
+- Utility calls skip empty input; the shutdown self-narrative rejects request-for-input replies; day summaries need at least 5 records and may not invent events
+- Ollama backend closes its HTTP session when a stream ends early
+
 ### Changed
 - OpenAI-compatible backend sends `reasoning_effort=none` to local servers unless thinking is explicitly enabled (qwen3.x otherwise returns empty replies)
 - GUI settings dialog now keeps JP labels fully visible (including short labels like `名`), refreshed the app to a bright, soft, rounded light theme, split first-turn startup status from "thinking", and increased GUI font sizing for readability.

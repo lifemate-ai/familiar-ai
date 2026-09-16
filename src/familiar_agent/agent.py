@@ -325,6 +325,27 @@ Message: {text}
 Reply with the label only (one English word)."""
 
 
+_NARRATIVE_REJECT_RE = re.compile(
+    r"(要約|教えて|ください|いただけ|お知らせ|provide|please share|summary of)", re.IGNORECASE
+)
+
+
+def _looks_like_self_narrative(text: str) -> bool:
+    """Reject utility replies that are not a narrative sentence.
+
+    Small models answer an under-specified prompt with a request for more input
+    ("「今日起きたこと（要約）」を教えていただければ…") or with markdown; neither
+    belongs in the diary.
+    """
+    if not text:
+        return False
+    if len(text) > 120 or text.startswith(("**", "#", "-", "・")):
+        return False
+    if text.rstrip().endswith(("?", "？", "ば", "…")):
+        return False
+    return _NARRATIVE_REJECT_RE.search(text) is None
+
+
 def _companion_mood_heuristic(text: str) -> str:
     """Fast keyword-based mood classifier used when no dedicated utility backend exists.
 
@@ -421,21 +442,24 @@ def _companion_mood_heuristic(text: str) -> str:
 
 
 # Day summary prompt — condense a day's observations into a diary-like entry
+_DAY_SUMMARY_MIN_OBSERVATIONS = 5
+
 _DAY_SUMMARY_PROMPT = """\
 You are writing a diary entry about this day from your own first-person memory.
-Recall the flow of the day: what happened in the morning, then afternoon, then evening.
+Recall the flow of the day in the order the records below happened.
 Capture how your feelings changed as events unfolded — what made you happy, 
 what frustrated you, what surprised you, what lingered in your mind.
 
 Rules:
+- Use ONLY the records below. Never invent events, people, places or feelings
+  that are not recorded. If the record is thin, write fewer sentences.
 - Write in first person, as someone remembering their own lived day
-- Follow the chronological arc: morning → afternoon → evening
 - Include specific details: what you saw, who you talked to, what was said
 - Show emotional shifts: how one event changed how you felt about the next
 - Do NOT list events — weave them into a flowing narrative
 - Do NOT include titles, headers, or markdown formatting
 - Start directly with the first sentence of the entry
-- 5-8 sentences. Write in {lang}.
+- 2-8 sentences, proportional to how much actually happened. Write in {lang}.
 
 {observations}
 
@@ -622,7 +646,9 @@ class EmbodiedAgent:
         self._social_reflex: bool = _reflex_env in ("1", "on", "true") or (
             _reflex_env == "auto" and self._prompt_profile == "compact"
         )
-        self._memory = ObservationMemory()
+        _memory_cfg = getattr(config, "memory", None)
+        _db_path = getattr(_memory_cfg, "db_path", None)
+        self._memory = ObservationMemory(db_path=_db_path) if _db_path else ObservationMemory()
         self._memory_worker = MemoryJobWorker(self._memory)
         self._memory_tool = MemoryTool(self._memory)
         self._tom_tool = ToMTool(
@@ -1276,6 +1302,8 @@ class EmbodiedAgent:
 
     async def _infer_emotion(self, text: str) -> str:
         """Ask the LLM to label the emotion of a response. Returns label string."""
+        if not text or not text.strip():
+            return "neutral"
         label = await self._utility_backend.complete(
             _EMOTION_PROMPT.format(text=text[:400]), max_tokens=10
         )
@@ -1691,8 +1719,12 @@ class EmbodiedAgent:
         """Generate and save a day summary for the given date."""
         try:
             observations = await asyncio.to_thread(self._memory.get_observations_for_date, date, 50)
-            if not observations:
-                logger.info("No observations for %s, skipping day summary", date)
+            if len(observations) < _DAY_SUMMARY_MIN_OBSERVATIONS:
+                # A handful of records is not a day. Asked for a "morning → evening" arc
+                # anyway, small models fill the gaps with invented events.
+                logger.info(
+                    "Only %d observation(s) for %s, skipping day summary", len(observations), date
+                )
                 return
 
             # Build a concise transcript for the LLM — keep it short
@@ -1885,6 +1917,8 @@ class EmbodiedAgent:
 
     async def extract_curiosity(self, exploration_result: str) -> str | None:
         """Ask the LLM what was most curious/interesting in the exploration."""
+        if not exploration_result or not exploration_result.strip():
+            return None
         try:
             none_word = _t("curiosity_none")
             text = await self._utility_backend.complete(
@@ -1972,6 +2006,13 @@ class EmbodiedAgent:
                 recent = await self._memory.recall_async("", n=5)
                 summary_hint = " / ".join(m.get("content", "")[:60] for m in recent[:3])
 
+            if not summary_hint.strip():
+                # Nothing to narrate from: a fresh DB or a session that stored no memories.
+                # Sending an empty hint makes small models ask for the summary back, and
+                # that request used to be saved as the day's self-narrative.
+                logger.info("No memories for today — skipping self narrative")
+                return
+
             mood, _ = self._decayed_mood()
             prompt = (
                 f"今日起きたこと（要約）:\n{summary_hint}\n\n"
@@ -1983,9 +2024,12 @@ class EmbodiedAgent:
                 self._utility_backend.complete(prompt, max_tokens=120),
                 timeout=15.0,
             )
-            if text and text.strip():
-                self._self_narrative.write(text.strip(), mood=mood)
-                logger.info("Self-narrative written: %s", text.strip()[:60])
+            text = (text or "").strip()
+            if not _looks_like_self_narrative(text):
+                logger.info("Self-narrative rejected (not a narrative): %s", text[:60])
+                return
+            self._self_narrative.write(text, mood=mood)
+            logger.info("Self-narrative written: %s", text[:60])
         except Exception as e:
             logger.warning("Could not write today's self narrative: %s", e)
 
