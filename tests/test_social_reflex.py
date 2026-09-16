@@ -133,3 +133,20 @@ async def test_agent_withholds_camera_tools_on_social_turn() -> None:
         seen_tools.clear()
         await agent.run("見て見て、これ買ったやつ！")
         assert seen_tools == [["say", "see", "look", "remember"]]
+
+
+def test_unwrap_textual_say() -> None:
+    assert (
+        sr.unwrap_textual_say('say("お疲れさん。今日はしんどかったんやな。")')
+        == "お疲れさん。今日はしんどかったんやな。"
+    )
+    assert sr.unwrap_textual_say("say('ok')") == "ok"
+    assert sr.unwrap_textual_say("say(「おかえり」)。") == "おかえり"
+    assert sr.unwrap_textual_say("普通の文。") == "普通の文。"
+    assert sr.normalize_small_model_text('<tool_code>x</tool_code>\nsay("やあ")') == "やあ"
+
+
+def test_share_joy_and_sleep_classification() -> None:
+    assert sr.classify_turn("今日、ずっと詰まってたバグ直せたわ。").kind == sr.KIND_SHARE_JOY
+    assert sr.classify_turn("最近ぜんぜん寝れてへんわ。").kind == sr.KIND_VENTING
+    assert not sr.classify_turn("最近ぜんぜん寝れてへんわ。").camera_ok

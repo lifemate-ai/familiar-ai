@@ -211,3 +211,33 @@ def test_openai_compatible_local_disables_reasoning_by_default(monkeypatch) -> N
     assert be._extra_kwargs() == {"reasoning_effort": "none"}
     be2 = create_backend(_config(platform="openai", model="qwen3.5:9b", thinking_mode="extended"))
     assert be2.reasoning_effort is None
+
+
+@pytest.mark.asyncio
+async def test_stream_turn_retries_once_on_parse_glitch() -> None:
+    calls = {"n": 0}
+
+    async def flaky(body):
+        calls["n"] += 1
+        if calls["n"] == 1:
+            yield {"error": "XML syntax error on line 4: element <function> closed by </parameter>"}
+            return
+        yield {"message": {"content": "ok"}, "done": True}
+
+    be = OllamaBackend("m", stream_factory=flaky)
+    result, _ = await be.stream_turn("s", [], [], 10)
+    assert result.text == "ok" and calls["n"] == 2
+
+
+@pytest.mark.asyncio
+async def test_stream_turn_does_not_retry_other_errors() -> None:
+    calls = {"n": 0}
+
+    async def down(body):
+        calls["n"] += 1
+        yield {"error": "model not found"}
+
+    be = OllamaBackend("m", stream_factory=down)
+    with pytest.raises(RuntimeError):
+        await be.stream_turn("s", [], [], 10)
+    assert calls["n"] == 1

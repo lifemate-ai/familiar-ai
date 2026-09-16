@@ -28,6 +28,7 @@ KIND_DEFLECTION = "deflection"  # 別に／なんもない
 KIND_INDIRECT = "indirect_request"  # ちょっと〜が…
 KIND_DISCLOSURE = "disclosure"  # 明日面接／病院
 KIND_IMPLICATURE = "implicature"  # いいよね、若いって（本音は別にある）
+KIND_SHARE_JOY = "share_joy"  # バグ直せた／受かった（喜びの共有）
 KIND_GENERAL = "general"
 
 SOCIAL_KINDS = frozenset(
@@ -38,6 +39,7 @@ SOCIAL_KINDS = frozenset(
         KIND_INDIRECT,
         KIND_DISCLOSURE,
         KIND_IMPLICATURE,
+        KIND_SHARE_JOY,
     }
 )
 
@@ -71,6 +73,7 @@ _GREETING = re.compile(
 )
 _VENTING = re.compile(
     r"(疲れ|しんど|つら|辛|だる|きつ|むかつ|イライラ|腹立|怒られ|言われ|最悪|うざ|もう嫌|泣き|"
+    r"寝れ|寝られ|眠れ|寝てない|寝不足|"
     r"exhaust|tired|rough day|frustrat|annoy|upset|my boss)",
     re.IGNORECASE,
 )
@@ -85,6 +88,11 @@ _IMPLICATURE = re.compile(
 )
 _INDIRECT = re.compile(
     r"(ちょっと.*(が|は)[…\.]{1,3}$|少し.*(が|は)[…\.]{1,3}$|a bit\.{2,}$|kind of\.{2,}$)",
+    re.IGNORECASE,
+)
+_SHARE_JOY = re.compile(
+    r"(直せた|直った|できた|出来た|受かった|合格|うまくいった|終わった|終えた|やっと|達成|"
+    r"finally|fixed it|passed|nailed it|got it working)",
     re.IGNORECASE,
 )
 _DISCLOSURE = re.compile(
@@ -123,6 +131,8 @@ def classify_turn(text: str) -> SocialTurn:
         return SocialTurn(
             KIND_DISCLOSURE, camera_ok=False, note="remember(companion_status) then say()"
         )
+    if _SHARE_JOY.search(t):
+        return SocialTurn(KIND_SHARE_JOY, camera_ok=False, note="share the joy; no follow-up quiz")
     return SocialTurn(KIND_GENERAL, camera_ok=True)
 
 
@@ -146,6 +156,26 @@ def strip_hallucinated_tool_text(text: str) -> str:
     cleaned = _STAGE_DIRECTION_RE.sub("", cleaned)
     cleaned = _TTS_TAG_RE.sub("", cleaned)
     return re.sub(r"\n{3,}", "\n\n", cleaned).strip()
+
+
+_TEXTUAL_SAY_RE = re.compile(
+    r"^\s*say\(\s*(?P<q>[\"'“「])(?P<body>.*?)(?:[\"'”」])\s*\)\s*[。.]?\s*$", re.DOTALL
+)
+
+
+def unwrap_textual_say(text: str) -> str:
+    """``say("…")`` written as prose → the inner text.
+
+    Small models imitate the examples literally instead of emitting a tool call;
+    the words are still theirs, so speak them.
+    """
+    m = _TEXTUAL_SAY_RE.match(text or "")
+    return m.group("body").strip() if m else (text or "")
+
+
+def normalize_small_model_text(text: str) -> str:
+    """Full cleanup pipeline for prose from a small model."""
+    return unwrap_textual_say(strip_hallucinated_tool_text(text))
 
 
 _SENTENCE_SPLIT = re.compile(r"(?<=[。！？!?])\s*|\n+")

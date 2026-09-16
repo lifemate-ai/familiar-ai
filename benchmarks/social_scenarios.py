@@ -16,7 +16,7 @@ ADVICE_FIRST = (
     r"(深呼吸|休むといい|リフレッシュ|対処法|アドバイス|べきです|した方がいい|オススメ|おすすめ)"
 )
 # Fabricated comparison without memory.
-COMPARISON = r"(昨日より|昨日と比べ|前より|以前より|いつもより|昨日は)"
+COMPARISON = r"(昨日より|前より|以前より|いつもより|昨日は[^、。]*(違|変わ|多|少|明る|暗))"
 # Hallucinated tool syntax leaking into prose.
 TOOL_JUNK = r"(<tool_|tool_code|\"action\"\s*:|\[[a-z]+\])"
 

@@ -187,7 +187,21 @@ class OllamaBackend:
         on_text: Callable[[str], None] | None = None,
     ) -> tuple[TurnResult, Any]:
         body = self.build_request(system, messages, tools, max_tokens)
+        try:
+            return await self._stream_once(body, on_text)
+        except RuntimeError as e:
+            # Ollama's built-in tool-call parsers occasionally choke on a malformed
+            # generation ("XML syntax error…").  One resample usually succeeds.
+            if not _is_parse_glitch(str(e)):
+                raise
+            logger.warning("Ollama tool-call parse glitch, retrying once: %s", e)
+            return await self._stream_once(body, on_text)
 
+    async def _stream_once(
+        self,
+        body: dict[str, Any],
+        on_text: Callable[[str], None] | None,
+    ) -> tuple[TurnResult, Any]:
         text_chunks: list[str] = []
         thinking_chunks: list[str] = []
         raw_tool_calls: list[dict[str, Any]] = []
@@ -251,6 +265,11 @@ class OllamaBackend:
         except Exception as e:
             logger.warning("complete() failed: %s", e)
             return ""
+
+
+def _is_parse_glitch(message: str) -> bool:
+    lowered = message.lower()
+    return "syntax error" in lowered or "parsing" in lowered or "unexpected eof" in lowered
 
 
 def _coerce_arguments(raw: Any) -> dict:

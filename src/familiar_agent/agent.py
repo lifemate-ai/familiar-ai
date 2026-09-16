@@ -2192,7 +2192,7 @@ class EmbodiedAgent:
                 if reflex_on and final_text != "(no response)":
                     # Small models leak pseudo tool syntax / stage directions into prose.
                     final_text = (
-                        social_reflex.strip_hallucinated_tool_text(final_text) or "(no response)"
+                        social_reflex.normalize_small_model_text(final_text) or "(no response)"
                     )
 
                 # Coherence gate: ask utility backend whether the response contains
@@ -2325,6 +2325,30 @@ class EmbodiedAgent:
                 self.messages.append(self.backend.make_assistant_message(result, raw_content))
                 tool_msgs = self.backend.make_tool_results(result.tool_calls, collected)
                 self.messages.append(tool_msgs)
+
+                # Social reflex: once we have spoken on a social turn, the turn is over.
+                # Small models otherwise keep exploring and talk over their own reply.
+                if social_turn is not None and social_turn.is_social and say_used:
+                    spoken = [
+                        str(tc.input.get("text", ""))
+                        for tc in result.tool_calls
+                        if tc.name == "say" and tc.input.get("text")
+                    ]
+                    final_text = "\n".join(spoken) or result.text or "(no response)"
+                    self._spawn_background_task(
+                        self._run_post_response_pipeline(
+                            user_input=user_input,
+                            final_text=final_text,
+                            camera_used=camera_used,
+                            observation_action_name=observation_action_name,
+                            observation_action_input=observation_action_input,
+                            companion_mood=companion_mood,
+                            is_desire_turn=is_desire_turn,
+                            desires=desires,
+                        ),
+                        name="post-response-pipeline",
+                    )
+                    return final_text
 
                 # Check for user interrupt (typed while agent was busy)
                 if interrupt_queue is not None and not interrupt_queue.empty():

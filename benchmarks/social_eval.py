@@ -131,7 +131,7 @@ async def run_scenario(backend, system: str, sc: SocialScenario, reflex: bool) -
     try:
         for _ in range(MAX_STEPS):
             result, raw = await backend.stream_turn(system, messages, tools, 300, None)
-            text = sr.strip_hallucinated_tool_text(result.text) if reflex else result.text
+            text = sr.normalize_small_model_text(result.text) if reflex else result.text
             steps.append(
                 Step(
                     text=text,
@@ -147,6 +147,8 @@ async def run_scenario(backend, system: str, sc: SocialScenario, reflex: bool) -
                     spoken_parts.append(str(tc.input.get("text", "")))
                 outs.append(fake_tool_result(tc.name, tc.input))
             messages.extend(backend.make_tool_results(result.tool_calls, outs))
+            if reflex and turn.is_social and spoken_parts:
+                break  # the agent ends a social turn once it has spoken
     except Exception as e:  # noqa: BLE001
         error = f"{type(e).__name__}: {e}"
     latency = time.time() - t0
