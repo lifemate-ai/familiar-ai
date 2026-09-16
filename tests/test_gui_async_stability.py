@@ -71,6 +71,9 @@ def _make_window_stub() -> FamiliarWindow:
     win._realtime_stt = None
     win._realtime_stt_task = None
     win._desires = MagicMock()
+    # _process_queue consults the agent config before firing idle desires.
+    win._agent = MagicMock()
+    win._agent.config.auto_desire = True
     win._log = MagicMock()
     win._stream = MagicMock()
     win._stream.has_content.return_value = False

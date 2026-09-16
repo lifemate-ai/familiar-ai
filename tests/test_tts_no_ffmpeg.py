@@ -92,6 +92,7 @@ async def test_tts_payload_requests_pcm_format() -> None:
     tool._lock = __import__("asyncio").Lock()
 
     captured_payload: dict = {}
+    captured_url = ""
 
     class FakeResp:
         status = 200
@@ -111,6 +112,9 @@ async def test_tts_payload_requests_pcm_format() -> None:
 
     class FakePost:
         def __init__(self, *a, **kw):
+            nonlocal captured_url
+            if a:
+                captured_url = str(a[0])
             captured_payload.update(kw.get("json", {}))
 
         async def __aenter__(self):
@@ -133,8 +137,13 @@ async def test_tts_payload_requests_pcm_format() -> None:
         with patch("aiohttp.ClientSession", return_value=FakeSession()):
             await tool.say("テスト")
 
-    assert captured_payload.get("output_format") == "pcm_16000", (
-        f"Expected output_format=pcm_16000, got: {captured_payload.get('output_format')}"
+    # ElevenLabs takes output_format as a query parameter; accept either placement.
+    requested = captured_payload.get("output_format") or (
+        "pcm_16000" if "output_format=pcm_16000" in captured_url else None
+    )
+    assert requested == "pcm_16000", (
+        f"Expected output_format=pcm_16000, got payload={captured_payload.get('output_format')} "
+        f"url={captured_url}"
     )
 
 

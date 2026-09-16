@@ -8,6 +8,10 @@ This project adheres to [Semantic Versioning](https://semver.org/).
 ## [Unreleased]
 
 ### Added
+- Native Ollama backend (`PLATFORM=ollama`) using `/api/chat`: native tool calls, `think` control, `OLLAMA_NUM_CTX`; `UTILITY_PLATFORM=ollama` / `SCENE_PLATFORM=ollama` need no API key
+- `PROMPT_PROFILE=compact` — short, example-driven system prompt for ~9B local models (auto-selected for local platforms)
+- Social reflex guards (`SOCIAL_REFLEX`) — perception tools withheld on social utterances, hallucinated tool syntax stripped, say-less replies spoken, social turns end once spoken
+- `benchmarks/social_eval.py` — deterministic Japanese social-behaviour evaluation for local models
 - Realtime STT via ElevenLabs Scribe v2 Realtime WebSocket API
   - Always-on, hands-free voice input with VAD auto-commit
   - Works in both REPL (`--no-tui`) and TUI modes
@@ -22,6 +26,7 @@ This project adheres to [Semantic Versioning](https://semver.org/).
 - Lightweight layered self continuity with inertial proto-self updates, recent intention-result traces, and persistent active concerns
 
 ### Changed
+- OpenAI-compatible backend sends `reasoning_effort=none` to local servers unless thinking is explicitly enabled (qwen3.x otherwise returns empty replies)
 - GUI settings dialog now keeps JP labels fully visible (including short labels like `名`), refreshed the app to a bright, soft, rounded light theme, split first-turn startup status from "thinking", and increased GUI font sizing for readability.
 - Interoception now reflects internal self-state signals in addition to time, uptime, social context, and mood
 - Prediction signals now distinguish external surprise from mismatches in the agent's own embodied actions

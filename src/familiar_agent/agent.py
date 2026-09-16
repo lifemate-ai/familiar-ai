@@ -12,7 +12,9 @@ from collections.abc import Callable, Coroutine, Mapping
 from datetime import datetime
 from typing import Any
 
+from . import social_reflex
 from .backend import create_backend, create_scene_backend, create_utility_backend
+from .prompt_profiles import compact_prompt, resolve_profile
 from .config import AgentConfig
 from .desires import DesireSystem, detect_worry_signal
 from .relationship import RelationshipTracker
@@ -613,6 +615,13 @@ class EmbodiedAgent:
         self._tts: TTSTool | None = None
         self._stt: STTTool | None = None
         self._me_md: str = self._load_me_md()  # loaded once; restart to pick up changes
+        # Prompt profile: "compact" for small local models, "full" for frontier models.
+        self._prompt_profile: str = resolve_profile(config.platform, config.base_url)
+        # Social reflex guards (tool withholding on social turns, text cleanup, auto-speak).
+        _reflex_env = os.environ.get("SOCIAL_REFLEX", "auto").strip().lower()
+        self._social_reflex: bool = _reflex_env in ("1", "on", "true") or (
+            _reflex_env == "auto" and self._prompt_profile == "compact"
+        )
         self._memory = ObservationMemory()
         self._memory_worker = MemoryJobWorker(self._memory)
         self._memory_tool = MemoryTool(self._memory)
@@ -1064,6 +1073,23 @@ class EmbodiedAgent:
         body_inner = "\n".join(parts)
         return f"(body\n{body_inner})"
 
+    def _get_body_description_compact(self) -> str:
+        """Plain-language body description for the compact prompt profile."""
+        lines = ["- Eyes: see() captures what the camera sees right now. No permission needed."]
+        if self._camera and self._camera.is_pan_tilt_available:
+            lines.append("- Neck: look() turns left/right/up/down. look() alone shows nothing.")
+        else:
+            lines.append("- Neck: fixed. You cannot turn your gaze.")
+        if self._mobility:
+            lines.append(
+                "- Legs: walk() moves the robot-vacuum body. The camera is a separate device, "
+                "so walking does not change what you see."
+            )
+        else:
+            lines.append("- Legs: none. You cannot move your location.")
+        lines.append("- Voice: only say() reaches the person. Text is a silent monologue.")
+        return "\n".join(lines)
+
     def _system_prompt(
         self,
         feelings_ctx: str = "",
@@ -1080,10 +1106,13 @@ class EmbodiedAgent:
                   AnthropicBackend marks this block with cache_control.
         variable — interoception, feelings, inner voice, plan; changes every turn.
         """
-        base = SYSTEM_PROMPT.format(max_steps=MAX_ITERATIONS)
-        # Dynamically replace (body ...) block based on actual hardware
-        body_desc = self._get_body_description()
-        base = re.sub(r"\(body.*?\)", body_desc, base, flags=re.DOTALL)
+        if getattr(self, "_prompt_profile", "full") == "compact":
+            base = compact_prompt(self._get_body_description_compact())
+        else:
+            base = SYSTEM_PROMPT.format(max_steps=MAX_ITERATIONS)
+            # Dynamically replace (body ...) block based on actual hardware
+            body_desc = self._get_body_description()
+            base = re.sub(r"\(body.*?\)", body_desc, base, flags=re.DOTALL)
 
         stable_parts = [p for p in [self._me_md, base] if p]
         stable = "\n\n---\n\n".join(stable_parts)
@@ -2101,8 +2130,27 @@ class EmbodiedAgent:
         if on_phase and startup_phase:
             on_phase("thinking")
 
+        # Social reflex: on social utterances (venting, greeting, indirect request…)
+        # withhold perception tools so a small model cannot answer feelings with the camera.
+        reflex_on = bool(getattr(self, "_social_reflex", False))
+        social_turn = (
+            social_reflex.classify_turn(user_input) if (reflex_on and not is_desire_turn) else None
+        )
+        turn_tools = (
+            social_reflex.allowed_tools(self._all_tool_defs, social_turn)
+            if social_turn is not None
+            else self._all_tool_defs
+        )
+        if social_turn is not None and social_turn.is_social:
+            logger.debug(
+                "Social reflex: kind=%s camera_ok=%s", social_turn.kind, social_turn.camera_ok
+            )
+
         camera_used = False
         say_used = False
+        language_retried = False
+        empty_retried = False
+        tools_used_this_turn: list[str] = []
         final_text = "(no response)"
         non_say_streak = 0  # consecutive tool calls without say()
         observation_action_name: str | None = None
@@ -2113,6 +2161,16 @@ class EmbodiedAgent:
         for i in range(MAX_ITERATIONS):
             logger.debug("Agent iteration %d", i + 1)
 
+            step_tools = turn_tools
+            if (
+                reflex_on
+                and not say_used
+                and social_reflex.perception_exhausted(tools_used_this_turn)
+            ):
+                # Looked enough: only speaking (or remembering) is left for this turn.
+                step_tools = [
+                    t for t in turn_tools if t.get("name") not in social_reflex.PERCEPTION_TOOLS
+                ]
             result, raw_content = await self.backend.stream_turn(
                 system=self._system_prompt(
                     feelings_ctx,
@@ -2124,7 +2182,7 @@ class EmbodiedAgent:
                     workspace_ctx=workspace_ctx,
                 ),
                 messages=self.messages,
-                tools=self._all_tool_defs,
+                tools=step_tools,
                 max_tokens=self.config.max_tokens,
                 on_text=on_text,
             )
@@ -2144,6 +2202,46 @@ class EmbodiedAgent:
             if result.stop_reason == "end_turn":
                 self.messages.append(self.backend.make_assistant_message(result, raw_content))
                 final_text = result.text or "(no response)"
+                if (
+                    reflex_on
+                    and not say_used
+                    and not empty_retried
+                    and not is_desire_turn
+                    and not (result.text or "").strip()
+                ):
+                    # Small models sometimes return nothing at all.  Ask once, briefly.
+                    empty_retried = True
+                    logger.info("Social reflex: empty reply, asking for one short say()")
+                    self.messages.append(
+                        self.backend.make_user_message(
+                            "You said nothing. Reply to the person with one short say() now."
+                        )
+                    )
+                    continue
+                if reflex_on and final_text != "(no response)":
+                    # Small models leak pseudo tool syntax / stage directions into prose,
+                    # or write say("…") literally instead of calling the tool.
+                    final_text = (
+                        social_reflex.normalize_small_model_text(final_text) or "(no response)"
+                    )
+                    if not language_retried and social_reflex.language_mismatch(
+                        user_input, final_text
+                    ):
+                        language_retried = True
+                        logger.info("Social reflex: reply language mismatch, asking for a redo")
+                        self.messages.append(
+                            self.backend.make_user_message(
+                                "Reply in the same language the person used. Say it again."
+                            )
+                        )
+                        continue
+                    if social_turn is not None and social_turn.is_social:
+                        final_text = (
+                            social_reflex.trim_spoken(
+                                final_text, user_input, social_turn.max_sentences
+                            )
+                            or final_text
+                        )
 
                 # Coherence gate: ask utility backend whether the response contains
                 # a logical error (e.g. shiritori word ending in 'ん').  If a
@@ -2172,7 +2270,11 @@ class EmbodiedAgent:
 
                 # Auto-say: if the model wrote text but never called say(), speak it aloud.
                 # Gated by config.auto_say (default OFF).
-                _auto_say_enabled = getattr(self.config, "auto_say", False)
+                _auto_say_enabled = getattr(self.config, "auto_say", False) or (
+                    reflex_on
+                    and os.environ.get("FAMILIAR_AUTO_SAY", "").strip().lower()
+                    not in ("0", "false", "no")
+                )
                 if (
                     _auto_say_enabled
                     and self._tts
@@ -2202,8 +2304,39 @@ class EmbodiedAgent:
                 return final_text
 
             if result.stop_reason == "tool_use":
+                # Social reflex: a say() in the wrong language is not spoken; ask once for a redo.
+                if (
+                    reflex_on
+                    and not language_retried
+                    and any(
+                        tc.name == "say"
+                        and social_reflex.language_mismatch(
+                            user_input, str(tc.input.get("text", ""))
+                        )
+                        for tc in result.tool_calls
+                    )
+                ):
+                    language_retried = True
+                    logger.info("Social reflex: say() language mismatch, asking for a redo")
+                    self.messages.append(self.backend.make_assistant_message(result, raw_content))
+                    nudge = (
+                        "Not spoken: wrong language. Reply in the same language the person "
+                        "used, then call say() again."
+                    )
+                    self.messages.append(
+                        self.backend.make_tool_results(
+                            result.tool_calls, [(nudge, None)] * len(result.tool_calls)
+                        )
+                    )
+                    continue
+
                 collected: list[tuple[str, str | None]] = []
                 for tc in result.tool_calls:
+                    tools_used_this_turn.append(tc.name)
+                    if reflex_on and tc.name == "say" and isinstance(tc.input, dict):
+                        tc.input["text"] = social_reflex.clean_say_text(
+                            str(tc.input.get("text", ""))
+                        )
                     if tc.name == "see":
                         camera_used = True
                         if pending_view_action_name is not None:
@@ -2271,6 +2404,30 @@ class EmbodiedAgent:
                 self.messages.append(self.backend.make_assistant_message(result, raw_content))
                 tool_msgs = self.backend.make_tool_results(result.tool_calls, collected)
                 self.messages.append(tool_msgs)
+
+                # Social reflex: once we have spoken on a social turn, the turn is over.
+                # Small models otherwise keep exploring and talk over their own reply.
+                if social_turn is not None and social_turn.is_social and say_used:
+                    spoken = [
+                        str(tc.input.get("text", ""))
+                        for tc in result.tool_calls
+                        if tc.name == "say" and tc.input.get("text")
+                    ]
+                    final_text = "\n".join(spoken) or result.text or "(no response)"
+                    self._spawn_background_task(
+                        self._run_post_response_pipeline(
+                            user_input=user_input,
+                            final_text=final_text,
+                            camera_used=camera_used,
+                            observation_action_name=observation_action_name,
+                            observation_action_input=observation_action_input,
+                            companion_mood=companion_mood,
+                            is_desire_turn=is_desire_turn,
+                            desires=desires,
+                        ),
+                        name="post-response-pipeline",
+                    )
+                    return final_text
 
                 # Check for user interrupt (typed while agent was busy)
                 if interrupt_queue is not None and not interrupt_queue.empty():

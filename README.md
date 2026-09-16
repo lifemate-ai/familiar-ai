@@ -176,7 +176,8 @@ run.bat --no-tui     # Plain REPL
 | Anthropic Claude | `anthropic` | `claude-haiku-4-5-20251001` | [console.anthropic.com](https://console.anthropic.com) |
 | Google Gemini | `gemini` | `gemini-2.5-flash` | [aistudio.google.com](https://aistudio.google.com) |
 | OpenAI | `openai` | `gpt-4o-mini` | [platform.openai.com](https://platform.openai.com) |
-| OpenAI-compatible (Ollama, vllm…) | `openai` + `BASE_URL=` | — | — |
+| **Ollama (local, native API)** | `ollama` | `gemma4:12b-it-qat` | [ollama.com](https://ollama.com) |
+| OpenAI-compatible (vllm, LM Studio…) | `openai` + `BASE_URL=` | — | — |
 | OpenRouter.ai (multi-provider) | `openai` + `BASE_URL=https://openrouter.ai/api/v1` | — | [openrouter.ai](https://openrouter.ai) |
 | **CLI tool** (claude -p, ollama…) | `cli` | (the command) | — |
 
@@ -213,6 +214,20 @@ AGENT_NAME=Yukine
 ```
 
 > **Note:** To disable local/NVIDIA models, simply don't set `BASE_URL` to a local endpoint like `http://localhost:11434/v1`. Use cloud providers instead.
+
+**Ollama (local ~10B) `.env` example:**
+```env
+PLATFORM=ollama
+MODEL=gemma4:12b-it-qat          # best local ~10B tested; qwen3.5:9b also works
+BASE_URL=http://localhost:11434  # default
+UTILITY_PLATFORM=ollama          # emotion/summary side-calls stay local too
+AGENT_NAME=Yukine
+# PROMPT_PROFILE=compact  (auto for local models) — short, example-driven prompt
+# SOCIAL_REFLEX=on        (auto for compact)     — no camera on social turns, auto-speak
+# THINKING_MODE=disabled  (auto = off for local; "extended" enables Ollama think)
+# OLLAMA_NUM_CTX=16384
+```
+Small local models are held to the same social bar with `uv run python benchmarks/social_eval.py`.
 
 **CLI tool `.env` example:**
 ```env
