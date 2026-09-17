@@ -38,9 +38,15 @@ class ToMTool:
             {
                 "name": "tom",
                 "description": (
-                    "Theory of Mind: perspective-taking tool. "
-                    "Call this BEFORE responding to understand what the other person is feeling and wanting. "
-                    "Projects your simulated emotions onto them, then swaps perspectives."
+                    "Perspective-taking (Theory of Mind). Step into the other person's position "
+                    "before you answer: what are they feeling right now, what do they actually "
+                    "want from this exchange, and what would I need if I were exactly them? The "
+                    "surface words are rarely the whole message — a trailing sentence, a "
+                    "non-sequitur, praising someone else when their own result is the topic, "
+                    "'it's fine' said flatly, all carry the real message. Use when someone "
+                    "shares a feeling, hints, vents, deflects, or says something that doesn't "
+                    "quite fit the moment. Projects your simulated emotions onto them, then "
+                    "swaps perspectives."
                 ),
                 "input_schema": {
                     "type": "object",

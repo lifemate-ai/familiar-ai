@@ -107,10 +107,10 @@ def build_system(profile: str, persona: str, template_path: str | None = None) -
 
 
 def fake_tool_result(name: str, tool_input: dict) -> tuple[str, str | None]:
-    if name == "take_perspective":
+    if name == "perspective_taking":
         # Minimal acknowledgement: the hypothesis is about the *description*, not the result.
         return "(perspective taken)", None
-    if name == "share_attention":
+    if name == "joint_attention":
         return f"(attending to: {tool_input.get('target', '?')}) — call see() to look.", None
     if name == "see":
         return FAKE_IMAGE_DESC, None
@@ -286,7 +286,7 @@ def render_markdown(report: Report) -> str:
         for r in report.results
         for st in r.steps
         for t in st.tools
-        if t["name"] in ("take_perspective", "share_attention")
+        if t["name"] in ("perspective_taking", "joint_attention")
     )
     lines.insert(3, f"Social tool calls: {social_calls}")
     for r in report.results:
@@ -330,7 +330,7 @@ def _parse_args() -> argparse.Namespace:
     p.add_argument(
         "--social-tools",
         action="store_true",
-        help="add take_perspective / share_attention tool definitions (unused-tool hypothesis)",
+        help="add perspective_taking / joint_attention tool definitions (unused-tool hypothesis)",
     )
     p.add_argument(
         "--pragmatic-read",

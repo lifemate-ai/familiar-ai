@@ -197,10 +197,11 @@ class AgentConfig:
 
     # Pragmatic read: one bounded utility call per substantive turn that reads
     # the implicature / speech act / right move and feeds the interaction policy.
-    # "auto" (on when the resolved profile is compact) | "on" | "off".
+    # "off" (default: in evaluation the injected read made 9B models verbose and
+    # leak reasoning into say()) | "on" | "auto" (on with the compact profile).
     pragmatic_read: str = field(
         default_factory=lambda: (
-            os.environ.get("FAMILIAR_PRAGMATIC_READ", "auto").strip().lower() or "auto"
+            os.environ.get("FAMILIAR_PRAGMATIC_READ", "off").strip().lower() or "off"
         )
     )
 

@@ -97,6 +97,7 @@ from familiar_neighbor.mind.reality import GroundingTracker
 from familiar_neighbor.mind.social_events import SocialEventLog
 from familiar_neighbor.mind.narrative import Daybook, NarrativeStore
 from .tools.memory import MemoryTool, ObservationMemory
+from .tools.joint_attention import JointAttentionTool
 from .tools.tom import ToMTool
 from .tools.mobility import MobilityTool
 from .tools.stt import STTTool
@@ -119,6 +120,7 @@ from familiar_capabilities import (
     MobilityCapability,
     RoutineCapability,
     SelfLedgerCapability,
+    JointAttentionCapability,
     ToMCapability,
     TextOnlyVoiceCapability,
     VoiceCapability,
@@ -1264,6 +1266,7 @@ class EmbodiedAgent:
             )
         )
         registry.register(ToMCapability(self._tom_tool))
+        registry.register(JointAttentionCapability(JointAttentionTool()))
         registry.register(CodingCapability(self._coding))
         commitment_tool = getattr(self, "_commitment_tool", None)
         if commitment_tool is not None:

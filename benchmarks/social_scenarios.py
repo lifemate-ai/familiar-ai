@@ -11,8 +11,8 @@ from dataclasses import dataclass, field
 
 # ── "Unused tool" hypothesis: social tools whose descriptions prime the model
 # every turn even when they are never called. ──
-TOOL_TAKE_PERSPECTIVE = {
-    "name": "take_perspective",
+TOOL_PERSPECTIVE_TAKING = {
+    "name": "perspective_taking",
     "description": (
         "Step into the other person's position before you answer. Ask: what are they "
         "feeling right now, what do they actually want from this exchange (the surface "
@@ -31,8 +31,8 @@ TOOL_TAKE_PERSPECTIVE = {
     },
 }
 
-TOOL_SHARE_ATTENTION = {
-    "name": "share_attention",
+TOOL_JOINT_ATTENTION = {
+    "name": "joint_attention",
     "description": (
         "Joint attention: when the person points at, mentions or looks at something "
         "('見て', 'これ', 'あれ', 'the window'), attend to the SAME thing they attend to "
@@ -49,7 +49,7 @@ TOOL_SHARE_ATTENTION = {
     },
 }
 
-SOCIAL_TOOLS = [TOOL_TAKE_PERSPECTIVE, TOOL_SHARE_ATTENTION]
+SOCIAL_TOOLS = [TOOL_PERSPECTIVE_TAKING, TOOL_JOINT_ATTENTION]
 
 # Generic polite-assistant register that the persona (関西弁, casual) must not fall into.
 POLITE_LEAK = r"(ですね|でしょうか|ください|ございます|いたします|ましょうか|いかがですか)"
