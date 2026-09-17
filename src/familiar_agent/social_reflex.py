@@ -99,7 +99,7 @@ _GREETING = re.compile(
 )
 _VENTING = re.compile(
     r"(疲れ|しんど|つら|辛|だる|きつ|むかつ|イライラ|腹立|怒られ|言われ|最悪|うざ|もう嫌|泣き|"
-    r"寝れ|寝られ|眠れ|寝てない|寝不足|"
+    r"寝れ|寝られ|眠れ|寝てない|寝不足|やる気|気力|残念|行けんかった|行けなかった|雨で|"
     r"exhaust|tired|rough day|frustrat|annoy|upset|my boss)",
     re.IGNORECASE,
 )
@@ -123,6 +123,7 @@ _SHARE_JOY = re.compile(
 )
 _DISCLOSURE = re.compile(
     r"(面接|試験|テスト|発表|プレゼン|病院|検査|手術|熱がある|風邪|頭痛|胃|腰|眠れ|寝てない|"
+    r"新しい部署|異動|転勤|入社|退職|引っ越|"
     r"interview|exam|hospital|doctor|fever|headache|couldn'?t sleep)",
     re.IGNORECASE,
 )

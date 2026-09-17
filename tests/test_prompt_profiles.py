@@ -107,3 +107,14 @@ def test_agent_stable_prompt_defaults_to_full():
     agent = _make_agent()
     stable, _variable = agent._system_prompt()
     assert ":profile compact" not in stable
+
+
+def test_compact_carries_social_patterns_but_stays_bounded():
+    """Small models copy examples; the compact profile shows the social moves
+    it needs instead of describing theory — while staying under the size bound
+    and keeping the voice rule last."""
+    text = _compact()
+    assert ":id social-patterns" in text
+    assert "いいよね、若いって" in text
+    assert text.index(":id social-patterns") < text.index("speak-every-reply")
+    assert len(text) < 0.45 * len(_full())
