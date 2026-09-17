@@ -25,6 +25,9 @@ from familiar_agent import social_reflex as sr
         ("I'm home", sr.KIND_GREETING, False),
         ("Ugh, my boss again. So tired.", sr.KIND_VENTING, False),
         ("", sr.KIND_GENERAL, True),
+        ("今日は雨でどこも行けんかったわ。", sr.KIND_VENTING, False),
+        ("なんか最近、やる気が出へんねん。", sr.KIND_VENTING, False),
+        ("来週から新しい部署やわ。", sr.KIND_DISCLOSURE, False),
     ],
 )
 def test_classify_turn(text: str, kind: str, camera_ok: bool) -> None:
