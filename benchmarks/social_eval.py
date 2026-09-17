@@ -38,7 +38,10 @@ from familiar_agent import social_reflex as sr  # noqa: E402
 from familiar_agent.agent import MAX_ITERATIONS, _interoception  # noqa: E402
 from familiar_agent.backend import create_backend  # noqa: E402
 from familiar_agent.config import AgentConfig  # noqa: E402
-from familiar_neighbor.prompts import assemble_neighbor_system_prompt  # noqa: E402
+from familiar_neighbor.prompts import (  # noqa: E402
+    assemble_from_template,
+    assemble_neighbor_system_prompt,
+)
 
 TOOLS = [TOOL_SAY, TOOL_SEE, TOOL_LOOK, TOOL_REMEMBER]
 MAX_STEPS = 4
@@ -91,13 +94,14 @@ class Report:
         return (sum(r.passed for r in self.results) / total) if total else 0.0
 
 
-def build_system(profile: str, persona: str) -> str:
-    body = re.sub(
-        r"\(body.*?\)\)",
-        _BODY_BLOCK,
-        assemble_neighbor_system_prompt(max_steps=MAX_ITERATIONS, profile=profile),
-        flags=re.DOTALL,
-    )
+def build_system(profile: str, persona: str, template_path: str | None = None) -> str:
+    if template_path:
+        assembled = assemble_from_template(
+            Path(template_path).read_text(encoding="utf-8"), max_steps=MAX_ITERATIONS
+        )
+    else:
+        assembled = assemble_neighbor_system_prompt(max_steps=MAX_ITERATIONS, profile=profile)
+    body = re.sub(r"\(body.*?\)\)", _BODY_BLOCK, assembled, flags=re.DOTALL)
     intero = _interoception(time.time() - 600, 3, "engaged")
     return "\n\n---\n\n".join(p for p in (persona, body, intero) if p)
 
@@ -285,6 +289,10 @@ def _parse_args() -> argparse.Namespace:
     p.add_argument("--profile", choices=["full", "compact"], default="compact")
     p.add_argument("--reflex", choices=["on", "off"], default="on")
     p.add_argument("--scenario", nargs="*", help="subset of scenario names")
+    p.add_argument("--tags", nargs="*", help="only scenarios carrying one of these tags")
+    p.add_argument(
+        "--template", help="raw compact/core template file to assemble instead of the profile"
+    )
     p.add_argument("--json", help="write machine-readable summary here")
     p.add_argument(
         "--persona",
@@ -301,10 +309,16 @@ async def _main(args: argparse.Namespace) -> None:
         if Path(args.persona).exists()
         else ""
     )
-    system = build_system(args.profile, persona)
+    system = build_system(args.profile, persona, args.template)
     reflex = args.reflex == "on"
-    selected = [s for s in SCENARIOS if not args.scenario or s.name in args.scenario]
-    report = Report(model=config.model or config.platform, profile=args.profile, reflex=reflex)
+    selected = [
+        s
+        for s in SCENARIOS
+        if (not args.scenario or s.name in args.scenario)
+        and (not args.tags or set(s.tags) & set(args.tags))
+    ]
+    label = f"{args.profile}:{Path(args.template).stem}" if args.template else args.profile
+    report = Report(model=config.model or config.platform, profile=label, reflex=reflex)
     for sc in selected:
         res = await run_scenario(backend, system, sc, reflex)
         report.results.append(res)

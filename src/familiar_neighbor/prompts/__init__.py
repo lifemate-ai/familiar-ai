@@ -23,6 +23,7 @@ NEIGHBOR_PROFILE = "neighbor"
 
 __all__ = [
     "NEIGHBOR_PROFILE",
+    "assemble_from_template",
     "assemble_neighbor_system_prompt",
     "load_embodied_compact_template",
     "load_embodied_core_template",
@@ -67,6 +68,11 @@ def assemble_neighbor_system_prompt(*, max_steps: int, profile: str = "full") ->
     text = (
         load_embodied_compact_template() if profile == "compact" else load_embodied_core_template()
     )
+    return assemble_from_template(text, max_steps=max_steps)
+
+
+def assemble_from_template(text: str, *, max_steps: int) -> str:
+    """Resolve the runtime placeholders in a raw neighbour template (any variant)."""
     text = text.replace("{react_loop}", runtime_prompts.load_react_loop())
     text = text.replace("{voice_rules_generic}", runtime_prompts.load_voice_rules_generic())
     text = text.replace("{language_match}", runtime_prompts.load_language_match())
