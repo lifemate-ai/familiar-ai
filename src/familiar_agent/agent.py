@@ -804,6 +804,9 @@ class EmbodiedAgent:
             getattr(config, "social_reflex", "auto"), self._prompt_profile
         )
         self._reflex_hook = social_reflex.SocialReflexHook(self) if self._social_reflex else None
+        self._pragmatic_read: bool = reflex_enabled(
+            getattr(config, "pragmatic_read", "auto"), self._prompt_profile
+        )
 
         self._init_tools()
 
@@ -1897,7 +1900,9 @@ class EmbodiedAgent:
             self._relationship.record_shared_ritual("light playful exchange", confidence=0.55)
 
     @staticmethod
-    def _format_social_policy_prompt(policy: SocialPolicyDecision) -> str:
+    def _format_social_policy_prompt(
+        policy: SocialPolicyDecision, pragmatic: Any | None = None
+    ) -> str:
         lines = [
             "[Interaction policy]",
             f"- primary-act: {policy.primary_act}",
@@ -1919,6 +1924,8 @@ class EmbodiedAgent:
                 "- you are running low right now; be honest about your current "
                 "capacity instead of overpromising — offer a smaller step or a deferral"
             )
+        if pragmatic is not None:
+            lines.extend(pragmatic.prompt_lines())
         return "\n".join(lines)
 
     def _update_consciousness_profile(self, *, origin: str, interoception_signal=None):

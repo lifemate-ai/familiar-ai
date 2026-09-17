@@ -195,6 +195,15 @@ class AgentConfig:
         default_factory=lambda: os.environ.get("PROMPT_PROFILE", "auto").strip().lower() or "auto"
     )
 
+    # Pragmatic read: one bounded utility call per substantive turn that reads
+    # the implicature / speech act / right move and feeds the interaction policy.
+    # "auto" (on when the resolved profile is compact) | "on" | "off".
+    pragmatic_read: str = field(
+        default_factory=lambda: (
+            os.environ.get("FAMILIAR_PRAGMATIC_READ", "auto").strip().lower() or "auto"
+        )
+    )
+
     # Social reflex guards for small models: "auto" (on when the resolved
     # profile is compact) | "on" | "off". See familiar_agent.social_reflex.
     social_reflex: str = field(

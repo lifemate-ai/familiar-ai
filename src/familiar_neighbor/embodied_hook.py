@@ -42,6 +42,7 @@ from familiar_neighbor.mind.appraisal import AppraisalContext, AppraisalEngine
 from familiar_neighbor.mind.deferral import DEFERRAL_PREFIX, detect_deferral
 from familiar_neighbor.mind.desires import DesireSystem
 from familiar_neighbor.mind.mental_state import MentalStateBus, MentalStateSnapshot
+from familiar_neighbor.mind.pragmatics import pragmatic_read
 from familiar_neighbor.mind.reality import looks_like_fresh_perception_claim
 from familiar_neighbor.mind.social_policy import (
     SPEECH_ACT_VOCABULARY,
@@ -540,7 +541,19 @@ class EmbodiedAgentHook(RuntimeHookBase):
         # substantive companion turn — and only when a dedicated utility
         # backend exists, so the common case stays zero-latency.
         llm_act_hint: str | None = None
+        pragmatic = None
         if (
+            getattr(agent, "_pragmatic_read", False)
+            and not is_desire_turn
+            and not candidate_brief_turn
+            and len(user_input.strip()) >= 2
+        ):
+            # Small-model path: one bounded read of the implicature / act / move.
+            # Its act doubles as the ADR 0004 hint (applied only in the hint zones).
+            pragmatic = await pragmatic_read(agent._utility_backend, user_input)
+            if pragmatic is not None:
+                llm_act_hint = pragmatic.act
+        elif (
             not is_desire_turn
             and not candidate_brief_turn
             and len(user_input.strip()) >= _ACT_FALLBACK_MIN_CHARS
@@ -703,7 +716,7 @@ class EmbodiedAgentHook(RuntimeHookBase):
             mental_ctx = "\n\n".join(
                 part
                 for part in (
-                    agent._format_social_policy_prompt(social_policy),
+                    agent._format_social_policy_prompt(social_policy, pragmatic),
                     agent._brief_reply_prompt(),
                 )
                 if part
@@ -714,7 +727,7 @@ class EmbodiedAgentHook(RuntimeHookBase):
                 for part in (
                     agent._mental_state_bus.summarize_recent_for_prompt(2),
                     mental_snapshot.prompt_summary(),
-                    agent._format_social_policy_prompt(social_policy),
+                    agent._format_social_policy_prompt(social_policy, pragmatic),
                 )
                 if part
             )

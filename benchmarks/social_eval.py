@@ -119,9 +119,20 @@ def fake_tool_result(name: str, tool_input: dict) -> tuple[str, str | None]:
 
 
 async def run_scenario(
-    backend, system: str, sc: SocialScenario, reflex: bool, max_tokens: int = 300
+    backend,
+    system: str,
+    sc: SocialScenario,
+    reflex: bool,
+    max_tokens: int = 300,
+    pragmatic: bool = False,
 ) -> ScenarioResult:
     turn = sr.classify_turn(sc.user)
+    if pragmatic:
+        from familiar_neighbor.mind.pragmatics import pragmatic_read
+
+        read = await pragmatic_read(backend, sc.user)
+        if read is not None:
+            system = system + "\n\n---\n\n[Interaction policy]\n" + "\n".join(read.prompt_lines())
     tools = sr.allowed_tools(TOOLS, turn) if reflex else TOOLS
     messages = [backend.make_user_message(sc.user)]
     steps: list[Step] = []
@@ -301,6 +312,11 @@ def _parse_args() -> argparse.Namespace:
         default=300,
         help="per-step token budget (raise when thinking is on)",
     )
+    p.add_argument(
+        "--pragmatic-read",
+        action="store_true",
+        help="prepend a one-call pragmatic read (implicature/act/move) to each turn's system prompt",
+    )
     p.add_argument("--json", help="write machine-readable summary here")
     p.add_argument(
         "--persona",
@@ -328,7 +344,7 @@ async def _main(args: argparse.Namespace) -> None:
     label = f"{args.profile}:{Path(args.template).stem}" if args.template else args.profile
     report = Report(model=config.model or config.platform, profile=label, reflex=reflex)
     for sc in selected:
-        res = await run_scenario(backend, system, sc, reflex, args.max_tokens)
+        res = await run_scenario(backend, system, sc, reflex, args.max_tokens, args.pragmatic_read)
         report.results.append(res)
         print(f"[{res.passed}/{res.total}] {sc.name} ({res.latency_s:.1f}s)", file=sys.stderr)
     print(render_markdown(report))
