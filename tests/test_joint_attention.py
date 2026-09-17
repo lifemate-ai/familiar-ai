@@ -28,3 +28,21 @@ def test_tom_description_carries_pragmatic_cues() -> None:
     text = spec["description"]
     for cue in ("trailing sentence", "non-sequitur", "'it's fine'"):
         assert cue in text
+
+
+@pytest.mark.asyncio
+async def test_perspective_taking_light_mode_skips_the_model() -> None:
+    from unittest.mock import AsyncMock, MagicMock
+
+    from familiar_agent.tools.tom import ToMTool
+
+    mem = MagicMock(recall_async=AsyncMock(return_value=[]))
+    backend = MagicMock(complete=AsyncMock(return_value="{}"))
+    tool = ToMTool(mem, default_person="Kota", backend=backend, mode="light")
+    text, _ = await tool.call("perspective_taking", {"situation": "ふぅ…"})
+    backend.complete.assert_not_awaited()
+    mem.recall_async.assert_not_awaited()  # a stance swap, not a lookup
+    assert "視点に立つ" in text and "ふぅ…" in text
+    # legacy alias still routes
+    text2, _ = await tool.call("tom", {"situation": "x"})
+    assert "視点に立つ" in text2

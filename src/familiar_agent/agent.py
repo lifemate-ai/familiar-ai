@@ -681,11 +681,31 @@ class EmbodiedAgent:
         self._memory_worker = MemoryJobWorker(self._memory)
         self._memory_tool = MemoryTool(self._memory)
         self._person_model = PersonModelTracker()
+        # Prompt profile + social reflex guards (small local models).
+        self._prompt_profile: str = resolve_profile(
+            config.platform,
+            getattr(config, "base_url", ""),
+            getattr(config, "prompt_profile", "auto"),
+        )
+        self._social_reflex: bool = reflex_enabled(
+            getattr(config, "social_reflex", "auto"), self._prompt_profile
+        )
+        self._reflex_hook = social_reflex.SocialReflexHook(self) if self._social_reflex else None
+        self._pragmatic_read: bool = reflex_enabled(
+            getattr(config, "pragmatic_read", "off"), self._prompt_profile
+        )
+        # perspective_taking result: light scaffold for small local models (the
+        # thinking happens in the call argument; a 512-token utility inference on
+        # the same 12B model made a turn take 80 s), full inference otherwise.
+        _tom_mode = os.environ.get("FAMILIAR_TOM_MODE", "").strip().lower() or (
+            "light" if (self._social_reflex or self._utility_backend is self.backend) else "llm"
+        )
         self._tom_tool = ToMTool(
             self._memory,
             default_person=config.companion_name,
             backend=self._utility_backend,
             person_model=self._person_model,
+            mode=_tom_mode,
         )
         self._coding = CodingTool(config.coding)
         _commitments_dir = Path.home() / ".familiar_ai"
@@ -796,19 +816,6 @@ class EmbodiedAgent:
 
         # Per-turn cognition pipeline (PR3 of the runtime reorg).
         self._hook = EmbodiedAgentHook(self)
-        # Prompt profile + social reflex guards (small local models).
-        self._prompt_profile: str = resolve_profile(
-            config.platform,
-            getattr(config, "base_url", ""),
-            getattr(config, "prompt_profile", "auto"),
-        )
-        self._social_reflex: bool = reflex_enabled(
-            getattr(config, "social_reflex", "auto"), self._prompt_profile
-        )
-        self._reflex_hook = social_reflex.SocialReflexHook(self) if self._social_reflex else None
-        self._pragmatic_read: bool = reflex_enabled(
-            getattr(config, "pragmatic_read", "auto"), self._prompt_profile
-        )
 
         self._init_tools()
 
