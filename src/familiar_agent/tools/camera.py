@@ -22,6 +22,37 @@ logger = logging.getLogger(__name__)
 CAPTURE_DIR = Path.home() / ".familiar_ai" / "captures"
 
 
+_PTZ_REPROBE_AFTER_S = 300.0
+
+
+async def _close_onvif_client(cam: Any) -> None:
+    """Close an ONVIFCamera and any half-built service transports.
+
+    ``ONVIFCamera.close()`` only walks ``cam.services``; a service created while
+    ``update_xaddrs()`` was failing is never registered there and keeps its
+    aiohttp session open ("Unclosed client session"). Sweep the instance for
+    anything closeable.
+    """
+    seen: set[int] = set()
+    try:
+        await cam.close()
+    except Exception as e:  # noqa: BLE001
+        logger.debug("ONVIF close failed: %s", e)
+    for value in list(vars(cam).values()):
+        candidates = list(value.values()) if isinstance(value, dict) else [value]
+        for obj in candidates:
+            close = getattr(obj, "close", None)
+            if id(obj) in seen or not callable(close) or obj is cam:
+                continue
+            seen.add(id(obj))
+            try:
+                result = close()
+                if hasattr(result, "__await__"):
+                    await result
+            except Exception:  # noqa: BLE001
+                pass
+
+
 class CameraTool:
     """Controls a camera via OpenCV (RTSP, USB, file) and optionally via ONVIF (PTZ)."""
 
@@ -49,6 +80,10 @@ class CameraTool:
         self.ptz_port = ptz_port if ptz_port is not None else port
 
         self._cam_onvif: Any = None
+        # Negative cache: when every ONVIF port fails (camera without pan/tilt),
+        # don't re-probe on every look() — each probe costs seconds and leaks the
+        # library's half-built service transports.
+        self._ptz_probe_failed_at: float = 0.0
         self._ptz: Any = None
         self._profile_token: str | None = None
 
@@ -102,10 +137,7 @@ class CameraTool:
         self._cam_onvif = None
         self._ptz = None
         if cam is not None:
-            try:
-                await cam.close()
-            except Exception as e:  # noqa: BLE001
-                logger.debug("ONVIF close failed: %s", e)
+            await _close_onvif_client(cam)
 
     def _capture_loop(self):
         """Background thread to keep camera buffer fresh and optionally show preview."""
@@ -158,6 +190,11 @@ class CameraTool:
         """Ensure ONVIF connection is established for PTZ (optional)."""
         if self._cam_onvif is not None:
             return True
+        if (
+            self._ptz_probe_failed_at
+            and time.monotonic() - self._ptz_probe_failed_at < _PTZ_REPROBE_AFTER_S
+        ):
+            return False
 
         hostname, username, password, port = self._get_ptz_connection_params()
         if hostname is None:
@@ -197,11 +234,9 @@ class CameraTool:
                 last_error = e
                 # A failed probe still opened transports; release them.
                 if cam is not None:
-                    try:
-                        await cam.close()
-                    except Exception:  # noqa: BLE001
-                        pass
+                    await _close_onvif_client(cam)
 
+        self._ptz_probe_failed_at = time.monotonic()
         logger.warning(
             "ONVIF PTZ unavailable for %s (tried ports %s). "
             "Pan/tilt will be disabled. Last error: %s. "

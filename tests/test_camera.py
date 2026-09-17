@@ -244,3 +244,41 @@ async def test_failed_move_closes_the_onvif_client() -> None:
     assert "failed" in text.lower()
     cam.close.assert_awaited_once()
     assert tool._cam_onvif is None and tool._ptz is None
+
+
+@pytest.mark.asyncio
+async def test_onvif_probe_failure_is_cached_and_sweeps_transports(monkeypatch) -> None:
+    """A camera without PTZ: probe once, close every transport, don't re-probe on each look()."""
+    from unittest.mock import AsyncMock, MagicMock
+
+    from familiar_agent.tools import camera as cam_mod
+
+    stray = MagicMock()
+    stray.close = AsyncMock()
+
+    class FakeONVIF:
+        instances: list = []
+
+        def __init__(self, *a, **kw):
+            self.services = {}
+            self.devicemgmt = stray  # created by the library before update_xaddrs failed
+            FakeONVIF.instances.append(self)
+
+        async def close(self):
+            pass
+
+        async def update_xaddrs(self):
+            raise RuntimeError("no ONVIF here")
+
+    monkeypatch.setattr(cam_mod, "ONVIFCamera", FakeONVIF)
+    tool = cam_mod.CameraTool.__new__(cam_mod.CameraTool)
+    tool._cam_onvif = None
+    tool._ptz = None
+    tool._ptz_probe_failed_at = 0.0
+    tool._get_ptz_connection_params = lambda: ("192.168.1.145", "u", "p", 2020)  # type: ignore[method-assign]
+
+    assert await tool._ensure_connected() is False
+    assert len(FakeONVIF.instances) == 3  # 2020, 8080, 80
+    assert stray.close.await_count == 3  # every half-built transport closed
+    assert await tool._ensure_connected() is False
+    assert len(FakeONVIF.instances) == 3  # negative cache: no re-probe
