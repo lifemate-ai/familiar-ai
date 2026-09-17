@@ -33,7 +33,7 @@ sys.path.insert(0, str(ROOT))
 sys.path.insert(0, str(ROOT / "src"))
 
 from benchmarks.scenarios import TOOL_LOOK, TOOL_REMEMBER, TOOL_SAY, TOOL_SEE  # noqa: E402
-from benchmarks.social_scenarios import SCENARIOS, SocialScenario  # noqa: E402
+from benchmarks.social_scenarios import SCENARIOS, SOCIAL_TOOLS, SocialScenario  # noqa: E402
 from familiar_agent import social_reflex as sr  # noqa: E402
 from familiar_agent.agent import MAX_ITERATIONS, _interoception  # noqa: E402
 from familiar_agent.backend import create_backend  # noqa: E402
@@ -107,6 +107,11 @@ def build_system(profile: str, persona: str, template_path: str | None = None) -
 
 
 def fake_tool_result(name: str, tool_input: dict) -> tuple[str, str | None]:
+    if name == "take_perspective":
+        # Minimal acknowledgement: the hypothesis is about the *description*, not the result.
+        return "(perspective taken)", None
+    if name == "share_attention":
+        return f"(attending to: {tool_input.get('target', '?')}) — call see() to look.", None
     if name == "see":
         return FAKE_IMAGE_DESC, None
     if name == "look":
@@ -125,15 +130,17 @@ async def run_scenario(
     reflex: bool,
     max_tokens: int = 300,
     pragmatic: bool = False,
+    social_tools: bool = False,
 ) -> ScenarioResult:
     turn = sr.classify_turn(sc.user)
+    base_tools = TOOLS + SOCIAL_TOOLS if social_tools else TOOLS
     if pragmatic:
         from familiar_neighbor.mind.pragmatics import pragmatic_read
 
         read = await pragmatic_read(backend, sc.user)
         if read is not None:
             system = system + "\n\n---\n\n[Interaction policy]\n" + "\n".join(read.prompt_lines())
-    tools = sr.allowed_tools(TOOLS, turn) if reflex else TOOLS
+    tools = sr.allowed_tools(base_tools, turn) if reflex else base_tools
     messages = [backend.make_user_message(sc.user)]
     steps: list[Step] = []
     spoken_parts: list[str] = []
@@ -274,6 +281,14 @@ def render_markdown(report: Report) -> str:
         "| scenario | kind | pass | latency | failed checks |",
         "|---|---|---|---|---|",
     ]
+    social_calls = sum(
+        1
+        for r in report.results
+        for st in r.steps
+        for t in st.tools
+        if t["name"] in ("take_perspective", "share_attention")
+    )
+    lines.insert(3, f"Social tool calls: {social_calls}")
     for r in report.results:
         failed = ", ".join(k for k, v in r.checks.items() if not v) or "—"
         lines.append(
@@ -313,6 +328,11 @@ def _parse_args() -> argparse.Namespace:
         help="per-step token budget (raise when thinking is on)",
     )
     p.add_argument(
+        "--social-tools",
+        action="store_true",
+        help="add take_perspective / share_attention tool definitions (unused-tool hypothesis)",
+    )
+    p.add_argument(
         "--pragmatic-read",
         action="store_true",
         help="prepend a one-call pragmatic read (implicature/act/move) to each turn's system prompt",
@@ -344,7 +364,9 @@ async def _main(args: argparse.Namespace) -> None:
     label = f"{args.profile}:{Path(args.template).stem}" if args.template else args.profile
     report = Report(model=config.model or config.platform, profile=label, reflex=reflex)
     for sc in selected:
-        res = await run_scenario(backend, system, sc, reflex, args.max_tokens, args.pragmatic_read)
+        res = await run_scenario(
+            backend, system, sc, reflex, args.max_tokens, args.pragmatic_read, args.social_tools
+        )
         report.results.append(res)
         print(f"[{res.passed}/{res.total}] {sc.name} ({res.latency_s:.1f}s)", file=sys.stderr)
     print(render_markdown(report))
