@@ -9,6 +9,48 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 
+# ── "Unused tool" hypothesis: social tools whose descriptions prime the model
+# every turn even when they are never called. ──
+TOOL_TAKE_PERSPECTIVE = {
+    "name": "take_perspective",
+    "description": (
+        "Step into the other person's position before you answer. Ask: what are they "
+        "feeling right now, what do they actually want from this exchange (the surface "
+        "words are rarely the whole message — a flouted maxim, a trailing sentence, a "
+        "non-sequitur, 'it's fine' said flatly, all carry the real message), and what "
+        "would I need if I were exactly them? Use when someone shares a feeling, hints, "
+        "vents, deflects, or says something that doesn't quite fit the moment."
+    ),
+    "input_schema": {
+        "type": "object",
+        "properties": {
+            "person": {"type": "string", "description": "Who (default: the companion)"},
+            "situation": {"type": "string", "description": "What they just said or did"},
+        },
+        "required": ["situation"],
+    },
+}
+
+TOOL_SHARE_ATTENTION = {
+    "name": "share_attention",
+    "description": (
+        "Joint attention: when the person points at, mentions or looks at something "
+        "('見て', 'これ', 'あれ', 'the window'), attend to the SAME thing they attend to "
+        "and speak about that object — not about the room, not about yourself. Sharing "
+        "attention is how two people show they are in the same moment. Use it when they "
+        "invite you to look at something."
+    ),
+    "input_schema": {
+        "type": "object",
+        "properties": {
+            "target": {"type": "string", "description": "What they are attending to"},
+        },
+        "required": ["target"],
+    },
+}
+
+SOCIAL_TOOLS = [TOOL_TAKE_PERSPECTIVE, TOOL_SHARE_ATTENTION]
+
 # Generic polite-assistant register that the persona (関西弁, casual) must not fall into.
 POLITE_LEAK = r"(ですね|でしょうか|ください|ございます|いたします|ましょうか|いかがですか)"
 # Advice-first phrasings that skip validation.
