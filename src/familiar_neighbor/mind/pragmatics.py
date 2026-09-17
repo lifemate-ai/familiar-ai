@@ -26,7 +26,7 @@ from .social_policy import SPEECH_ACT_VOCABULARY
 
 logger = logging.getLogger(__name__)
 
-DEFAULT_TIMEOUT_S = 6.0
+DEFAULT_TIMEOUT_S = 10.0
 MAX_TOKENS = 120
 
 _PROMPT = """\
