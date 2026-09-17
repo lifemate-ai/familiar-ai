@@ -40,9 +40,9 @@ Run this quickly:
    the message.
 3. IMPLICATURE — what it implies about their state or want.
 4. ACT — one label from: {vocabulary}.
-5. MOVE — the right kind of reply (receive the feeling / grant the indirect
-   request / one-line greeting / share the joy / remember it / look where they
-   point). Never advice unless asked.
+5. MOVE — the right kind of reply, at most eight words (receive the feeling /
+   grant the indirect request / one-line greeting / share the joy / remember it /
+   look where they point). Never advice unless asked.
 
 Answer in exactly three lines, in the person's language for the free text:
 implicature: ...
@@ -50,6 +50,15 @@ act: <label>
 move: ...
 
 Utterance: {utterance}"""
+
+_MAX_MOVE_CHARS = 40
+
+
+def _short(text: str) -> str:
+    text = (text or "").strip()
+    text = re.split(r"[（(。.]", text, maxsplit=1)[0].strip() or text
+    return text[:_MAX_MOVE_CHARS]
+
 
 _LINE_RE = re.compile(r"^\s*(implicature|act|move)\s*[:：]\s*(.+?)\s*$", re.IGNORECASE)
 
@@ -61,12 +70,10 @@ class PragmaticRead:
     move: str
 
     def prompt_lines(self) -> list[str]:
-        lines = []
-        if self.implicature:
-            lines.append(f"- implicature: {self.implicature}")
-        if self.move:
-            lines.append(f"- move: {self.move}")
-        return lines
+        """Only the move, kept short: injected implicature text made small models
+        verbose and leaked reasoning into say()."""
+        move = _short(self.move)
+        return [f"- move: {move}"] if move else []
 
 
 def parse_pragmatic_read(raw: str) -> PragmaticRead | None:

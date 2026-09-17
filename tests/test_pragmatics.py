@@ -17,10 +17,7 @@ def test_parse_three_lines_and_vocabulary_guard() -> None:
     )
     assert parse_pragmatic_read("**Implicature:** x\n**act:** made_up_label\nmove: y").act is None
     assert parse_pragmatic_read("random prose") is None
-    assert read.prompt_lines() == [
-        "- implicature: 悔しさを隠している",
-        "- move: 気持ちを受け止める。器用さの話に乗らない。",
-    ]
+    assert read.prompt_lines() == ["- move: 気持ちを受け止める"]  # move only, first clause
 
 
 @pytest.mark.asyncio
@@ -57,5 +54,5 @@ def test_policy_prompt_carries_the_read() -> None:
     text = EmbodiedAgent._format_social_policy_prompt(
         policy, PragmaticRead("悔しい", "venting", "受け止める")
     )
-    assert text.endswith("- implicature: 悔しい\n- move: 受け止める")
+    assert text.endswith("- move: 受け止める")
     assert "implicature" not in EmbodiedAgent._format_social_policy_prompt(policy)
