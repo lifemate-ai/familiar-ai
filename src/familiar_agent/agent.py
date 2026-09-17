@@ -97,6 +97,7 @@ from familiar_neighbor.mind.reality import GroundingTracker
 from familiar_neighbor.mind.social_events import SocialEventLog
 from familiar_neighbor.mind.narrative import Daybook, NarrativeStore
 from .tools.memory import MemoryTool, ObservationMemory
+from .tools.joint_attention import JointAttentionTool
 from .tools.tom import ToMTool
 from .tools.mobility import MobilityTool
 from .tools.stt import STTTool
@@ -119,6 +120,7 @@ from familiar_capabilities import (
     MobilityCapability,
     RoutineCapability,
     SelfLedgerCapability,
+    JointAttentionCapability,
     ToMCapability,
     TextOnlyVoiceCapability,
     VoiceCapability,
@@ -679,11 +681,31 @@ class EmbodiedAgent:
         self._memory_worker = MemoryJobWorker(self._memory)
         self._memory_tool = MemoryTool(self._memory)
         self._person_model = PersonModelTracker()
+        # Prompt profile + social reflex guards (small local models).
+        self._prompt_profile: str = resolve_profile(
+            config.platform,
+            getattr(config, "base_url", ""),
+            getattr(config, "prompt_profile", "auto"),
+        )
+        self._social_reflex: bool = reflex_enabled(
+            getattr(config, "social_reflex", "auto"), self._prompt_profile
+        )
+        self._reflex_hook = social_reflex.SocialReflexHook(self) if self._social_reflex else None
+        self._pragmatic_read: bool = reflex_enabled(
+            getattr(config, "pragmatic_read", "off"), self._prompt_profile
+        )
+        # perspective_taking result: light scaffold for small local models (the
+        # thinking happens in the call argument; a 512-token utility inference on
+        # the same 12B model made a turn take 80 s), full inference otherwise.
+        _tom_mode = os.environ.get("FAMILIAR_TOM_MODE", "").strip().lower() or (
+            "light" if (self._social_reflex or self._utility_backend is self.backend) else "llm"
+        )
         self._tom_tool = ToMTool(
             self._memory,
             default_person=config.companion_name,
             backend=self._utility_backend,
             person_model=self._person_model,
+            mode=_tom_mode,
         )
         self._coding = CodingTool(config.coding)
         _commitments_dir = Path.home() / ".familiar_ai"
@@ -794,16 +816,6 @@ class EmbodiedAgent:
 
         # Per-turn cognition pipeline (PR3 of the runtime reorg).
         self._hook = EmbodiedAgentHook(self)
-        # Prompt profile + social reflex guards (small local models).
-        self._prompt_profile: str = resolve_profile(
-            config.platform,
-            getattr(config, "base_url", ""),
-            getattr(config, "prompt_profile", "auto"),
-        )
-        self._social_reflex: bool = reflex_enabled(
-            getattr(config, "social_reflex", "auto"), self._prompt_profile
-        )
-        self._reflex_hook = social_reflex.SocialReflexHook(self) if self._social_reflex else None
 
         self._init_tools()
 
@@ -1261,6 +1273,7 @@ class EmbodiedAgent:
             )
         )
         registry.register(ToMCapability(self._tom_tool))
+        registry.register(JointAttentionCapability(JointAttentionTool()))
         registry.register(CodingCapability(self._coding))
         commitment_tool = getattr(self, "_commitment_tool", None)
         if commitment_tool is not None:
@@ -1897,7 +1910,9 @@ class EmbodiedAgent:
             self._relationship.record_shared_ritual("light playful exchange", confidence=0.55)
 
     @staticmethod
-    def _format_social_policy_prompt(policy: SocialPolicyDecision) -> str:
+    def _format_social_policy_prompt(
+        policy: SocialPolicyDecision, pragmatic: Any | None = None
+    ) -> str:
         lines = [
             "[Interaction policy]",
             f"- primary-act: {policy.primary_act}",
@@ -1919,6 +1934,8 @@ class EmbodiedAgent:
                 "- you are running low right now; be honest about your current "
                 "capacity instead of overpromising — offer a smaller step or a deferral"
             )
+        if pragmatic is not None:
+            lines.extend(pragmatic.prompt_lines())
         return "\n".join(lines)
 
     def _update_consciousness_profile(self, *, origin: str, interoception_signal=None):

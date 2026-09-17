@@ -24,10 +24,15 @@ class ToMTool:
         default_person: str = "Alex",
         backend: Any | None = None,
         person_model: "PersonModelTracker | None" = None,
+        mode: str = "llm",
     ) -> None:
         self._memory = memory
         self._default_person = default_person
         self._backend = backend
+        # "llm": bounded utility inference (frontier/cloud utility models).
+        # "light": the reasoning scaffold only — no model call. The perspective-taking
+        # already happens in the *call argument*; a heavy result adds 60 s, not insight.
+        self.mode = mode
         self._person_model = person_model
         self._last_situation: str | None = None
         self._last_person: str | None = None
@@ -36,11 +41,17 @@ class ToMTool:
     def get_tool_definitions(self) -> list[dict]:
         return [
             {
-                "name": "tom",
+                "name": "perspective_taking",
                 "description": (
-                    "Theory of Mind: perspective-taking tool. "
-                    "Call this BEFORE responding to understand what the other person is feeling and wanting. "
-                    "Projects your simulated emotions onto them, then swaps perspectives."
+                    "Perspective-taking (Theory of Mind). Step into the other person's position "
+                    "before you answer: what are they feeling right now, what do they actually "
+                    "want from this exchange, and what would I need if I were exactly them? The "
+                    "surface words are rarely the whole message — a trailing sentence, a "
+                    "non-sequitur, praising someone else when their own result is the topic, "
+                    "'it's fine' said flatly, all carry the real message. Use when someone "
+                    "shares a feeling, hints, vents, deflects, or says something that doesn't "
+                    "quite fit the moment. Projects your simulated emotions onto them, then "
+                    "swaps perspectives."
                 ),
                 "input_schema": {
                     "type": "object",
@@ -64,7 +75,7 @@ class ToMTool:
         ]
 
     async def call(self, tool_name: str, tool_input: dict) -> tuple[str, None]:
-        if tool_name != "tom":
+        if tool_name not in ("perspective_taking", "tom"):  # "tom" = legacy alias
             return f"Unknown tool: {tool_name}", None
 
         situation = tool_input.get("situation", "")
@@ -74,21 +85,23 @@ class ToMTool:
         if person.casefold() == self._default_person.casefold():
             person = self._default_person
 
-        # Pull relevant memories about this person
-        memories = await self._memory.recall_async(
-            f"{person} コミュニケーション 性格 会話パターン {situation}", n=5
-        )
-        memory_context = ""
-        if memories:
-            lines = [f"- [{m.get('emotion', 'neutral')}] {m['summary']}" for m in memories]
-            memory_context = f"\n## {person}に関する記憶\n" + "\n".join(lines)
-
-        # No backend → return static template (backward compatible)
-        if self._backend is None:
-            result = self._template_output(situation, person, memory_context)
+        if self.mode == "light":
+            # Minimal perspective-taking is a stance swap, not a lookup: no memory
+            # search, no model call — just the scaffold that frames the swap.
+            result = self._template_output(situation, person, "")
         else:
-            # LLM-based inference
-            result = await self._llm_inference(situation, person, memory_context)
+            # Pull relevant memories about this person
+            memories = await self._memory.recall_async(
+                f"{person} コミュニケーション 性格 会話パターン {situation}", n=5
+            )
+            memory_context = ""
+            if memories:
+                lines = [f"- [{m.get('emotion', 'neutral')}] {m['summary']}" for m in memories]
+                memory_context = f"\n## {person}に関する記憶\n" + "\n".join(lines)
+            if self._backend is None:
+                result = self._template_output(situation, person, memory_context)
+            else:
+                result = await self._llm_inference(situation, person, memory_context)
 
         # Track last inference for workspace coalition
         self._last_situation = situation

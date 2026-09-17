@@ -33,12 +33,15 @@ sys.path.insert(0, str(ROOT))
 sys.path.insert(0, str(ROOT / "src"))
 
 from benchmarks.scenarios import TOOL_LOOK, TOOL_REMEMBER, TOOL_SAY, TOOL_SEE  # noqa: E402
-from benchmarks.social_scenarios import SCENARIOS, SocialScenario  # noqa: E402
+from benchmarks.social_scenarios import SCENARIOS, SOCIAL_TOOLS, SocialScenario  # noqa: E402
 from familiar_agent import social_reflex as sr  # noqa: E402
 from familiar_agent.agent import MAX_ITERATIONS, _interoception  # noqa: E402
 from familiar_agent.backend import create_backend  # noqa: E402
 from familiar_agent.config import AgentConfig  # noqa: E402
-from familiar_neighbor.prompts import assemble_neighbor_system_prompt  # noqa: E402
+from familiar_neighbor.prompts import (  # noqa: E402
+    assemble_from_template,
+    assemble_neighbor_system_prompt,
+)
 
 TOOLS = [TOOL_SAY, TOOL_SEE, TOOL_LOOK, TOOL_REMEMBER]
 MAX_STEPS = 4
@@ -91,18 +94,24 @@ class Report:
         return (sum(r.passed for r in self.results) / total) if total else 0.0
 
 
-def build_system(profile: str, persona: str) -> str:
-    body = re.sub(
-        r"\(body.*?\)\)",
-        _BODY_BLOCK,
-        assemble_neighbor_system_prompt(max_steps=MAX_ITERATIONS, profile=profile),
-        flags=re.DOTALL,
-    )
+def build_system(profile: str, persona: str, template_path: str | None = None) -> str:
+    if template_path:
+        assembled = assemble_from_template(
+            Path(template_path).read_text(encoding="utf-8"), max_steps=MAX_ITERATIONS
+        )
+    else:
+        assembled = assemble_neighbor_system_prompt(max_steps=MAX_ITERATIONS, profile=profile)
+    body = re.sub(r"\(body.*?\)\)", _BODY_BLOCK, assembled, flags=re.DOTALL)
     intero = _interoception(time.time() - 600, 3, "engaged")
     return "\n\n---\n\n".join(p for p in (persona, body, intero) if p)
 
 
 def fake_tool_result(name: str, tool_input: dict) -> tuple[str, str | None]:
+    if name == "perspective_taking":
+        # Minimal acknowledgement: the hypothesis is about the *description*, not the result.
+        return "(perspective taken)", None
+    if name == "joint_attention":
+        return f"(attending to: {tool_input.get('target', '?')}) — call see() to look.", None
     if name == "see":
         return FAKE_IMAGE_DESC, None
     if name == "look":
@@ -114,9 +123,24 @@ def fake_tool_result(name: str, tool_input: dict) -> tuple[str, str | None]:
     return "ok", None
 
 
-async def run_scenario(backend, system: str, sc: SocialScenario, reflex: bool) -> ScenarioResult:
+async def run_scenario(
+    backend,
+    system: str,
+    sc: SocialScenario,
+    reflex: bool,
+    max_tokens: int = 300,
+    pragmatic: bool = False,
+    social_tools: bool = False,
+) -> ScenarioResult:
     turn = sr.classify_turn(sc.user)
-    tools = sr.allowed_tools(TOOLS, turn) if reflex else TOOLS
+    base_tools = TOOLS + SOCIAL_TOOLS if social_tools else TOOLS
+    if pragmatic:
+        from familiar_neighbor.mind.pragmatics import pragmatic_read
+
+        read = await pragmatic_read(backend, sc.user)
+        if read is not None:
+            system = system + "\n\n---\n\n[Interaction policy]\n" + "\n".join(read.prompt_lines())
+    tools = sr.allowed_tools(base_tools, turn) if reflex else base_tools
     messages = [backend.make_user_message(sc.user)]
     steps: list[Step] = []
     spoken_parts: list[str] = []
@@ -130,7 +154,7 @@ async def run_scenario(backend, system: str, sc: SocialScenario, reflex: bool) -
             step_tools = tools
             if reflex and not spoken_parts and sr.perception_exhausted(tools_used):
                 step_tools = [t for t in tools if t["name"] not in sr.PERCEPTION_TOOLS]
-            result, raw = await backend.stream_turn(system, messages, step_tools, 300, None)
+            result, raw = await backend.stream_turn(system, messages, step_tools, max_tokens, None)
             text = sr.normalize_small_model_text(result.text) if reflex else result.text
             if (
                 reflex
@@ -257,6 +281,14 @@ def render_markdown(report: Report) -> str:
         "| scenario | kind | pass | latency | failed checks |",
         "|---|---|---|---|---|",
     ]
+    social_calls = sum(
+        1
+        for r in report.results
+        for st in r.steps
+        for t in st.tools
+        if t["name"] in ("perspective_taking", "joint_attention")
+    )
+    lines.insert(3, f"Social tool calls: {social_calls}")
     for r in report.results:
         failed = ", ".join(k for k, v in r.checks.items() if not v) or "—"
         lines.append(
@@ -285,6 +317,26 @@ def _parse_args() -> argparse.Namespace:
     p.add_argument("--profile", choices=["full", "compact"], default="compact")
     p.add_argument("--reflex", choices=["on", "off"], default="on")
     p.add_argument("--scenario", nargs="*", help="subset of scenario names")
+    p.add_argument("--tags", nargs="*", help="only scenarios carrying one of these tags")
+    p.add_argument(
+        "--template", help="raw compact/core template file to assemble instead of the profile"
+    )
+    p.add_argument(
+        "--max-tokens",
+        type=int,
+        default=300,
+        help="per-step token budget (raise when thinking is on)",
+    )
+    p.add_argument(
+        "--social-tools",
+        action="store_true",
+        help="add perspective_taking / joint_attention tool definitions (unused-tool hypothesis)",
+    )
+    p.add_argument(
+        "--pragmatic-read",
+        action="store_true",
+        help="prepend a one-call pragmatic read (implicature/act/move) to each turn's system prompt",
+    )
     p.add_argument("--json", help="write machine-readable summary here")
     p.add_argument(
         "--persona",
@@ -301,12 +353,20 @@ async def _main(args: argparse.Namespace) -> None:
         if Path(args.persona).exists()
         else ""
     )
-    system = build_system(args.profile, persona)
+    system = build_system(args.profile, persona, args.template)
     reflex = args.reflex == "on"
-    selected = [s for s in SCENARIOS if not args.scenario or s.name in args.scenario]
-    report = Report(model=config.model or config.platform, profile=args.profile, reflex=reflex)
+    selected = [
+        s
+        for s in SCENARIOS
+        if (not args.scenario or s.name in args.scenario)
+        and (not args.tags or set(s.tags) & set(args.tags))
+    ]
+    label = f"{args.profile}:{Path(args.template).stem}" if args.template else args.profile
+    report = Report(model=config.model or config.platform, profile=label, reflex=reflex)
     for sc in selected:
-        res = await run_scenario(backend, system, sc, reflex)
+        res = await run_scenario(
+            backend, system, sc, reflex, args.max_tokens, args.pragmatic_read, args.social_tools
+        )
         report.results.append(res)
         print(f"[{res.passed}/{res.total}] {sc.name} ({res.latency_s:.1f}s)", file=sys.stderr)
     print(render_markdown(report))

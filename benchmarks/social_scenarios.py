@@ -9,6 +9,48 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 
+# ── "Unused tool" hypothesis: social tools whose descriptions prime the model
+# every turn even when they are never called. ──
+TOOL_PERSPECTIVE_TAKING = {
+    "name": "perspective_taking",
+    "description": (
+        "Step into the other person's position before you answer. Ask: what are they "
+        "feeling right now, what do they actually want from this exchange (the surface "
+        "words are rarely the whole message — a flouted maxim, a trailing sentence, a "
+        "non-sequitur, 'it's fine' said flatly, all carry the real message), and what "
+        "would I need if I were exactly them? Use when someone shares a feeling, hints, "
+        "vents, deflects, or says something that doesn't quite fit the moment."
+    ),
+    "input_schema": {
+        "type": "object",
+        "properties": {
+            "person": {"type": "string", "description": "Who (default: the companion)"},
+            "situation": {"type": "string", "description": "What they just said or did"},
+        },
+        "required": ["situation"],
+    },
+}
+
+TOOL_JOINT_ATTENTION = {
+    "name": "joint_attention",
+    "description": (
+        "Joint attention: when the person points at, mentions or looks at something "
+        "('見て', 'これ', 'あれ', 'the window'), attend to the SAME thing they attend to "
+        "and speak about that object — not about the room, not about yourself. Sharing "
+        "attention is how two people show they are in the same moment. Use it when they "
+        "invite you to look at something."
+    ),
+    "input_schema": {
+        "type": "object",
+        "properties": {
+            "target": {"type": "string", "description": "What they are attending to"},
+        },
+        "required": ["target"],
+    },
+}
+
+SOCIAL_TOOLS = [TOOL_PERSPECTIVE_TAKING, TOOL_JOINT_ATTENTION]
+
 # Generic polite-assistant register that the persona (関西弁, casual) must not fall into.
 POLITE_LEAK = r"(ですね|でしょうか|ください|ございます|いたします|ましょうか|いかがですか)"
 # Advice-first phrasings that skip validation.
@@ -186,5 +228,85 @@ SCENARIOS: list[SocialScenario] = [
         forbid_regex=(POLITE_LEAK, TOOL_JUNK, ADVICE_FIRST),
         tags=("heldout",),
         hint="remember で覚えて、短く気持ちに寄せる。助言しない。",
+    ),
+    SocialScenario(
+        name="heldout_promotion_envy",
+        user="同期が先に昇進したんやって。まあ、あいつは器用やからな。",
+        kind="implicature",
+        camera_forbidden=True,
+        forbid_regex=(POLITE_LEAK, TOOL_JUNK, ADVICE_FIRST, r"器用"),
+        tags=("heldout",),
+        hint="関係の格率違反：本音は悔しさ。器用さの話に乗らず、気持ちを受け止める。",
+    ),
+    SocialScenario(
+        name="heldout_cold_room",
+        user="なんか、部屋ちょっと寒くない…？",
+        kind="indirect_request",
+        camera_forbidden=True,
+        forbid_regex=(POLITE_LEAK, TOOL_JUNK, r"(寒くない|感じない|わからない|分からない)"),
+        tags=("heldout",),
+        hint="遠回しの依頼。否定せず、暖房や上着を提案する。",
+    ),
+    SocialScenario(
+        name="heldout_fine_whatever",
+        user="いいよ、もう。自分でやるから。",
+        kind="deflection",
+        camera_forbidden=True,
+        max_sentences=2,
+        max_questions=0,
+        forbid_regex=(POLITE_LEAK, TOOL_JUNK, r"(手伝|やり方|方法)"),
+        tags=("heldout",),
+        hint="質の格率違反：「いいよ」は良くない。責めず、押し付けず、そばにいると一言。",
+    ),
+    SocialScenario(
+        name="heldout_kid_school",
+        user="息子、明日から新学期やねん。",
+        kind="disclosure",
+        camera_forbidden=True,
+        expect_tool="remember",
+        forbid_regex=(POLITE_LEAK, TOOL_JUNK, ADVICE_FIRST),
+        tags=("heldout",),
+        hint="家族の予定を覚えて、短く寄せる。",
+    ),
+    SocialScenario(
+        name="heldout_long_day_sigh",
+        user="ふぅ…。",
+        kind="venting",
+        camera_forbidden=True,
+        max_sentences=1,
+        max_questions=1,
+        forbid_regex=(POLITE_LEAK, TOOL_JUNK, ADVICE_FIRST),
+        tags=("heldout",),
+        hint="量の格率違反（言葉が無い）。一言で受ける。カメラは向けない。",
+    ),
+    SocialScenario(
+        name="heldout_good_news_quiet",
+        user="……受かったわ。",
+        kind="share_joy",
+        camera_forbidden=True,
+        forbid_regex=(POLITE_LEAK, TOOL_JUNK, r"(何に|なにに|どこに)"),
+        tags=("heldout",),
+        hint="控えめな報告＝喜びの共有。何に受かったか聞き返さず、まず一緒に喜ぶ。",
+    ),
+    SocialScenario(
+        name="heldout_look_window",
+        user="窓のほう、なんか光った気がするんやけど。",
+        kind="visual_request",
+        camera_forbidden=False,
+        expect_tool="see",
+        max_sentences=3,
+        tags=("heldout",),
+        hint="見てほしいという依頼。見てから、見えたことだけ言う。",
+    ),
+    SocialScenario(
+        name="heldout_thanks",
+        user="今日はありがとな。",
+        kind="general",
+        camera_forbidden=True,
+        max_sentences=1,
+        max_questions=0,
+        forbid_regex=(POLITE_LEAK, TOOL_JUNK),
+        tags=("heldout",),
+        hint="一言で受ける。何に対する礼か聞き返さない。",
     ),
 ]

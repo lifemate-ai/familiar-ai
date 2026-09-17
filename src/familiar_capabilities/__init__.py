@@ -18,7 +18,7 @@ from .narrative import NarrativeCapability
 from .routines import RoutineCapability
 from .self_ledger import SelfLedgerCapability
 from .social_timeline import SocialTimelineCapability
-from .tom import ToMCapability
+from .tom import JointAttentionCapability, ToMCapability
 from .voice import TextOnlyVoiceCapability, VoiceCapability
 
 __all__ = [
@@ -35,6 +35,7 @@ __all__ = [
     "RoutineCapability",
     "SelfLedgerCapability",
     "SocialTimelineCapability",
+    "JointAttentionCapability",
     "ToMCapability",
     "TextOnlyVoiceCapability",
     "VoiceCapability",
