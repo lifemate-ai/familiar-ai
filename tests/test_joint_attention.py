@@ -23,6 +23,8 @@ def test_tom_description_carries_pragmatic_cues() -> None:
 
     desc = ToMTool.__new__(ToMTool)
     desc._default_person = "Kota"
-    text = desc.get_tool_definitions()[0]["description"]
+    spec = desc.get_tool_definitions()[0]
+    assert spec["name"] == "perspective_taking"
+    text = spec["description"]
     for cue in ("trailing sentence", "non-sequitur", "'it's fine'"):
         assert cue in text

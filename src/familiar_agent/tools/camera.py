@@ -309,7 +309,9 @@ class CameraTool:
             return f"Looked {direction} by ~{degrees} degrees."
         except Exception as e:
             logger.warning("Camera move failed: %s", e)
-            self._cam_onvif = None
+            # Drop the PTZ client, but close its transports first — a dropped
+            # ONVIF client leaves aiohttp sessions open ("Unclosed client session").
+            await self.aclose()
             return f"Camera move failed: {e}"
 
     def get_tool_definitions(self) -> list[dict]:

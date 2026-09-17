@@ -13,7 +13,7 @@ class ToMCapability(LegacyToolProvider):
     def __init__(self, tool: ToMTool) -> None:
         super().__init__(
             tool,
-            names={"tom"},
+            names={"perspective_taking", "tom"},  # "tom" kept as a call alias
             category="cognition",
             tags={"neighbor", "social"},
         )

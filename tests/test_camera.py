@@ -224,3 +224,23 @@ async def test_aclose_closes_onvif_transports() -> None:
     assert tool._cam_onvif is None and tool._ptz is None
     await tool.aclose()  # idempotent
     cam.close.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_failed_move_closes_the_onvif_client() -> None:
+    """A dropped PTZ client must have its transports closed (no unclosed sessions)."""
+    from unittest.mock import AsyncMock, MagicMock
+
+    from familiar_agent.tools.camera import CameraTool
+
+    tool = CameraTool.__new__(CameraTool)
+    cam = MagicMock()
+    cam.close = AsyncMock()
+    tool._cam_onvif = cam
+    tool._ptz = MagicMock()
+    tool._ptz.RelativeMove = AsyncMock(side_effect=RuntimeError("no ptz"))
+    tool._profile_token = "p"
+    text = await tool.move("left", 30)
+    assert "failed" in text.lower()
+    cam.close.assert_awaited_once()
+    assert tool._cam_onvif is None and tool._ptz is None

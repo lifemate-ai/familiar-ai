@@ -36,7 +36,7 @@ class ToMTool:
     def get_tool_definitions(self) -> list[dict]:
         return [
             {
-                "name": "tom",
+                "name": "perspective_taking",
                 "description": (
                     "Perspective-taking (Theory of Mind). Step into the other person's position "
                     "before you answer: what are they feeling right now, what do they actually "
@@ -70,7 +70,7 @@ class ToMTool:
         ]
 
     async def call(self, tool_name: str, tool_input: dict) -> tuple[str, None]:
-        if tool_name != "tom":
+        if tool_name not in ("perspective_taking", "tom"):  # "tom" = legacy alias
             return f"Unknown tool: {tool_name}", None
 
         situation = tool_input.get("situation", "")

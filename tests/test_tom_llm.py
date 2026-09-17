@@ -172,7 +172,7 @@ def test_get_tool_definitions_unchanged():
     defs = tom.get_tool_definitions()
     assert isinstance(defs, list)
     assert len(defs) == 1
-    assert defs[0]["name"] == "tom"
+    assert defs[0]["name"] == "perspective_taking"  # renamed; "tom" stays a call alias
     assert "input_schema" in defs[0]
 
 
