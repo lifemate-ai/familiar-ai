@@ -282,3 +282,38 @@ async def test_onvif_probe_failure_is_cached_and_sweeps_transports(monkeypatch) 
     assert stray.close.await_count == 3  # every half-built transport closed
     assert await tool._ensure_connected() is False
     assert len(FakeONVIF.instances) == 3  # negative cache: no re-probe
+
+
+@pytest.mark.asyncio
+async def test_cancelled_probe_still_closes_transports(monkeypatch) -> None:
+    """A tool timeout cancels the ONVIF probe mid-flight; the client must still be closed."""
+    import asyncio
+    from unittest.mock import AsyncMock, MagicMock
+
+    from familiar_agent.tools import camera as cam_mod
+
+    stray = MagicMock()
+    stray.close = AsyncMock()
+
+    class HangingONVIF:
+        def __init__(self, *a, **kw):
+            self.services = {}
+            self.devicemgmt = stray
+
+        async def close(self):
+            pass
+
+        async def update_xaddrs(self):
+            await asyncio.sleep(60)
+
+    monkeypatch.setattr(cam_mod, "ONVIFCamera", HangingONVIF)
+    tool = cam_mod.CameraTool.__new__(cam_mod.CameraTool)
+    tool._cam_onvif = None
+    tool._ptz = None
+    tool._ptz_probe_failed_at = 0.0
+    tool._get_ptz_connection_params = lambda: ("192.168.1.145", "u", "p", 2020)  # type: ignore[method-assign]
+
+    with pytest.raises(asyncio.TimeoutError):
+        await asyncio.wait_for(tool._ensure_connected(), timeout=0.05)
+    stray.close.assert_awaited_once()
+    assert tool._ptz_probe_failed_at > 0  # and we won't re-probe immediately

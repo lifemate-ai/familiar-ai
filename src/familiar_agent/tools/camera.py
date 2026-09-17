@@ -229,6 +229,14 @@ class CameraTool:
                 self._cam_onvif = cam
                 logger.info("Camera PTZ connected via ONVIF: %s (port %d)", hostname, try_port)
                 return True
+            except asyncio.CancelledError:
+                # The tool timeout cancelled us mid-probe (camera unreachable). This is
+                # a BaseException — without this branch the half-built client and its
+                # aiohttp sessions were simply dropped ("Unclosed client session").
+                if cam is not None:
+                    await asyncio.shield(_close_onvif_client(cam))
+                self._ptz_probe_failed_at = time.monotonic()
+                raise
             except Exception as e:
                 logger.debug("ONVIF PTZ port %d failed for %s: %s", try_port, hostname, e)
                 last_error = e
