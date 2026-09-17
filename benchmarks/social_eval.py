@@ -118,7 +118,9 @@ def fake_tool_result(name: str, tool_input: dict) -> tuple[str, str | None]:
     return "ok", None
 
 
-async def run_scenario(backend, system: str, sc: SocialScenario, reflex: bool) -> ScenarioResult:
+async def run_scenario(
+    backend, system: str, sc: SocialScenario, reflex: bool, max_tokens: int = 300
+) -> ScenarioResult:
     turn = sr.classify_turn(sc.user)
     tools = sr.allowed_tools(TOOLS, turn) if reflex else TOOLS
     messages = [backend.make_user_message(sc.user)]
@@ -134,7 +136,7 @@ async def run_scenario(backend, system: str, sc: SocialScenario, reflex: bool) -
             step_tools = tools
             if reflex and not spoken_parts and sr.perception_exhausted(tools_used):
                 step_tools = [t for t in tools if t["name"] not in sr.PERCEPTION_TOOLS]
-            result, raw = await backend.stream_turn(system, messages, step_tools, 300, None)
+            result, raw = await backend.stream_turn(system, messages, step_tools, max_tokens, None)
             text = sr.normalize_small_model_text(result.text) if reflex else result.text
             if (
                 reflex
@@ -293,6 +295,12 @@ def _parse_args() -> argparse.Namespace:
     p.add_argument(
         "--template", help="raw compact/core template file to assemble instead of the profile"
     )
+    p.add_argument(
+        "--max-tokens",
+        type=int,
+        default=300,
+        help="per-step token budget (raise when thinking is on)",
+    )
     p.add_argument("--json", help="write machine-readable summary here")
     p.add_argument(
         "--persona",
@@ -320,7 +328,7 @@ async def _main(args: argparse.Namespace) -> None:
     label = f"{args.profile}:{Path(args.template).stem}" if args.template else args.profile
     report = Report(model=config.model or config.platform, profile=label, reflex=reflex)
     for sc in selected:
-        res = await run_scenario(backend, system, sc, reflex)
+        res = await run_scenario(backend, system, sc, reflex, args.max_tokens)
         report.results.append(res)
         print(f"[{res.passed}/{res.total}] {sc.name} ({res.latency_s:.1f}s)", file=sys.stderr)
     print(render_markdown(report))
